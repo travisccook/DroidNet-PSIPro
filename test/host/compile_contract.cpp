@@ -1,6 +1,8 @@
-// Host TYPE-CHECK of the PSI firmware layer ContractPSI.h against mock_psi.h.
-// Not a behavioral test — it only proves the firmware C++ compiles with the verified
-// board API signatures (catches typos / wrong arity / type errors before the bench).
+// Host check of the PSI firmware layer ContractPSI.h against mock_psi.h.
+// Mostly a TYPE-CHECK (proves the firmware C++ compiles with the verified board API
+// signatures — catches typos / wrong arity / type errors before the bench), plus a
+// focused behavioral guard that a scored NATIVE section threads its native code into
+// the ScoreEntry (the exact drift the 2026-07-12 fork audit fixed on this board).
 #include "mock_psi.h"
 #include "../../src/contract/ContractPSI.h"
 #include <cstdio>
@@ -48,6 +50,18 @@ int main() {
   if (contractParse("PFA:i=flash,c=112233,s=64,d=500", p)) applyContract(p);
   (void)contractAddressed('P', 'F');
 
-  printf("ContractPSI.h type-check OK\n");
+  // behavioral guard: a scored NATIVE section must thread its native code into the
+  // ScoreEntry (this is the exact drift the fork audit fixed — nativeCode stayed -1,
+  // so scored native sections rendered the stale live g_nativeCode instead).
+  { int before = g_scoreCount;
+    parseContract("!P*A:i=native:22,c=FF0000,at=99");
+    if (g_scoreCount <= before || g_score[g_scoreCount - 1].nativeCode != 22
+        || g_score[g_scoreCount - 1].effect != CE_NATIVE) {
+      printf("FAIL: PSI scored native section did not thread nativeCode\n");
+      return 1;
+    }
+  }
+
+  printf("ContractPSI.h type-check + score-native guard OK\n");
   return 0;
 }

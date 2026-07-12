@@ -140,6 +140,7 @@ inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
     e.speed      = pr.hasSpeed ? pr.speed : g_speed;
     e.beatMod    = pr.hasBeatMod ? pr.beatMod : g_beatMod;
     e.accentMode = pr.hasAm ? pr.accentMode : 0;
+    e.nativeCode = pr.hasEffect ? pr.nativeCode : -1;  // thread native code into the score (parity w/ RSeries)
     g_scoreCount = scoreInsert(g_score, g_scoreCount, 8, e);
     return;
   }
@@ -269,6 +270,7 @@ inline bool contractLoopTick() {
       g_scoreIndex = idx;
       const ScoreEntry& e = g_score[idx];
       g_effect = e.effect;
+      if (e.effect == CE_NATIVE && e.nativeCode >= 0) g_nativeCode = e.nativeCode;  // scored native section -> authored code, not stale g_nativeCode
       g_contractColor = _scaled(e.color);
       g_speed = e.speed;
       g_beatMod = e.beatMod;
