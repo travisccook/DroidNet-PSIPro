@@ -290,6 +290,7 @@ inline uint8_t fxTwinkleBright(int idx, uint32_t now, uint8_t speed) {
   uint32_t phase = (now + ((uint32_t)h << 3)) % period;
   uint32_t half = period / 2u; if (!half) half = 1;
   uint32_t tri = (phase < half) ? (phase * 255u / half) : ((period - phase) * 255u / half);
+  if (tri > 255u) tri = 255u;      // odd-period midpoint can exceed 255; clamp to the intended peak
   return (uint8_t)tri;
 }
 // ===== END FX HUE/TWINKLE HELPERS =====

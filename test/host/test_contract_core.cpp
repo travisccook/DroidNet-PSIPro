@@ -200,6 +200,15 @@ static void test_fx_hue_twinkle_helpers() {
   CHECK(fxTwinkleBright(0, 0, 255) != fxTwinkleBright(1, 0, 255)); // per-LED differs
   CHECK(fxTwinkleBright(0, 0, 255) == 0);
   CHECK(fxTwinkleBright(1, 0, 255) == 133);
+
+  // Boundary regression: odd-period midpoint (phase == half) can raw-compute
+  // (period-half)*255/half > 255, wrapping a uint8_t cast to a wrong low
+  // value right at what should be peak brightness. idx=2, now=327, speed=255
+  // -> period=403 (odd), half=201, phase=201 -> raw triangle 256, previously
+  // wrapped to 0. Must be clamped to 255 (the intended peak) and stay <=255.
+  uint8_t twinkleBoundary = fxTwinkleBright(2, 327, 255);
+  CHECK(twinkleBoundary <= 255);
+  CHECK(twinkleBoundary == 255);
 }
 
 int main() {
