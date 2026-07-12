@@ -14,6 +14,14 @@ void set_delay(unsigned long timeout);
 void loopsDonedoRestoreDefault();
 void runPattern(int pattern);
 
+// Render primitives called by the contract fork layer (src/contract/ContractPSI.h),
+// which is included before their definitions in main.cpp. Signatures match main.cpp.
+void allON(CRGB color, bool showLED, unsigned long runtime);
+void allOFF(bool showLED, unsigned long runtime);
+void scanCol(unsigned long time_delay, int start_col, CRGB color, bool scanDirection);
+void DiscoBall(unsigned long time_delay, int loops, int numSparkles, CRGB color, unsigned long runtime);
+void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime);
+
 // Command-related function prototypes
 byte buildCommand(char ch, char* output_str);
 void parseCommand(char* inputStr);

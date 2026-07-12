@@ -349,6 +349,13 @@ unsigned long swipeDelay = 0;
 unsigned long lastLedUpdate = 0;
 CRGB overlayColors[COLUMNS];
 
+// Driveable-Animation Contract fork layer. Included HERE (after the global state
+// block above, and after functions.h prototyped the render primitives) so its
+// inline dispatchers see leds[]/level[]/tempGlobalBrightnessValue/firstTime/
+// serialPort + the primitive prototypes, and BEFORE loop()/serialEvent() so those
+// can call parseContract()/contractLoopTick()/contractPulseTick(). Additive only.
+#include "contract/ContractPSI.h"
+
 
 // Setup
 void setup() {
@@ -431,14 +438,19 @@ void loop()
     //DEBUG_PRINT_LN("Main Loop Tick");
     previousMillis = currentMillis;
 
-    if (patternRunning)
+    // Contract owns the frame when armed (beat-clock + score + envelope + render);
+    // otherwise the native pattern path runs exactly as before. Additive.
+    if (!contractLoopTick())
     {
-      runPattern(lastPSIeventCode);
-    }
-    else
-    {
-      lastPSIeventCode = defaultPattern;
-      runPattern(lastPSIeventCode);
+      if (patternRunning)
+      {
+        runPattern(lastPSIeventCode);
+      }
+      else
+      {
+        lastPSIeventCode = defaultPattern;
+        runPattern(lastPSIeventCode);
+      }
     }
 
     // Grab the POT Average value.
@@ -451,6 +463,10 @@ void loop()
       globalPOTaverage = tempglobalPOTaverage;
     }
   }
+
+  // Checked every loop pass (not only inside the 25 ms gate) for crisp, sub-tick
+  // pulse-accent expiry. No-op unless a contract P overlay is active.
+  contractPulseTick();
 
 }
 
@@ -1692,9 +1708,13 @@ void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime)
     allOFF(true);
 
     // Set a default start level for each column.
-    for (int i=0; i< COLUMNS; i++)
-    {
-      level[i] = random(0, 6);
+    // Contract verb L drives level[] from Studio energy, so skip the random seed
+    // while the contract is armed (keeps the meter tracking L, not noise).
+    if (!g_contractArmed) {
+      for (int i=0; i< COLUMNS; i++)
+      {
+        level[i] = random(0, 6);
+      }
     }
   }
 
@@ -1718,7 +1738,9 @@ void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime)
     
     updateLed = 1;
 
-    // calc the next position of the bars
+    // calc the next position of the bars.
+    // Suppressed while the contract is armed: verb L owns level[] (Studio energy).
+    if (!g_contractArmed)
     for (int y = 0; y < COLUMNS; y++)
     {
       byte upDown = random(0, 2);
@@ -2153,16 +2175,22 @@ void runPattern(int pattern) {
     case 6:              //  6 = Leia message (34s)
       Cylon_Row(0xcccccc, 74, 3, 57, 34);
       break;
+#ifndef CONTRACT_SLIM
     case 7:              //  7 = I heart U
       i_heart_u(500, 3, 0);
       break;
+#endif
     case 8:              //  8 = Radar sweep
       radar(0xff0000, 250, 6, 0);
       break;
     case 9:              //   = Flashing red heart
       if (digitalRead(JUMP_FRONT_REAR)) {
         // Display the beating heart on the front
+#ifndef CONTRACT_SLIM
         red_heart(500, 3, 0); //3x1s 500ms on, 500ms off
+#else
+        allON(CRGB::Red, true);  // slim build: red_heart stripped; hold red instead
+#endif
       } else {
         // Display the Pulse on the back
         Pulse(100, 3, 0); //12x100ms per loop
@@ -2171,9 +2199,11 @@ void runPattern(int pattern) {
     case 10:              //  10 = Star Wars Animation
       Cylon_Row(0xC8AA00, 500, 4, 5, 0);
       break;
+#ifndef CONTRACT_SLIM
     case 11:              //  11 = Imperial March (47s)
       march(0xffffff, 552, 42, 47);
       break;
+#endif
     case 12:          // 13 - Disco Ball - 4 seconds
       DiscoBall(150, 30, 3, CRGB::Grey, 4); //gray /30
       break;
@@ -2197,12 +2227,14 @@ void runPattern(int pattern) {
     case 18:              //  18 - Turns Panel On Green Indefinitely
       allON(CRGB::Green, true);
       break;
+#ifndef CONTRACT_SLIM
     case 19:              //  19 - Complex animation test, Lightsaber Battle
       lightsaberBattle(250);
       break;
     case 20:             // 20 - Star Wars Intro Text (10 seconds)
       StarWarsIntro(500, 4, 0xC8AA00, 10);
       break;
+#endif
     case 21:          // 12 - VU Meter (4 seconds).
       // Set loops to 0 to remain on indefinately.
       VUMeter(250, 20, 4);
@@ -2235,11 +2267,12 @@ void receiveEvent(int eventCode) {
     DEBUG_PRINT("I2C Character received "); DEBUG_PRINT_LN(ch);
     
     command_available=buildCommand(ch, cmdString);  // build command line
-      
-    if (command_available) 
+
+    if (command_available)
     {
-      parseCommand(cmdString);  // interpret the command
-    } 
+      if (cmdString[0]=='!') parseContract(cmdString);  // additive contract branch
+      else                   parseCommand(cmdString);   // unchanged JawaLite path
+    }
   }
 }
 #endif
@@ -2265,9 +2298,10 @@ void serialEvent() {
 
     // New improved command handling
     command_available=buildCommand(ch, cmdString);  // build command line
-    if (command_available) 
+    if (command_available)
     {
-      parseCommand(cmdString);  // interpret the command
+      if (cmdString[0]=='!') parseContract(cmdString);  // additive contract branch
+      else                   parseCommand(cmdString);   // unchanged JawaLite path
     }
   }
   sei();
@@ -2287,13 +2321,16 @@ byte buildCommand(char ch, char* output_str)
   switch(ch)
  {
     case '\r':                          // end character recognized
+      if(pos > CMD_MAX_LENGTH-1) pos = CMD_MAX_LENGTH-1;  // clamp: never write the '\0' past the buffer
       output_str[pos]='\0';   // append the end of string character
       pos=0;        // reset buffer pointer
       return true;      // return and signal command ready
       break;
     default:        // regular character
-      output_str[pos]=ch;   // append the  character to the command string
-      if(pos<=CMD_MAX_LENGTH-1)pos++; // too many characters, discard them.
+      // Bounds-check BEFORE writing (fixes the pre-existing off-by-one OOB write).
+      // Reserve the last index for the '\0'; drop overflow bytes so a >=64-char line
+      // never corrupts the SRAM after cmdString nor wraps into the next command.
+      if(pos < CMD_MAX_LENGTH-1) { output_str[pos]=ch; pos++; }
       break;
   }
   return false;

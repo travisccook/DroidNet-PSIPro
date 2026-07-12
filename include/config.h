@@ -39,6 +39,22 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 
 
 ///////////////////////////////////////////////////
+////////// CONTRACT FLASH ESCAPE HATCH ///////////
+/////////////////////////////////////////////////
+
+// OPT-IN ONLY. The default build keeps every native novelty mode for backward
+// compatibility. Uncomment CONTRACT_SLIM *only* if the AVR linker overflows the
+// ~28 KB flash after adding the Driveable-Animation Contract fork. It drops the
+// heaviest novelty native modes (Modes 7 i_heart_u, 9 red_heart front half,
+// 11 Imperial March, 19 lightsaberBattle, 20 StarWarsIntro) to reclaim ~3-5 KB.
+// Under -ffunction-sections/--gc-sections these functions then become unreferenced
+// and are stripped. DiscoBall (12/13) is kept because the contract 'sparkle' effect
+// maps to it.
+
+//#define CONTRACT_SLIM
+
+
+///////////////////////////////////////////////////
 ////////////// SWIPE MODE SETTINGS ///////////////
 /////////////////////////////////////////////////
 
