@@ -189,6 +189,7 @@ inline uint8_t beatAccentAmount(uint8_t am, const BeatPos& bp, uint8_t beatMod, 
 struct ScoreEntry {
   int32_t        atBeat = 0;
   ContractEffect effect = CE_SOLID;
+  int            nativeCode = -1;      // for effect==CE_NATIVE (an iconic native look)
   RGB            color{0, 0, 0};
   uint8_t        speed = 128;
   uint8_t        beatMod = 0;
