@@ -122,6 +122,28 @@ static void test_score() {
   CHECK(scoreActiveIndex(s, n, 999) == 2);
 }
 
+static void test_fx_helpers() {
+  // fxStepMs: 30 + (255-speed)/2. Exact vectors captured by running the real
+  // implementation (clang++ host build) — not hand-computed.
+  CHECK(fxStepMs(255) == 30);
+  CHECK(fxStepMs(0) == 157);
+  CHECK(fxStepMs(128) == 93);
+
+  // fxHsv2rgb: standard 6-sextant HSV->RGB, integer math. Exact bytes captured
+  // by running the real implementation (integer division makes the greenish
+  // sextant land at (3,255,0), not the ideal (0,255,0)).
+  { RGB c = fxHsv2rgb(0, 255, 255);   CHECK(c.r == 255 && c.g == 0 && c.b == 0); }      // red
+  { RGB c = fxHsv2rgb(85, 255, 255);  CHECK(c.g == 255); CHECK(c.r <= 8 && c.b <= 8);
+                                       CHECK(c.r == 3 && c.b == 0); }                    // ~green, pinned exact
+  { RGB c = fxHsv2rgb(0, 0, 120);     CHECK(c.r == 120 && c.g == 120 && c.b == 120); }   // greyscale
+
+  // fxHash16: distinct inputs -> distinct outputs (xorshift hash). Exact
+  // outputs captured by running the real implementation.
+  CHECK(fxHash16(1) != fxHash16(2));
+  CHECK(fxHash16(1) == 8225);
+  CHECK(fxHash16(2) == 16450);
+}
+
 int main() {
   test_scope_and_verb();
   test_verbs_and_units();
@@ -129,6 +151,7 @@ int main() {
   test_beat_clock();
   test_accent_envelope();
   test_score();
+  test_fx_helpers();
   printf("%s  %d/%d checks passed\n", g_fail ? "FAILURES" : "OK", g_total - g_fail, g_total);
   return g_fail ? 1 : 0;
 }

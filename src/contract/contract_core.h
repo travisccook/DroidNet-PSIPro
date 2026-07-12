@@ -220,4 +220,27 @@ inline int scoreInsert(ScoreEntry* entries, int n, int cap, const ScoreEntry& e)
   entries[i] = e;
   return n + 1;
 }
+// ===== FX SCALAR HELPERS (Tasks 3-4 build effect renderers atop these) =====
+// Pure integer math, board-agnostic. fxStepMs: per-frame cadence from a 0..255
+// speed knob. fxHash16: cheap xorshift PRNG hash for sparkle/twinkle seeding.
+// fxHsv2rgb: standard 6-sextant HSV->RGB (integer division, matches the JS parity port).
+inline uint32_t fxStepMs(uint8_t speed) { return 30u + (uint32_t)(255 - speed) / 2u; }
+inline uint16_t fxHash16(uint32_t x) { x ^= x << 13; x ^= x >> 17; x ^= x << 5; return (uint16_t)(x & 0xFFFFu); }
+inline RGB fxHsv2rgb(uint8_t h, uint8_t s, uint8_t v) {
+  if (s == 0) return RGB{ v, v, v };
+  uint8_t region = h / 43;
+  uint8_t rem = (uint8_t)(((uint16_t)(h - region * 43) * 6));
+  uint8_t p = (uint8_t)(((uint16_t)v * (255 - s)) / 255);
+  uint8_t q = (uint8_t)(((uint16_t)v * (255 - (((uint16_t)s * rem) / 255))) / 255);
+  uint8_t t = (uint8_t)(((uint16_t)v * (255 - (((uint16_t)s * (255 - rem)) / 255))) / 255);
+  switch (region) {
+    case 0:  return RGB{ v, t, p };
+    case 1:  return RGB{ q, v, p };
+    case 2:  return RGB{ p, v, t };
+    case 3:  return RGB{ p, q, v };
+    case 4:  return RGB{ t, p, v };
+    default: return RGB{ v, p, q };
+  }
+}
+// ===== END FX SCALAR HELPERS =====
 // ===== END BEAT-CLOCK + SCORE =====
