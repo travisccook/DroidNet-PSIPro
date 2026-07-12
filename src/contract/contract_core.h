@@ -12,7 +12,8 @@ enum ContractVerb : uint8_t {
   CV_NONE = 0, CV_ANIMATE, CV_PULSE, CV_CLOCK, CV_BRIGHT, CV_LEVEL, CV_STOP, CV_MODE, CV_QUERY
 };
 enum ContractEffect : uint8_t {
-  CE_NONE = 0, CE_OFF, CE_SOLID, CE_FLASH, CE_PULSE, CE_RAINBOW, CE_SCAN, CE_SPARKLE, CE_METER, CE_NATIVE
+  CE_NONE = 0, CE_OFF, CE_SOLID, CE_FLASH, CE_PULSE, CE_RAINBOW, CE_SCAN, CE_SPARKLE, CE_METER, CE_NATIVE,
+  CE_COMET, CE_CHASE, CE_WIPE, CE_GRADIENT, CE_COLORCYCLE, CE_TWINKLE
 };
 
 struct ContractParams {
@@ -71,6 +72,9 @@ inline ContractEffect _effectFromName(const char* s, size_t len, int& nativeCode
   if (eq("flash")) return CE_FLASH;     if (eq("pulse")) return CE_PULSE;
   if (eq("rainbow")) return CE_RAINBOW; if (eq("scan")) return CE_SCAN;
   if (eq("sparkle")) return CE_SPARKLE; if (eq("meter")) return CE_METER;
+  if (eq("comet")) return CE_COMET;       if (eq("chase")) return CE_CHASE;
+  if (eq("wipe")) return CE_WIPE;         if (eq("gradient")) return CE_GRADIENT;
+  if (eq("colorcycle")) return CE_COLORCYCLE; if (eq("twinkle")) return CE_TWINKLE;
   if (len > 7 && strncmp(s, "native:", 7) == 0) { nativeCode = atoi(s + 7); return CE_NATIVE; }
   return CE_NONE;
 }

@@ -41,6 +41,13 @@ static void test_params() {
   CHECK(p.params.beatMod == 255 && p.params.hasAt && p.params.atBeat == 44 && p.params.accentMode == 1);
 
   CHECK(contractParse("LFA:i=native:105", p) && p.params.effect == CE_NATIVE && p.params.nativeCode == 105);
+  // six new effect names (Task 1): parse to their enum and round-trip through contractParse
+  CHECK(contractParse("L*A:i=comet", p) && p.params.effect == CE_COMET);
+  CHECK(contractParse("L*A:i=chase", p) && p.params.effect == CE_CHASE);
+  CHECK(contractParse("L*A:i=wipe", p) && p.params.effect == CE_WIPE);
+  CHECK(contractParse("L*A:i=gradient", p) && p.params.effect == CE_GRADIENT);
+  CHECK(contractParse("L*A:i=colorcycle", p) && p.params.effect == CE_COLORCYCLE);
+  CHECK(contractParse("L*A:i=twinkle", p) && p.params.effect == CE_TWINKLE);
   CHECK(contractParse("P*L:v=190", p) && p.verb == CV_LEVEL && p.params.hasLevel && p.params.level == 190);
   CHECK(contractParse("**C:bpm=128,ph=40,bpb=4,beat=64", p));
   CHECK(p.params.bpm == 128 && p.params.phMs == 40 && p.params.bpb == 4 && p.params.hasBeat && p.params.beatAnchor == 64);
