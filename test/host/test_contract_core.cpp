@@ -144,6 +144,47 @@ static void test_fx_helpers() {
   CHECK(fxHash16(2) == 16450);
 }
 
+static void test_fx_spatial_helpers() {
+  // fxHead: (elapsed / fxStepMs(speed)) % N. At speed=255, fxStepMs==30, so
+  // head advances one position every 30ms and wraps at N. Exact vectors
+  // captured by running the real implementation (clang++ host build).
+  CHECK(fxHead(0, 255, 10) == 0);
+  CHECK(fxHead(30, 255, 10) == 1);
+  CHECK(fxHead(299, 255, 10) == 9);   // just before the 10th wrap
+  CHECK(fxHead(300, 255, 10) == 0);   // wrapped exactly 10 steps
+  CHECK(fxHead(310, 255, 10) == 0);   // still within step 10's window
+
+  // fxCometBright: 255 at the head, linear falloff to 0 across
+  // trail=max(2,2N/5); for N=10, trail=4. Exact bytes captured by running
+  // the real implementation (integer division: 255-(dist*255)/trail).
+  CHECK(fxCometBright(5, 5, 10) == 255);  // at head
+  CHECK(fxCometBright(4, 5, 10) == 192);  // 1 behind
+  CHECK(fxCometBright(3, 5, 10) == 128);  // 2 behind
+  CHECK(fxCometBright(2, 5, 10) == 64);   // 3 behind
+  CHECK(fxCometBright(1, 5, 10) == 0);    // 4 behind == trail -> 0
+  CHECK(fxCometBright(0, 5, 10) == 0);    // beyond trail
+  CHECK(fxCometBright(6, 5, 10) == 0);    // ahead of head (dist wraps to N-1 >= trail)
+  CHECK(fxCometBright(9, 0, 10) == 192);  // wraps around N: 1 behind head=0
+  CHECK(fxCometBright(8, 0, 10) == 128);  // wraps around N: 2 behind head=0
+
+  // fxChaseLit: (p + elapsed/fxStepMs) % 3 == 0.
+  CHECK(fxChaseLit(0, 0, 255) == true);   // p+phase=0 -> lit
+  CHECK(fxChaseLit(1, 0, 255) == false);
+  CHECK(fxChaseLit(2, 0, 255) == false);
+  CHECK(fxChaseLit(3, 0, 255) == true);   // 3 % 3 == 0 -> lit
+  CHECK(fxChaseLit(0, 30, 255) == false); // one step elapsed -> phase 1
+
+  // fxWipeLit: ping-pong fill/drain over 2N steps. Fill half: p<=front.
+  // Drain half (ph>=N): p>(ph-N). Exact vectors captured by running the
+  // real implementation.
+  CHECK(fxWipeLit(0, 0, 255, 10) == true);    // front at 0, p<=front
+  CHECK(fxWipeLit(9, 0, 255, 10) == false);
+  CHECK(fxWipeLit(1, 0, 255, 10) == false);
+  CHECK(fxWipeLit(0, 300, 255, 10) == false); // ph==N: drain phase begins, p=0 not lit
+  CHECK(fxWipeLit(9, 300, 255, 10) == true);  // ph==N: drain phase, far end still lit
+  CHECK(fxWipeLit(5, 300, 255, 10) == true);
+}
+
 int main() {
   test_scope_and_verb();
   test_verbs_and_units();
@@ -152,6 +193,7 @@ int main() {
   test_accent_envelope();
   test_score();
   test_fx_helpers();
+  test_fx_spatial_helpers();
   printf("%s  %d/%d checks passed\n", g_fail ? "FAILURES" : "OK", g_total - g_fail, g_total);
   return g_fail ? 1 : 0;
 }

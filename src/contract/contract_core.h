@@ -243,4 +243,31 @@ inline RGB fxHsv2rgb(uint8_t h, uint8_t s, uint8_t v) {
   }
 }
 // ===== END FX SCALAR HELPERS =====
+// ===== FX SPATIAL HELPERS (Task 3; comet/chase/wipe renderers build atop these) =====
+// Pure integer math over a strip of N positions (0..N-1). fxHead: which position
+// leads at time `elapsed` for a given speed knob. fxCometBright: per-position
+// brightness for a comet trailing behind the head (linear falloff, wraps around
+// N). fxChaseLit: classic marquee-chase lit/unlit test. fxWipeLit: ping-pong
+// fill wipe (fills 0..N-1 then drains back), lit test per position.
+inline int fxHead(uint32_t elapsed, uint8_t speed, int N) {
+  if (N <= 0) return 0; uint32_t s = fxStepMs(speed); if (!s) s = 1;
+  return (int)((elapsed / s) % (uint32_t)N);
+}
+inline uint8_t fxCometBright(int p, int head, int N) {
+  if (N <= 0) return 0; int trail = (2 * N) / 5; if (trail < 2) trail = 2;
+  int dist = (head - p) % N; if (dist < 0) dist += N;
+  if (dist >= trail) return 0;
+  return (uint8_t)(255 - (dist * 255) / trail);
+}
+inline bool fxChaseLit(int p, uint32_t elapsed, uint8_t speed) {
+  uint32_t s = fxStepMs(speed); if (!s) s = 1;
+  return (((uint32_t)p + elapsed / s) % 3u) == 0u;
+}
+inline bool fxWipeLit(int p, uint32_t elapsed, uint8_t speed, int N) {
+  if (N <= 0) return false; uint32_t s = fxStepMs(speed); if (!s) s = 1;
+  uint32_t ph = (elapsed / s) % (uint32_t)(2 * N);
+  if (ph < (uint32_t)N) return p <= (int)ph;
+  return p > (int)(ph - (uint32_t)N);
+}
+// ===== END FX SPATIAL HELPERS =====
 // ===== END BEAT-CLOCK + SCORE =====
