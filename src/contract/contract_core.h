@@ -270,4 +270,27 @@ inline bool fxWipeLit(int p, uint32_t elapsed, uint8_t speed, int N) {
   return p > (int)(ph - (uint32_t)N);
 }
 // ===== END FX SPATIAL HELPERS =====
+// ===== FX HUE/TWINKLE HELPERS (Task 4; gradient/colorcycle/twinkle renderers build atop these) =====
+// Pure integer math. fxGradientHue: hue at position p across a strip's span
+// (0..128 spread), drifting with elapsed. fxCycleHue: whole-strip hue rotation
+// over time (half the drift rate of the gradient's per-position spread).
+// fxTwinkleBright: per-LED (fxHash16-seeded) triangle-wave brightness so each
+// index twinkles at its own hashed period/phase.
+inline uint8_t fxGradientHue(int p, int N, uint8_t baseHue, uint32_t elapsed, uint8_t speed) {
+  int span = (N > 1) ? (N - 1) : 1; uint32_t s = fxStepMs(speed); if (!s) s = 1;
+  return (uint8_t)((uint32_t)baseHue + (uint32_t)(p * 128) / (uint32_t)span + elapsed / s);
+}
+inline uint8_t fxCycleHue(uint8_t baseHue, uint32_t elapsed, uint8_t speed) {
+  uint32_t s = fxStepMs(speed) * 2u; if (!s) s = 1;
+  return (uint8_t)((uint32_t)baseHue + elapsed / s);
+}
+inline uint8_t fxTwinkleBright(int idx, uint32_t now, uint8_t speed) {
+  uint16_t h = fxHash16((uint32_t)idx * 2654435761u);
+  uint32_t period = 400u + (uint32_t)(255 - speed) * 6u + (uint32_t)(h & 0x1FFu);
+  uint32_t phase = (now + ((uint32_t)h << 3)) % period;
+  uint32_t half = period / 2u; if (!half) half = 1;
+  uint32_t tri = (phase < half) ? (phase * 255u / half) : ((period - phase) * 255u / half);
+  return (uint8_t)tri;
+}
+// ===== END FX HUE/TWINKLE HELPERS =====
 // ===== END BEAT-CLOCK + SCORE =====

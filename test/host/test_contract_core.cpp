@@ -185,6 +185,23 @@ static void test_fx_spatial_helpers() {
   CHECK(fxWipeLit(5, 300, 255, 10) == true);
 }
 
+static void test_fx_hue_twinkle_helpers() {
+  // fxGradientHue: base + (p*128)/span + elapsed/fxStepMs(speed).
+  CHECK(fxGradientHue(0, 10, 50, 0, 255) == 50);   // p0 -> base
+  CHECK(fxGradientHue(9, 10, 0, 0, 255) == 128);   // p last -> +128 span
+
+  // fxCycleHue: base + elapsed/(fxStepMs(speed)*2).
+  CHECK(fxCycleHue(0, 0, 255) == 0);
+
+  // fxTwinkleBright: per-LED (fxHash16-seeded) triangle-wave brightness with a
+  // hashed period + phase offset. Exact vectors captured by running the real
+  // implementation (clang++ host build) — not hand-computed.
+  CHECK(fxTwinkleBright(0, 0, 255) <= 255);                       // in range (uint8_t, always true)
+  CHECK(fxTwinkleBright(0, 0, 255) != fxTwinkleBright(1, 0, 255)); // per-LED differs
+  CHECK(fxTwinkleBright(0, 0, 255) == 0);
+  CHECK(fxTwinkleBright(1, 0, 255) == 133);
+}
+
 int main() {
   test_scope_and_verb();
   test_verbs_and_units();
@@ -194,6 +211,7 @@ int main() {
   test_score();
   test_fx_helpers();
   test_fx_spatial_helpers();
+  test_fx_hue_twinkle_helpers();
   printf("%s  %d/%d checks passed\n", g_fail ? "FAILURES" : "OK", g_total - g_fail, g_total);
   return g_fail ? 1 : 0;
 }
