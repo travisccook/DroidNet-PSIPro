@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PSI Visualizer Feature Parity Check</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .stat-box {
+            flex: 1;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-box h2 {
+            margin: 0;
+            color: #666;
+            font-size: 14px;
+        }
+        .stat-box .number {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .passed { color: #28a745; }
+        .missing { color: #dc3545; }
+        .total { color: #007bff; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        .implemented {
+            color: #28a745;
+        }
+        .missing-item {
+            color: #dc3545;
+        }
+        .mapped {
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PSI Visualizer Feature Parity Check</h1>
+        
+        <div class="stats">
+            <div class="stat-box">
+                <h2>Total Animations</h2>
+                <div class="number total" id="total">-</div>
+            </div>
+            <div class="stat-box">
+                <h2>Implemented</h2>
+                <div class="number passed" id="implemented">-</div>
+            </div>
+            <div class="stat-box">
+                <h2>Missing</h2>
+                <div class="number missing" id="missing">-</div>
+            </div>
+            <div class="stat-box">
+                <h2>Coverage</h2>
+                <div class="number" id="coverage">-</div>
+            </div>
+        </div>
+
+        <h2>Animation Details</h2>
+        <table id="animationTable">
+            <thead>
+                <tr>
+                    <th>Original Name</th>
+                    <th>New Name</th>
+                    <th>Status</th>
+                    <th>Category</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+            </tbody>
+        </table>
+    </div>
+
+    <script type="module">
+        import { AnimationRegistry } from './src/animation-registry.js';
+        
+        // Original animations from PSIvisualizer.html
+        const originalAnimations = [
+            'off', 'test', 'testWhite', 'greenOn', 'redOn', 'disco', 'discoForever',
+            'swipe', 'flash', 'alarm', 'march', 'marchTwo', 'solidRed', 'solidYellow',
+            'solidGreen', 'solidCyan', 'solidBlue', 'solidPurple', 'solidWhite',
+            'psiColorWipe1', 'psiColorWipe2', 'psiColorWipeRainbow', 'marchImperial',
+            'clawMachineFlicker', 'clawMachineDisplay', 'cylon', 'knightRider',
+            'theaterChase', 'warpSpeed', 'starWarsScroll', 'starField', 'rebel',
+            'leia', 'loadingBar', 'wifiBreathing', 'rippleEffect', 'heart',
+            'randomBars', 'shortCircuit', 'rainbow', 'randomFlash', 'randomColors',
+            'i_heart_u', 'plasma', 'binaryCounter', 'dnaHelix', 'communicationStatic',
+            'morseSOS', 'clockDisplay', 'scream', 'rainbowSweep', 'glitchMatrix',
+            'heartbeat', 'lightsaber', 'starWarsIntro', 'vuMeter', 'vuMeterForever',
+            'spiral', 'radarSweep', 'breathingGlow', 'matrixRain', 'fireEffect',
+            'rainbowWave', 'countdownTimer', 'dualColorChase', 'emergencyStrobe',
+            'spinningSegments', 'pendulum', 'simonSays', 'snakeGame',
+            'particleExplosion', 'audioSpectrum'
+        ];
+
+        // Name mappings
+        const nameMapping = {
+            'test': 'test-white',
+            'testWhite': 'test-white',
+            'greenOn': 'green-on',
+            'redOn': 'red-on',
+            'discoForever': 'disco-forever',
+            'psiColorWipe1': 'swipe',
+            'psiColorWipe2': 'swipe',
+            'psiColorWipeRainbow': 'swipe',
+            'marchImperial': 'march',
+            'marchTwo': 'march',
+            'solidRed': 'red-on',
+            'solidYellow': 'flash',
+            'solidGreen': 'green-on',
+            'solidCyan': 'flash',
+            'solidBlue': 'flash',
+            'solidPurple': 'flash',
+            'solidWhite': 'test-white',
+            'clawMachineFlicker': 'short-circuit',
+            'clawMachineDisplay': 'loading-bar',
+            'cylon': 'knight-rider',
+            'knightRider': 'knight-rider',
+            'theaterChase': 'theater-chase',
+            'warpSpeed': 'warp-speed',
+            'starWarsScroll': 'star-wars-scroll',
+            'starField': 'star-field',
+            'loadingBar': 'loading-bar',
+            'wifiBreathing': 'breathe',
+            'rippleEffect': 'ripple-effect',
+            'randomBars': 'loading-bar',
+            'shortCircuit': 'short-circuit',
+            'rainbow': 'rainbow-cycle',
+            'randomFlash': 'flash',
+            'randomColors': 'disco',
+            'i_heart_u': 'i-heart-u',
+            'plasma': 'plasma-effect',
+            'binaryCounter': 'binary-counter',
+            'dnaHelix': 'dna-helix',
+            'communicationStatic': 'glitch-matrix',
+            'morseSOS': 'morse-code',
+            'clockDisplay': 'clock-display',
+            'rainbowSweep': 'rainbow-cycle',
+            'glitchMatrix': 'glitch-matrix',
+            'starWarsIntro': 'star-wars-intro',
+            'vuMeter': 'audio-spectrum',
+            'vuMeterForever': 'audio-spectrum',
+            'radarSweep': 'radar-sweep',
+            'breathingGlow': 'breathe',
+            'matrixRain': 'matrix-rain',
+            'fireEffect': 'fire-effect',
+            'rainbowWave': 'rainbow-cycle',
+            'countdownTimer': 'countdown',
+            'dualColorChase': 'theater-chase',
+            'emergencyStrobe': 'emergency-strobe',
+            'spinningSegments': 'spinning-segments',
+            'simonSays': 'simon-says',
+            'snakeGame': 'snake-game',
+            'particleExplosion': 'particle-explosion',
+            'audioSpectrum': 'audio-spectrum'
+        };
+
+        async function checkParity() {
+            const registry = new AnimationRegistry();
+            await registry.loadAnimations();
+            
+            const implementedAnimations = registry.getAll();
+            const implementedNames = implementedAnimations.map(a => a.name);
+            
+            let implemented = 0;
+            let missing = 0;
+            const tableBody = document.getElementById('tableBody');
+            tableBody.innerHTML = '';
+            
+            originalAnimations.forEach(original => {
+                const mappedName = nameMapping[original] || original;
+                const isImplemented = implementedNames.includes(mappedName);
+                const animation = implementedAnimations.find(a => a.name === mappedName);
+                
+                if (isImplemented) implemented++;
+                else missing++;
+                
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${original}</td>
+                    <td>${mappedName} ${original !== mappedName ? '<span class="mapped">(mapped)</span>' : ''}</td>
+                    <td class="${isImplemented ? 'implemented' : 'missing-item'}">${isImplemented ? '✓ Implemented' : '✗ Missing'}</td>
+                    <td>${animation ? animation.category : '-'}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+            
+            // Update stats
+            document.getElementById('total').textContent = originalAnimations.length;
+            document.getElementById('implemented').textContent = implemented;
+            document.getElementById('missing').textContent = missing;
+            document.getElementById('coverage').textContent = 
+                ((implemented / originalAnimations.length) * 100).toFixed(1) + '%';
+        }
+        
+        // Run check on load
+        checkParity();
+    </script>
+</body>
+</html>

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSI Visualizer Test Suite</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .pass {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .fail {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .error-details {
+            background-color: #f8f9fa;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        .summary {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .progress {
+            margin: 20px 0;
+            font-size: 14px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>PSI Visualizer Test Suite</h1>
+    
+    <div class="test-container">
+        <button onclick="runTests()">Run All Tests</button>
+        <div class="progress" id="progress"></div>
+        <div class="summary" id="summary"></div>
+        <div id="testResults"></div>
+    </div>
+
+    <script type="module">
+        import { LEDController } from '../src/core/led-controller.js';
+        import { AnimationRegistry } from '../src/animation-registry.js';
+
+        window.runTests = async function() {
+            const resultsDiv = document.getElementById('testResults');
+            const progressDiv = document.getElementById('progress');
+            const summaryDiv = document.getElementById('summary');
+            
+            resultsDiv.innerHTML = '';
+            progressDiv.textContent = 'Running tests...';
+            summaryDiv.textContent = '';
+            
+            const results = [];
+            
+            // Test 1: LED Controller initialization
+            results.push(await testLEDController());
+            
+            // Test 2: Animation Registry loading
+            results.push(await testAnimationRegistry());
+            
+            // Test 3: Test each animation
+            const animationResults = await testAllAnimations();
+            results.push(...animationResults);
+            
+            // Display summary
+            const passed = results.filter(r => r.status === 'pass').length;
+            const failed = results.filter(r => r.status === 'fail').length;
+            const total = results.length;
+            
+            summaryDiv.textContent = `Test Results: ${passed} passed, ${failed} failed out of ${total} tests`;
+            summaryDiv.className = failed === 0 ? 'summary pass' : 'summary fail';
+            progressDiv.textContent = 'Tests completed!';
+            
+            // Display individual results
+            results.forEach(result => {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = `test-result ${result.status}`;
+                resultDiv.innerHTML = `
+                    <strong>${result.name}</strong>: ${result.message}
+                    ${result.error ? `<div class="error-details">${result.error}</div>` : ''}
+                `;
+                resultsDiv.appendChild(resultDiv);
+            });
+        };
+
+        async function testLEDController() {
+            try {
+                const controller = new LEDController();
+                
+                // Create mock LED elements
+                const frontDiv = document.createElement('div');
+                frontDiv.id = 'test-front';
+                const rearDiv = document.createElement('div');
+                rearDiv.id = 'test-rear';
+                
+                // Add LED elements
+                for (let i = 0; i < 48; i++) {
+                    const frontLed = document.createElement('div');
+                    frontLed.className = 'led off';
+                    frontDiv.appendChild(frontLed);
+                    
+                    const rearLed = document.createElement('div');
+                    rearLed.className = 'led off';
+                    rearDiv.appendChild(rearLed);
+                }
+                
+                document.body.appendChild(frontDiv);
+                document.body.appendChild(rearDiv);
+                
+                controller.initialize('test-front', 'test-rear');
+                
+                // Test basic LED control
+                controller.setLED(0, 'red');
+                controller.setLED(47, 'blue');
+                
+                const frontLeds = frontDiv.querySelectorAll('.led');
+                const rearLeds = rearDiv.querySelectorAll('.led');
+                
+                if (!frontLeds[0].className.includes('red')) {
+                    throw new Error('Failed to set front LED 0 to red');
+                }
+                
+                if (!rearLeds[0].className.includes('yellow')) { // red maps to yellow on rear
+                    throw new Error('Failed to map front red to rear yellow');
+                }
+                
+                // Clean up
+                document.body.removeChild(frontDiv);
+                document.body.removeChild(rearDiv);
+                
+                return {
+                    name: 'LED Controller',
+                    status: 'pass',
+                    message: 'LED Controller initialized and controlled LEDs successfully'
+                };
+            } catch (error) {
+                return {
+                    name: 'LED Controller',
+                    status: 'fail',
+                    message: 'Failed to initialize or control LEDs',
+                    error: error.toString()
+                };
+            }
+        }
+
+        async function testAnimationRegistry() {
+            try {
+                const registry = new AnimationRegistry();
+                await registry.loadAnimations();
+                
+                const animations = registry.getAll();
+                if (animations.length === 0) {
+                    throw new Error('No animations loaded');
+                }
+                
+                // Check for required animations
+                const requiredAnimations = ['off', 'swipe', 'flash', 'alarm', 'heart', 'lightsaber'];
+                for (const name of requiredAnimations) {
+                    if (!registry.get(name)) {
+                        throw new Error(`Required animation '${name}' not found`);
+                    }
+                }
+                
+                return {
+                    name: 'Animation Registry',
+                    status: 'pass',
+                    message: `Successfully loaded ${animations.length} animations`
+                };
+            } catch (error) {
+                return {
+                    name: 'Animation Registry',
+                    status: 'fail',
+                    message: 'Failed to load animations',
+                    error: error.toString()
+                };
+            }
+        }
+
+        async function testAllAnimations() {
+            const results = [];
+            const controller = new LEDController();
+            const registry = new AnimationRegistry();
+            
+            // Create mock LED display
+            const frontDiv = document.createElement('div');
+            frontDiv.id = 'test-front-anim';
+            const rearDiv = document.createElement('div');
+            rearDiv.id = 'test-rear-anim';
+            
+            for (let i = 0; i < 48; i++) {
+                const frontLed = document.createElement('div');
+                frontLed.className = 'led off';
+                frontDiv.appendChild(frontLed);
+                
+                const rearLed = document.createElement('div');
+                rearLed.className = 'led off';
+                rearDiv.appendChild(rearLed);
+            }
+            
+            document.body.appendChild(frontDiv);
+            document.body.appendChild(rearDiv);
+            
+            controller.initialize('test-front-anim', 'test-rear-anim');
+            await registry.loadAnimations();
+            
+            const animations = registry.getAll();
+            const progressDiv = document.getElementById('progress');
+            
+            for (let i = 0; i < animations.length; i++) {
+                const animation = animations[i];
+                progressDiv.textContent = `Testing animation ${i + 1}/${animations.length}: ${animation.name}`;
+                
+                try {
+                    // Initialize animation state
+                    const state = animation.init ? animation.init() : {};
+                    
+                    // Test that frame function exists
+                    if (typeof animation.frame !== 'function') {
+                        throw new Error('Animation missing frame function');
+                    }
+                    
+                    // Run a few frames to ensure no errors
+                    for (let j = 0; j < 5; j++) {
+                        animation.frame(controller, state);
+                    }
+                    
+                    results.push({
+                        name: `Animation: ${animation.displayName}`,
+                        status: 'pass',
+                        message: 'Animation ran successfully without errors'
+                    });
+                } catch (error) {
+                    results.push({
+                        name: `Animation: ${animation.displayName}`,
+                        status: 'fail',
+                        message: 'Animation failed during execution',
+                        error: error.toString()
+                    });
+                }
+                
+                // Clear LEDs between animations
+                controller.clear();
+            }
+            
+            // Clean up
+            document.body.removeChild(frontDiv);
+            document.body.removeChild(rearDiv);
+            
+            return results;
+        }
+    </script>
+</body>
+</html>

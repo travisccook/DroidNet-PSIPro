@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LED Test</title>
+    <style>
+        body { background: #1a1a1a; color: white; padding: 20px; }
+        .led-matrix { display: grid; grid-template-columns: repeat(10, 1fr); gap: 10px; width: 360px; }
+        .led { width: 24px; height: 24px; border-radius: 50%; background-color: #111; border: 2px solid #222; }
+        .led.red { background-color: #ff0000; box-shadow: 0 0 20px #ff0000; }
+        .led.empty { visibility: hidden; }
+    </style>
+</head>
+<body>
+    <h1>LED Test</h1>
+    <div class="led-matrix" id="testMatrix"></div>
+    <button onclick="testLEDs()">Test LEDs</button>
+    <div id="debug"></div>
+    
+    <script>
+        const ledMatrix = [
+            [-1, -1, 23, 24, -1, -1],
+            [-1,  6, 22, 25, 41, -1],
+            [ 5,  7, 21, 26, 40, 42],
+            [ 4,  8, 20, 27, 39, 43],
+            [ 3,  9, 19, 28, 38, 44],
+            [ 2, 10, 18, 29, 37, 45],
+            [ 1, 11, 17, 30, 36, 46],
+            [ 0, 12, 16, 31, 35, 47],
+            [-1, 13, 15, 32, 34, -1],
+            [-1, -1, 14, 33, -1, -1]
+        ];
+        
+        let leds = [];
+        const container = document.getElementById('testMatrix');
+        const debug = document.getElementById('debug');
+        
+        // Initialize
+        for (let row = 0; row < 6; row++) {
+            for (let col = 0; col < 10; col++) {
+                const led = document.createElement('div');
+                const ledIndex = ledMatrix[col][row];
+                
+                if (ledIndex === -1) {
+                    led.className = 'led empty';
+                } else {
+                    led.className = 'led';
+                    leds[ledIndex] = led;
+                }
+                container.appendChild(led);
+            }
+        }
+        
+        debug.innerHTML = `Created ${leds.filter(l => l).length} LEDs`;
+        
+        function testLEDs() {
+            leds.forEach((led, index) => {
+                if (led) {
+                    led.className = 'led red';
+                    debug.innerHTML += `<br>LED ${index}: ${led.className}`;
+                }
+            });
+        }
+    </script>
+</body>
+</html>

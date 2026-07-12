@@ -1,0 +1,262 @@
+/* PSI Visualizer Styles */
+
+body {
+    background-color: #1a1a1a;
+    color: white;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    flex-direction: row;
+    padding: 20px;
+    margin: 0;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.left-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 500px;
+    padding-right: 40px;
+}
+
+.right-panel {
+    flex: 1;
+    overflow-y: auto;
+    padding-left: 20px;
+    max-height: 100vh;
+}
+
+h1 {
+    margin-bottom: 10px;
+    color: #4a9eff;
+}
+
+.psi-container {
+    background: radial-gradient(circle, #2a2a2a 0%, #111 100%);
+    padding: 40px;
+    border-radius: 50%;
+    border: 4px solid #333;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.5);
+    margin: 20px;
+    position: relative;
+}
+
+.led-matrix {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 10px;
+    width: 360px;
+    height: 240px;
+}
+
+.led {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background-color: #111;
+    border: 2px solid #222;
+    transition: all 0.15s ease;
+    position: relative;
+}
+
+.led::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 60%;
+    height: 60%;
+    border-radius: 50%;
+    background: inherit;
+    filter: blur(3px);
+}
+
+/* LED color states with realistic glow effects */
+.led.off { 
+    background-color: #111; 
+    border-color: #222;
+}
+
+.led.red { 
+    background-color: #ff0000; 
+    box-shadow: 0 0 20px #ff0000, inset 0 0 5px #ff6666;
+    border-color: #ff3333;
+}
+
+.led.blue { 
+    background-color: #0080ff; 
+    box-shadow: 0 0 20px #0080ff, inset 0 0 5px #66b3ff;
+    border-color: #3399ff;
+}
+
+.led.green { 
+    background-color: #00ff00; 
+    box-shadow: 0 0 20px #00ff00, inset 0 0 5px #66ff66;
+    border-color: #33ff33;
+}
+
+.led.yellow { 
+    background-color: #ffcc00; 
+    box-shadow: 0 0 20px #ffcc00, inset 0 0 5px #ffe066;
+    border-color: #ffd633;
+}
+
+.led.white { 
+    background-color: #ffffff; 
+    box-shadow: 0 0 25px #ffffff, inset 0 0 5px #ffffff;
+    border-color: #ffffff;
+}
+
+.led.grey { 
+    background-color: #999999; 
+    box-shadow: 0 0 15px #999999, inset 0 0 5px #cccccc;
+    border-color: #aaaaaa;
+}
+
+.led.orange { 
+    background-color: #ff8c00; 
+    box-shadow: 0 0 20px #ff8c00, inset 0 0 5px #ffb366;
+    border-color: #ffa633;
+}
+
+.led.dim-red { 
+    background-color: #660000; 
+    box-shadow: 0 0 10px #660000;
+    border-color: #440000;
+}
+
+.led.dim-blue { 
+    background-color: #002266; 
+    box-shadow: 0 0 10px #002266;
+    border-color: #001144;
+}
+
+.led.dim-white {
+    background-color: #333333;
+    box-shadow: 0 0 5px #333333;
+    border-color: #222222;
+}
+
+.controls {
+    margin: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    max-width: 1000px;
+    width: 100%;
+}
+
+button {
+    padding: 12px 20px;
+    background-color: #333;
+    color: white;
+    border: 2px solid #444;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s ease;
+    font-weight: 500;
+}
+
+button:hover {
+    background-color: #444;
+    border-color: #555;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+button.active {
+    background-color: #0066cc;
+    border-color: #0080ff;
+    box-shadow: 0 0 10px #0080ff;
+}
+
+.idea-button-container {
+    position: relative;
+    display: inline-block;
+    margin: 2px;
+}
+
+.reject-button {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 20px;
+    height: 20px;
+    background-color: #ff0000;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 18px;
+    padding: 0;
+    font-weight: bold;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.reject-button:hover {
+    background-color: #cc0000;
+}
+
+.rejected-section {
+    background-color: #2a1414;
+    border: 1px solid #660000;
+    margin-top: 20px;
+}
+
+.rejected-section h3 {
+    color: #ff6666;
+}
+
+.rejected-section button {
+    background-color: #660000;
+    opacity: 0.7;
+}
+
+.rejected-section button:hover {
+    opacity: 1;
+}
+
+.info {
+    text-align: center;
+    margin: 10px;
+    font-size: 20px;
+    color: #4a9eff;
+    font-weight: 300;
+    height: 30px;
+}
+
+.mode-info {
+    color: #888;
+    font-size: 14px;
+    margin-top: 5px;
+}
+
+.empty { visibility: hidden; }
+
+.psi-label {
+    position: absolute;
+    bottom: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 14px;
+    color: #666;
+}
+
+.control-section {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #222;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.control-section h3 {
+    margin: 0 0 10px 0;
+    color: #4a9eff;
+    font-size: 16px;
+}

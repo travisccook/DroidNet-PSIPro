@@ -1,0 +1,13 @@
+{
+  "name": "psi-visualizer",
+  "version": "1.0.0",
+  "description": "PSI Pro LED Visualizer",
+  "scripts": {
+    "build": "node build.js",
+    "watch": "node build.js --watch",
+    "test": "node tests/run-tests.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.0"
+  }
+}

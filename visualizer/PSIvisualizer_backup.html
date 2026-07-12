@@ -1,0 +1,2472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSI Dual Visualizer</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: row;
+            padding: 20px;
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        .left-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 500px;
+            padding-right: 40px;
+        }
+        
+        .right-panel {
+            flex: 1;
+            overflow-y: auto;
+            padding-left: 20px;
+            max-height: 100vh;
+        }
+        
+        h1 {
+            margin-bottom: 10px;
+            color: #4a9eff;
+        }
+        
+        .psi-container {
+            background: radial-gradient(circle, #2a2a2a 0%, #111 100%);
+            padding: 40px;
+            border-radius: 50%;
+            border: 4px solid #333;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.5);
+            margin: 20px;
+            position: relative;
+        }
+        
+        .led-matrix {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 10px;
+            width: 360px;
+            height: 240px;
+        }
+        
+        .led {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background-color: #111;
+            border: 2px solid #222;
+            transition: all 0.15s ease;
+            position: relative;
+        }
+        
+        .led::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60%;
+            height: 60%;
+            border-radius: 50%;
+            background: inherit;
+            filter: blur(3px);
+        }
+        
+        /* LED color states with realistic glow effects */
+        .led.off { 
+            background-color: #111; 
+            border-color: #222;
+        }
+        
+        .led.red { 
+            background-color: #ff0000; 
+            box-shadow: 0 0 20px #ff0000, inset 0 0 5px #ff6666;
+            border-color: #ff3333;
+        }
+        
+        .led.blue { 
+            background-color: #0080ff; 
+            box-shadow: 0 0 20px #0080ff, inset 0 0 5px #66b3ff;
+            border-color: #3399ff;
+        }
+        
+        .led.green { 
+            background-color: #00ff00; 
+            box-shadow: 0 0 20px #00ff00, inset 0 0 5px #66ff66;
+            border-color: #33ff33;
+        }
+        
+        .led.yellow { 
+            background-color: #ffcc00; 
+            box-shadow: 0 0 20px #ffcc00, inset 0 0 5px #ffe066;
+            border-color: #ffd633;
+        }
+        
+        .led.white { 
+            background-color: #ffffff; 
+            box-shadow: 0 0 25px #ffffff, inset 0 0 5px #ffffff;
+            border-color: #ffffff;
+        }
+        
+        .led.grey { 
+            background-color: #999999; 
+            box-shadow: 0 0 15px #999999, inset 0 0 5px #cccccc;
+            border-color: #aaaaaa;
+        }
+        
+        .led.orange { 
+            background-color: #ff8c00; 
+            box-shadow: 0 0 20px #ff8c00, inset 0 0 5px #ffb366;
+            border-color: #ffa633;
+        }
+        
+        .led.dim-red { 
+            background-color: #660000; 
+            box-shadow: 0 0 10px #660000;
+            border-color: #440000;
+        }
+        
+        .led.dim-blue { 
+            background-color: #002266; 
+            box-shadow: 0 0 10px #002266;
+            border-color: #001144;
+        }
+        
+        .led.dim-white {
+            background-color: #333333;
+            box-shadow: 0 0 5px #333333;
+            border-color: #222222;
+        }
+        
+        .controls {
+            margin: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            max-width: 1000px;
+            width: 100%;
+        }
+        
+        button {
+            padding: 12px 20px;
+            background-color: #333;
+            color: white;
+            border: 2px solid #444;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+        
+        button:hover {
+            background-color: #444;
+            border-color: #555;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        
+        button.active {
+            background-color: #0066cc;
+            border-color: #0080ff;
+            box-shadow: 0 0 10px #0080ff;
+        }
+        
+        .idea-button-container {
+            position: relative;
+            display: inline-block;
+            margin: 2px;
+        }
+        
+        .reject-button {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            width: 20px;
+            height: 20px;
+            background-color: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 18px;
+            padding: 0;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .reject-button:hover {
+            background-color: #cc0000;
+        }
+        
+        .rejected-section {
+            background-color: #2a1414;
+            border: 1px solid #660000;
+            margin-top: 20px;
+        }
+        
+        .rejected-section h3 {
+            color: #ff6666;
+        }
+        
+        .rejected-section button {
+            background-color: #660000;
+            opacity: 0.7;
+        }
+        
+        .rejected-section button:hover {
+            opacity: 1;
+        }
+        
+        .info {
+            text-align: center;
+            margin: 10px;
+            font-size: 20px;
+            color: #4a9eff;
+            font-weight: 300;
+            height: 30px;
+        }
+        
+        .mode-info {
+            color: #888;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        
+        .empty { visibility: hidden; }
+        
+        .psi-label {
+            position: absolute;
+            bottom: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .control-section {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #222;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .control-section h3 {
+            margin: 0 0 10px 0;
+            color: #4a9eff;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="left-panel">
+        <h1>PSI Dual Visualizer</h1>
+        <div class="info" id="animationName">Select an animation</div>
+        <div class="mode-info" id="modeInfo"></div>
+        
+        <div style="display: flex; flex-direction: column; gap: 30px; margin-top: 20px;">
+            <div class="psi-container">
+                <div class="led-matrix" id="frontMatrix"></div>
+                <div class="psi-label" style="color: #4a9eff;">Front PSI (Blue/Red)</div>
+            </div>
+            
+            <div class="psi-container">
+                <div class="led-matrix" id="rearMatrix"></div>
+                <div class="psi-label" style="color: #4aff9e;">Rear PSI (Green/Yellow)</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="right-panel">
+        <div class="control-section">
+            <h3>Current PSIPro Animations</h3>
+        </div>
+        
+        <div class="controls">
+        <button onclick="startAnimation('off')">Mode 0: Off</button>
+        <button onclick="startAnimation('swipe')">Mode 1: Swipe</button>
+        <button onclick="startAnimation('flash')">Mode 2: Flash</button>
+        <button onclick="startAnimation('alarm')">Mode 3: Alarm</button>
+        <button onclick="startAnimation('shortCircuit')">Mode 4: Short Circuit</button>
+        <button onclick="startAnimation('scream')">Mode 5: Scream</button>
+        <button onclick="startAnimation('leia')">Mode 6: Leia Message</button>
+        <button onclick="startAnimation('iHeartU')">Mode 7: I Heart U</button>
+        <button onclick="startAnimation('radar')">Mode 8: Radar Sweep</button>
+        <button onclick="startAnimation('heart')">Mode 9: Heart/Pulse</button>
+        <button onclick="startAnimation('starWarsScroll')">Mode 10: SW Title</button>
+        <button onclick="startAnimation('march')">Mode 11: Imperial March</button>
+        <button onclick="startAnimation('disco')">Mode 12: Disco (Timed)</button>
+        <button onclick="startAnimation('discoForever')">Mode 13: Disco (Forever)</button>
+        <button onclick="startAnimation('rebel')">Mode 14: Rebel Symbol</button>
+        <button onclick="startAnimation('knightRider')">Mode 15: Knight Rider</button>
+        <button onclick="startAnimation('testWhite')">Mode 16: Test (White)</button>
+        <button onclick="startAnimation('redOn')">Mode 17: Red On</button>
+        <button onclick="startAnimation('greenOn')">Mode 18: Green On</button>
+        <button onclick="startAnimation('lightsaber')">Mode 19: Lightsaber</button>
+        <button onclick="startAnimation('starWarsIntro')">Mode 20: SW Intro</button>
+        <button onclick="startAnimation('vuMeter')">Mode 21: VU Meter</button>
+        <button onclick="startAnimation('vuMeterForever')">Mode 92: VU (Forever)</button>
+        <button onclick="stopAnimation()" style="background-color: #660000;">Stop</button>
+        </div>
+        
+        <div class="control-section" style="margin-top: 40px;">
+            <h3>Animation Ideas & Demonstrations</h3>
+            <p style="color: #888; font-size: 14px; margin: 10px 0;">These are concept animations that could be added to PSIPro firmware</p>
+        </div>
+        
+        <div class="controls" id="ideaControls">
+        <div class="idea-button-container">
+            <button onclick="startAnimation('spiral')" style="background-color: #004466;">Idea: Spiral Pattern</button>
+            <button class="reject-button" onclick="rejectIdea('spiral', 'Idea: Spiral Pattern')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('radarSweep')" style="background-color: #004466;">Idea: Radar Sweep</button>
+            <button class="reject-button" onclick="rejectIdea('radarSweep', 'Idea: Radar Sweep')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('breathingGlow')" style="background-color: #004466;">Idea: Breathing Glow</button>
+            <button class="reject-button" onclick="rejectIdea('breathingGlow', 'Idea: Breathing Glow')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('matrixRain')" style="background-color: #004466;">Idea: Matrix Rain</button>
+            <button class="reject-button" onclick="rejectIdea('matrixRain', 'Idea: Matrix Rain')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('fireEffect')" style="background-color: #004466;">Idea: Fire Effect</button>
+            <button class="reject-button" onclick="rejectIdea('fireEffect', 'Idea: Fire Effect')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('rainbowWave')" style="background-color: #004466;">Idea: Rainbow Wave</button>
+            <button class="reject-button" onclick="rejectIdea('rainbowWave', 'Idea: Rainbow Wave')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('countdownTimer')" style="background-color: #004466;">Idea: Countdown</button>
+            <button class="reject-button" onclick="rejectIdea('countdownTimer', 'Idea: Countdown')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('communicationStatic')" style="background-color: #004466;">Idea: Comm Static</button>
+            <button class="reject-button" onclick="rejectIdea('communicationStatic', 'Idea: Comm Static')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('dualColorChase')" style="background-color: #004466;">Idea: Dual Chase</button>
+            <button class="reject-button" onclick="rejectIdea('dualColorChase', 'Idea: Dual Chase')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('emergencyStrobe')" style="background-color: #004466;">Idea: Emergency</button>
+            <button class="reject-button" onclick="rejectIdea('emergencyStrobe', 'Idea: Emergency')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('rippleEffect')" style="background-color: #004466;">Idea: Ripple Effect</button>
+            <button class="reject-button" onclick="rejectIdea('rippleEffect', 'Idea: Ripple Effect')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('spinningSegments')" style="background-color: #004466;">Idea: Spinning Segments</button>
+            <button class="reject-button" onclick="rejectIdea('spinningSegments', 'Idea: Spinning Segments')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('morseCode')" style="background-color: #004466;">Idea: Morse Code</button>
+            <button class="reject-button" onclick="rejectIdea('morseCode', 'Idea: Morse Code')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('plasmaEffect')" style="background-color: #004466;">Idea: Plasma</button>
+            <button class="reject-button" onclick="rejectIdea('plasmaEffect', 'Idea: Plasma')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('dnaHelix')" style="background-color: #004466;">Idea: DNA Helix</button>
+            <button class="reject-button" onclick="rejectIdea('dnaHelix', 'Idea: DNA Helix')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('loadingBar')" style="background-color: #004466;">Idea: Loading Bar</button>
+            <button class="reject-button" onclick="rejectIdea('loadingBar', 'Idea: Loading Bar')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('theaterChase')" style="background-color: #004466;">Idea: Theater Chase</button>
+            <button class="reject-button" onclick="rejectIdea('theaterChase', 'Idea: Theater Chase')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('starField')" style="background-color: #004466;">Idea: Star Field</button>
+            <button class="reject-button" onclick="rejectIdea('starField', 'Idea: Star Field')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('warpSpeed')" style="background-color: #004466;">Idea: Warp Speed</button>
+            <button class="reject-button" onclick="rejectIdea('warpSpeed', 'Idea: Warp Speed')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('heartbeat')" style="background-color: #004466;">Idea: Heartbeat</button>
+            <button class="reject-button" onclick="rejectIdea('heartbeat', 'Idea: Heartbeat')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('pendulum')" style="background-color: #004466;">Idea: Pendulum</button>
+            <button class="reject-button" onclick="rejectIdea('pendulum', 'Idea: Pendulum')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('simonSays')" style="background-color: #004466;">Idea: Simon Says</button>
+            <button class="reject-button" onclick="rejectIdea('simonSays', 'Idea: Simon Says')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('snakeGame')" style="background-color: #004466;">Idea: Snake Game</button>
+            <button class="reject-button" onclick="rejectIdea('snakeGame', 'Idea: Snake Game')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('audioSpectrum')" style="background-color: #004466;">Idea: Audio Spectrum</button>
+            <button class="reject-button" onclick="rejectIdea('audioSpectrum', 'Idea: Audio Spectrum')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('clockDisplay')" style="background-color: #004466;">Idea: Clock</button>
+            <button class="reject-button" onclick="rejectIdea('clockDisplay', 'Idea: Clock')" title="Reject this idea">×</button>
+        </div>
+        <div class="idea-button-container">
+            <button onclick="startAnimation('particleExplosion')" style="background-color: #004466;">Idea: Explosions</button>
+            <button class="reject-button" onclick="rejectIdea('particleExplosion', 'Idea: Explosions')" title="Reject this idea">×</button>
+        </div>
+        </div>
+        
+        <div class="control-section rejected-section" style="margin-top: 40px;">
+            <h3>Rejected Ideas</h3>
+            <p style="color: #ff9999; font-size: 14px; margin: 10px 0;">These animation ideas were reviewed but not selected for implementation</p>
+            <button onclick="resetRejections()" style="background-color: #990000; margin-top: 10px;">Reset All Rejections</button>
+        </div>
+        
+        <div class="controls" id="rejectedControls">
+        </div>
+    </div>
+
+    <script>
+        // PSIPro LED matrix layout (-1 means no LED in that position)
+        const ledMatrix = [
+            [-1, -1, 23, 24, -1, -1],
+            [-1,  6, 22, 25, 41, -1],
+            [ 5,  7, 21, 26, 40, 42],
+            [ 4,  8, 20, 27, 39, 43],
+            [ 3,  9, 19, 28, 38, 44],
+            [ 2, 10, 18, 29, 37, 45],
+            [ 1, 11, 17, 30, 36, 46],
+            [ 0, 12, 16, 31, 35, 47],
+            [-1, 13, 15, 32, 34, -1],
+            [-1, -1, 14, 33, -1, -1]
+        ];
+        
+        // Pattern matrices from PSIPro code
+        const patterns = {
+            heart: [
+                [0,0,0,0,0,0],
+                [0,1,1,0,0,1,1,0],
+                [0,1,1,1,1,1,1,1,1,0],
+                [0,0,1,1,1,1,1,1,0,0],
+                [0,0,1,1,1,1,0,0],
+                [0,0,1,1,0,0]
+            ],
+            letterI: [
+                [0,1,1,1,1,0],
+                [0,0,0,1,1,0,0,0],
+                [0,0,0,0,1,1,0,0,0,0],
+                [0,0,0,0,1,1,0,0,0,0],
+                [0,0,0,1,1,0,0,0],
+                [0,1,1,1,1,0]
+            ],
+            letterU: [
+                [1,1,0,0,1,1],
+                [0,1,1,0,0,1,1,0],
+                [0,0,1,1,0,0,1,1,0,0],
+                [0,0,1,1,0,0,1,1,0,0],
+                [0,1,1,1,1,1,1,0],
+                [0,1,1,1,1,0]
+            ],
+            rebel: [
+                [0,0,1,1,0,0],
+                [1,0,1,1,1,1,0,1],
+                [1,0,0,0,1,1,0,0,0,1],
+                [1,1,0,1,1,1,1,0,1,1],
+                [1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1]
+            ],
+            pulse: [
+                [0,0,0,0,0,1],
+                [0,0,0,0,0,1,0,1],
+                [0,0,1,0,0,0,1,0,0,1],
+                [1,1,0,1,0,1,0,0,0,0],
+                [0,0,1,0,1,0,0,0],
+                [0,0,1,0,0,0]
+            ]
+        };
+        
+        let frontLeds = [];
+        let rearLeds = [];
+        let animationInterval = null;
+        let currentAnimation = null;
+        
+        // Initialize LED display
+        function initializeLEDs() {
+            initializeMatrix('frontMatrix', frontLeds);
+            initializeMatrix('rearMatrix', rearLeds);
+        }
+        
+        function initializeMatrix(containerId, ledArray) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            ledArray.length = 0;
+            
+            for (let row = 0; row < 6; row++) {
+                for (let col = 0; col < 10; col++) {
+                    const led = document.createElement('div');
+                    const ledIndex = ledMatrix[col][row];
+                    
+                    if (ledIndex === -1) {
+                        led.className = 'led empty';
+                    } else {
+                        led.className = 'led off';
+                        led.id = `${containerId}-led-${ledIndex}`;
+                        ledArray[ledIndex] = led;
+                    }
+                    
+                    container.appendChild(led);
+                }
+            }
+        }
+        
+        // Clear all LEDs
+        function clearLEDs() {
+            frontLeds.forEach(led => {
+                if (led) led.className = 'led off';
+            });
+            rearLeds.forEach(led => {
+                if (led) led.className = 'led off';
+            });
+        }
+        
+        // Set LED color by index
+        function setLED(index, color, target = 'both') {
+            if (target === 'both' || target === 'front') {
+                if (frontLeds[index]) {
+                    frontLeds[index].className = `led ${color}`;
+                }
+            }
+            if (target === 'both' || target === 'rear') {
+                if (rearLeds[index]) {
+                    // Map colors for rear PSI
+                    let rearColor = color;
+                    if (color === 'blue') rearColor = 'green';
+                    else if (color === 'red') rearColor = 'yellow';
+                    else if (color === 'dim-blue') rearColor = 'dim-white';
+                    else if (color === 'dim-red') rearColor = 'dim-white';
+                    
+                    rearLeds[index].className = `led ${rearColor}`;
+                }
+            }
+        }
+        
+        // Fill column with color
+        function fillColumn(col, color, target = 'both') {
+            for (let row = 0; row < 6; row++) {
+                const ledIndex = ledMatrix[col][row];
+                if (ledIndex !== -1) {
+                    setLED(ledIndex, color, target);
+                }
+            }
+        }
+        
+        // Fill row with color  
+        function fillRow(row, color, target = 'both') {
+            for (let col = 0; col < 10; col++) {
+                const ledIndex = ledMatrix[col][row];
+                if (ledIndex !== -1) {
+                    setLED(ledIndex, color, target);
+                }
+            }
+        }
+        
+        // Display a pattern matrix
+        function displayMatrix(pattern, colors = {0: 'off', 1: 'red', 2: 'blue', 3: 'green', 4: 'white'}, target = 'both') {
+            if (target === 'both') clearLEDs();
+            else clearMatrix(target);
+            let ledIndex = 0;
+            
+            // Pattern is stored as a linear array, need to map to our matrix
+            for (let i = 0; i < pattern.length; i++) {
+                for (let j = 0; j < pattern[i].length; j++) {
+                    // Map pattern position to actual LED
+                    const actualCol = j + (pattern[i].length === 6 ? 2 : 
+                                           pattern[i].length === 8 ? 1 : 0);
+                    const actualRow = i;
+                    
+                    if (actualCol < 10 && actualRow < 6) {
+                        const ledIdx = ledMatrix[actualCol][actualRow];
+                        if (ledIdx !== -1 && pattern[i][j] !== 0) {
+                            const colorKey = pattern[i][j];
+                            setLED(ledIdx, colors[colorKey] || 'red', target);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Clear specific matrix
+        function clearMatrix(target) {
+            if (target === 'front') {
+                frontLeds.forEach(led => {
+                    if (led) led.className = 'led off';
+                });
+            } else if (target === 'rear') {
+                rearLeds.forEach(led => {
+                    if (led) led.className = 'led off';
+                });
+            }
+        }
+        
+        // Animation functions
+        // Note: All animations are designed to complete their main cycle within 5-10 seconds
+        // for optimal demonstration purposes, though they can run indefinitely
+        const animations = {
+            off: function() {
+                clearLEDs();
+                return null; // No interval needed
+            },
+            
+            swipe: function() {
+                let position = 0;
+                let direction = 1;
+                let state = 'primary'; // primary, transition, secondary
+                let pauseCounter = 0;
+                let pauseDuration = 0;
+                
+                return setInterval(() => {
+                    if (pauseCounter > 0) {
+                        pauseCounter--;
+                        return;
+                    }
+                    
+                    clearLEDs();
+                    
+                    if (state === 'primary') {
+                        // All primary color
+                        for (let col = 0; col < 10; col++) {
+                            fillColumn(col, 'blue', 'front');
+                            fillColumn(col, 'green', 'rear');
+                        }
+                        // Random pause on primary
+                        if (pauseDuration === 0) {
+                            pauseDuration = 20 + Math.floor(Math.random() * 80); // 2-10 seconds at 100ms intervals
+                            pauseCounter = pauseDuration;
+                            state = 'transition';
+                            position = 0;
+                            direction = 1;
+                        }
+                    } else if (state === 'transition') {
+                        // Swipe effect
+                        for (let col = 0; col < 10; col++) {
+                            if (col < position) {
+                                fillColumn(col, 'red', 'front');
+                                fillColumn(col, 'yellow', 'rear');
+                            } else {
+                                fillColumn(col, 'blue', 'front');
+                                fillColumn(col, 'green', 'rear');
+                            }
+                        }
+                        
+                        position += direction;
+                        
+                        if (position > 10 && direction === 1) {
+                            state = 'secondary';
+                            pauseDuration = 40 + Math.floor(Math.random() * 80); // 4-12 seconds
+                            pauseCounter = pauseDuration;
+                        } else if (position < 0 && direction === -1) {
+                            state = 'primary';
+                            pauseDuration = 20 + Math.floor(Math.random() * 80);
+                            pauseCounter = pauseDuration;
+                        }
+                    } else if (state === 'secondary') {
+                        // All secondary color
+                        for (let col = 0; col < 10; col++) {
+                            fillColumn(col, 'red', 'front');
+                            fillColumn(col, 'yellow', 'rear');
+                        }
+                        if (pauseDuration === 0) {
+                            state = 'transition';
+                            position = 10;
+                            direction = -1;
+                        }
+                    }
+                    
+                    if (pauseDuration > 0) pauseDuration--;
+                }, 100);
+            },
+            
+            flash: function() {
+                let on = false;
+                return setInterval(() => {
+                    if (on) {
+                        clearLEDs();
+                    } else {
+                        for (let i = 0; i < 48; i++) {
+                            setLED(i, 'white');
+                        }
+                    }
+                    on = !on;
+                }, 60);
+            },
+            
+            alarm: function() {
+                let on = false;
+                return setInterval(() => {
+                    if (on) {
+                        clearLEDs();
+                    } else {
+                        for (let i = 0; i < 48; i++) {
+                            setLED(i, 'white');
+                        }
+                    }
+                    on = !on;
+                }, 125);
+            },
+            
+            shortCircuit: function() {
+                // Initialize all LEDs to blue
+                let initialized = false;
+                return setInterval(() => {
+                    if (!initialized) {
+                        for (let index = 0; index < 48; index++) {
+                            setLED(index, 'blue');
+                        }
+                        initialized = true;
+                    }
+                    
+                    // Randomly dim or brighten pixels
+                    for (let index = 0; index < 48; index++) {
+                        if (Math.random() > 0.7) {
+                            const brightness = Math.random();
+                            if (brightness < 0.3) {
+                                setLED(index, 'off');
+                            } else if (brightness < 0.6) {
+                                setLED(index, 'dim-blue');
+                            } else {
+                                setLED(index, 'blue');
+                            }
+                        }
+                    }
+                }, 257);
+            },
+            
+            scream: function() {
+                // Same as alarm
+                return animations.alarm();
+            },
+            
+            leia: function() {
+                // Cylon row effect (horizontal sweep)
+                let row = 0;
+                let direction = 1;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    fillRow(row, 'grey');
+                    
+                    row += direction;
+                    if (row >= 6) {
+                        row = 5;
+                        direction = -1;
+                    } else if (row < 0) {
+                        row = 0;
+                        direction = 1;
+                    }
+                }, 74);
+            },
+            
+            iHeartU: function() {
+                let state = 0;
+                const sequences = [
+                    () => displayMatrix(patterns.letterI, {1: 'red', 0: 'grey'}),
+                    () => clearLEDs(),
+                    () => displayMatrix(patterns.heart, {1: 'red', 0: 'grey'}),
+                    () => clearLEDs(),
+                    () => displayMatrix(patterns.letterU, {1: 'red', 0: 'grey'}),
+                    () => clearLEDs()
+                ];
+                
+                return setInterval(() => {
+                    sequences[state]();
+                    state = (state + 1) % sequences.length;
+                }, 500);
+            },
+            
+            radar: function() {
+                // Quarter panel sweep - lights up half the display in 4 positions
+                let state = 0;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    switch(state) {
+                        case 0: // Top half of left side (columns 0-4)
+                            for (let col = 0; col <= 4; col++) {
+                                for (let row = 0; row < 3; row++) {
+                                    const ledIndex = ledMatrix[col][row];
+                                    if (ledIndex !== -1) setLED(ledIndex, 'red');
+                                }
+                            }
+                            break;
+                        case 1: // Clear
+                            break;
+                        case 2: // Top half of right side (columns 5-9)
+                            for (let col = 5; col <= 9; col++) {
+                                for (let row = 0; row < 3; row++) {
+                                    const ledIndex = ledMatrix[col][row];
+                                    if (ledIndex !== -1) setLED(ledIndex, 'red');
+                                }
+                            }
+                            break;
+                        case 3: // Clear
+                            break;
+                        case 4: // Bottom half of right side (columns 5-9)
+                            for (let col = 5; col <= 9; col++) {
+                                for (let row = 3; row < 6; row++) {
+                                    const ledIndex = ledMatrix[col][row];
+                                    if (ledIndex !== -1) setLED(ledIndex, 'red');
+                                }
+                            }
+                            break;
+                        case 5: // Clear
+                            break;
+                        case 6: // Bottom half of left side (columns 0-4)
+                            for (let col = 0; col <= 4; col++) {
+                                for (let row = 3; row < 6; row++) {
+                                    const ledIndex = ledMatrix[col][row];
+                                    if (ledIndex !== -1) setLED(ledIndex, 'red');
+                                }
+                            }
+                            break;
+                        case 7: // Clear
+                            break;
+                    }
+                    
+                    state = (state + 1) % 8;
+                }, 250);
+            },
+            
+            heart: function() {
+                let beat = 0;
+                let position = 0;
+                const pulsePath = [33, 32, 16, 30, 36, 45, 38, 28, 20, 8, 5, 6, 23];
+                
+                return setInterval(() => {
+                    // Front PSI - heart
+                    if (beat % 10 < 5) {
+                        displayMatrix(patterns.heart, {1: 'red', 0: 'grey'}, 'front');
+                    } else {
+                        clearMatrix('front');
+                    }
+                    
+                    // Rear PSI - pulse
+                    displayMatrix(patterns.pulse, {1: 'dim-white', 0: 'grey'}, 'rear');
+                    if (position < pulsePath.length) {
+                        setLED(pulsePath[position], 'green', 'rear');
+                    }
+                    
+                    position = (position + 1) % pulsePath.length;
+                    beat++;
+                }, 100);
+            },
+            
+            starWarsScroll: function() {
+                // Cylon row with yellow color
+                let row = 0;
+                let direction = 1;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    fillRow(row, 'yellow');
+                    
+                    row += direction;
+                    if (row >= 6) {
+                        row = 5;
+                        direction = -1;
+                    } else if (row < 0) {
+                        row = 0;
+                        direction = 1;
+                    }
+                }, 500);
+            },
+            
+            march: function() {
+                // Imperial March - rhythmic flashing
+                let pattern = 0;
+                const marchPattern = [1,0,1,0,1,0,0,0,1,0,1,0,1,0,0,0];
+                
+                return setInterval(() => {
+                    if (marchPattern[pattern % marchPattern.length]) {
+                        for (let i = 0; i < 48; i++) {
+                            setLED(i, 'white');
+                        }
+                    } else {
+                        clearLEDs();
+                    }
+                    pattern++;
+                }, 552);
+            },
+            
+            disco: function() {
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // 3 random sparkles on each PSI
+                    for (let i = 0; i < 3; i++) {
+                        const frontLed = Math.floor(Math.random() * 48);
+                        const rearLed = Math.floor(Math.random() * 48);
+                        setLED(frontLed, 'grey', 'front');
+                        setLED(rearLed, 'grey', 'rear');
+                    }
+                }, 150);
+            },
+            
+            discoForever: function() {
+                return animations.disco();
+            },
+            
+            rebel: function() {
+                displayMatrix(patterns.rebel, {1: 'red', 0: 'grey'});
+                return null;
+            },
+            
+            knightRider: function() {
+                // Cylon column effect (vertical sweep like KITT)
+                let position = 0;
+                let direction = 1;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    fillColumn(position, 'red');
+                    
+                    // Trailing effect
+                    if (position - direction >= 0 && position - direction < 10) {
+                        fillColumn(position - direction, 'dim-red');
+                    }
+                    
+                    position += direction;
+                    if (position >= 10) {
+                        position = 9;
+                        direction = -1;
+                    } else if (position < 0) {
+                        position = 0;
+                        direction = 1;
+                    }
+                }, 250);
+            },
+            
+            testWhite: function() {
+                for (let i = 0; i < 48; i++) {
+                    setLED(i, 'grey');
+                }
+                return null;
+            },
+            
+            redOn: function() {
+                for (let i = 0; i < 48; i++) {
+                    setLED(i, 'red', 'front');
+                    setLED(i, 'yellow', 'rear');
+                }
+                return null;
+            },
+            
+            greenOn: function() {
+                for (let i = 0; i < 48; i++) {
+                    setLED(i, 'blue', 'front');
+                    setLED(i, 'green', 'rear');
+                }
+                return null;
+            },
+            
+            lightsaber: function() {
+                let frame = 0;
+                const delays = [250, 250, 250, 250, 250, 250, 100, 250, 250, 250, 250, 250, 250, 250, 250, 100, 250, 250, 250, 250, 250, 250, 500];
+                let currentDelay = 250;
+                let timeoutId = null;
+                
+                // All 22 lightsaber frames from the matrices
+                const lightsaberFrames = [
+                    // Frame 0 - Starting positions
+                    [[0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    // Frame 1 - Blue saber appears
+                    [[0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0],
+                     [0,0,0,2,0,0,0,0,0,0],
+                     [0,0,0,2,0,0,0,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    // Frame 2 - Red saber appears
+                    [[0,0,0,0,0,0],
+                     [0,0,2,0,0,0,0,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    // Frame 3 - Sabers extend
+                    [[0,0,0,0,0,0],
+                     [0,0,2,0,0,3,0,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    // Frame 4 - Sabers clash
+                    [[0,0,0,0,0,0],
+                     [0,0,0,3,2,0,0,0],
+                     [0,0,0,0,2,3,0,0,0,0],
+                     [0,0,0,0,2,3,0,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    // Frame 5
+                    [[0,0,0,0,0,0],
+                     [0,0,3,0,0,2,0,0],
+                     [0,0,0,0,3,2,0,0,0,0],
+                     [0,0,0,0,2,3,0,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [1,0,0,0,0,1]],
+                    
+                    // Frame 6 - Flash/clash effect
+                    [[4,4,4,4,4,4],
+                     [4,4,3,4,4,2,4,4],
+                     [4,4,4,4,3,2,4,4,4,4],
+                     [4,4,4,4,2,3,4,4,4,4],
+                     [4,4,1,4,4,1,4,4],
+                     [1,4,4,4,4,1]],
+                    
+                    // Continue with remaining frames...
+                    [[0,0,0,0,0,0],
+                     [0,0,0,0,2,0,0,0],
+                     [0,0,0,0,2,3,0,0,0,0],
+                     [0,0,0,0,2,0,3,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [0,0,0,2,0,0,3,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,1,0,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [0,0,2,0,0,0,0,3],
+                     [0,0,0,2,0,0,0,3,0,0],
+                     [0,0,0,2,0,0,1,0,0,0],
+                     [0,0,1,0,1,0,0,0],
+                     [0,1,0,0,0,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [2,0,0,0,0,0,0,0],
+                     [0,0,2,0,0,0,0,0,0,0],
+                     [0,0,0,2,0,1,1,3,3,3],
+                     [0,0,1,0,0,0,0,0],
+                     [0,1,0,0,0,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0],
+                     [0,2,0,0,0,0,0,0,0,0],
+                     [0,0,2,0,0,0,1,3,0,0],
+                     [0,0,1,0,0,0,0,0],
+                     [0,0,1,0,0,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [0,2,0,0,0,0,0,0],
+                     [0,0,0,2,0,0,0,0,0,0],
+                     [0,0,0,2,0,0,1,0,0,0],
+                     [0,0,1,0,0,0,0,0],
+                     [0,1,0,0,0,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [0,0,2,0,0,0,0,0],
+                     [0,0,0,2,0,0,0,0,0,0],
+                     [0,0,0,2,3,3,3,1,1,0],
+                     [0,0,1,0,0,0,0,0],
+                     [0,1,0,0,0,0]],
+                    
+                    // Frame 14 - Another flash
+                    [[4,4,4,4,4,4],
+                     [4,4,2,4,4,4,4,4],
+                     [4,4,4,2,4,4,4,4,4,4],
+                     [4,4,4,3,3,3,1,1,4,4],
+                     [4,4,1,4,4,4,4,4],
+                     [4,1,4,4,4,4]],
+                    
+                    [[0,0,0,0,0,0],
+                     [2,0,0,0,0,0,0,0],
+                     [0,0,2,0,3,0,0,0,0,0],
+                     [0,0,2,0,0,3,0,0,0,0],
+                     [0,0,1,0,0,3,0,0],
+                     [0,1,0,0,0,1]],
+                    
+                    [[0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0],
+                     [0,2,0,0,0,3,0,0,0,0],
+                     [0,0,2,0,0,3,0,0,0,0],
+                     [0,0,1,0,0,3,0,0],
+                     [0,0,1,0,1,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [2,0,0,0,3,0,0,0],
+                     [0,0,2,0,0,3,0,0,0,0],
+                     [0,0,2,0,0,0,3,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [0,0,0,0,0,3,0,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0],
+                     [0,0,0,0,0,0,3,0,0,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    [[0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0,0,0],
+                     [0,0,0,2,0,0,3,0,0,0],
+                     [0,0,1,0,0,1,0,0],
+                     [0,1,0,0,1,0]],
+                    
+                    // Final frame - hilts fall
+                    [[0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0,0,0],
+                     [0,0,0,0,0,0,0,0,0,0],
+                     [0,0,0,0,0,1,0,0],
+                     [0,1,1,0,1,0]]
+                ];
+                
+                // Colors: 0=off, 1=white (hilt), 2=blue, 3=red, 4=grey (flash)
+                const colors = {0: 'off', 1: 'white', 2: 'blue', 3: 'red', 4: 'grey'};
+                
+                // Use interval instead of setTimeout chain
+                return setInterval(() => {
+                    displayMatrix(lightsaberFrames[frame], colors);
+                    frame = (frame + 1) % lightsaberFrames.length;
+                }, 250); // Average delay
+            },
+            
+            starWarsIntro: function() {
+                // Text scrolling up and getting smaller
+                let state = 0;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    switch(state % 8) {
+                        case 0: fillRow(5, 'yellow'); break;
+                        case 1: break;
+                        case 2: fillRow(4, 'yellow'); break;
+                        case 3: break;
+                        case 4: 
+                            fillRow(3, 'yellow');
+                            setLED(ledMatrix[2][3], 'off');
+                            setLED(ledMatrix[7][3], 'off');
+                            break;
+                        case 5:
+                            fillRow(4, 'yellow');
+                            fillRow(2, 'dim-white');
+                            // Make row 2 smaller
+                            for (let col of [0, 1, 8, 9]) {
+                                if (ledMatrix[col][2] !== -1) {
+                                    setLED(ledMatrix[col][2], 'off');
+                                }
+                            }
+                            break;
+                        case 6:
+                            fillRow(3, 'yellow');
+                            setLED(ledMatrix[2][3], 'off');
+                            setLED(ledMatrix[7][3], 'off');
+                            fillRow(1, 'dim-white');
+                            // Make row 1 even smaller
+                            for (let col of [0, 1, 2, 7, 8, 9]) {
+                                if (ledMatrix[col][1] !== -1) {
+                                    setLED(ledMatrix[col][1], 'off');
+                                }
+                            }
+                            break;
+                        case 7: break;
+                    }
+                    
+                    state++;
+                }, 500);
+            },
+            
+            vuMeter: function() {
+                let levels = new Array(10).fill(3);
+                
+                // VUChart matrix defines color zones: 1=green, 2=yellow, 3=orange, 4=red
+                const vuColors = {0: 'off', 1: 'green', 2: 'yellow', 3: 'orange', 4: 'red'};
+                
+                return setInterval(() => {
+                    // First display the VU chart pattern
+                    displayMatrix([
+                        [4,4,4,4,4,4],      // Row 0 - Red
+                        [0,3,3,3,3,3,3,0],  // Row 1 - Orange
+                        [0,0,2,2,2,2,2,2,0,0], // Row 2 - Yellow
+                        [0,0,1,1,1,1,1,1,0,0], // Row 3 - Green
+                        [0,1,1,1,1,1,1,0],  // Row 4 - Green
+                        [1,1,1,1,1,1]       // Row 5 - Green
+                    ], vuColors);
+                    
+                    // Now blank out columns based on level (from top down)
+                    for (let col = 0; col < 10; col++) {
+                        // Update level randomly
+                        const change = Math.random() > 0.5 ? 1 : -1;
+                        const changeAmount = Math.random() > 0.7 ? 2 : 1;
+                        levels[col] = Math.max(0, Math.min(6, levels[col] + (change * changeAmount)));
+                        
+                        // Turn off LEDs above the level
+                        for (let row = 0; row < 6; row++) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1 && row < (6 - levels[col])) {
+                                setLED(ledIndex, 'off');
+                            }
+                        }
+                    }
+                }, 250);
+            },
+            
+            vuMeterForever: function() {
+                return animations.vuMeter();
+            },
+            
+            // New animation ideas
+            spiral: function() {
+                let frame = 0;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Create a proper spiral by calculating distance and angle from center
+                    const centerX = 4.5;
+                    const centerY = 2.5;
+                    const spiralSpeed = 0.3;
+                    const spiralTightness = 0.8;
+                    
+                    for (let col = 0; col < 10; col++) {
+                        for (let row = 0; row < 6; row++) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1) {
+                                // Calculate polar coordinates
+                                const dx = col - centerX;
+                                const dy = row - centerY;
+                                const distance = Math.sqrt(dx * dx + dy * dy);
+                                const angle = Math.atan2(dy, dx);
+                                
+                                // Spiral equation: r = a + b*theta
+                                const spiralAngle = (frame * spiralSpeed) - (distance * spiralTightness);
+                                const normalizedAngle = ((angle + Math.PI * 2) * 180 / Math.PI) % 360;
+                                const spiralValue = ((spiralAngle * 180 / Math.PI) % 360 + 360) % 360;
+                                
+                                const diff = Math.abs(normalizedAngle - spiralValue);
+                                if (diff < 30 || diff > 330) {
+                                    setLED(ledIndex, 'white');
+                                } else if (diff < 60 || diff > 300) {
+                                    setLED(ledIndex, 'grey');
+                                } else if (diff < 90 || diff > 270) {
+                                    setLED(ledIndex, 'dim-white');
+                                }
+                            }
+                        }
+                    }
+                    
+                    frame++;
+                }, 50);
+            },
+            
+            radarSweep: function() {
+                let angle = 0;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Calculate sweep line
+                    const radians = (angle * Math.PI) / 180;
+                    const centerX = 4.5;
+                    const centerY = 2.5;
+                    
+                    // Light up LEDs along the sweep line
+                    for (let col = 0; col < 10; col++) {
+                        for (let row = 0; row < 6; row++) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1) {
+                                // Calculate angle from center to this LED
+                                const ledAngle = Math.atan2(row - centerY, col - centerX) * 180 / Math.PI;
+                                const normalizedAngle = (ledAngle + 360) % 360;
+                                const angleDiff = Math.abs(normalizedAngle - angle);
+                                
+                                if (angleDiff < 20 || angleDiff > 340) {
+                                    setLED(ledIndex, 'green');
+                                } else if (angleDiff < 40 || angleDiff > 320) {
+                                    setLED(ledIndex, 'dim-white');
+                                }
+                            }
+                        }
+                    }
+                    
+                    angle = (angle + 10) % 360;
+                }, 100);
+            },
+            
+            breathingGlow: function() {
+                let brightness = 0;
+                let direction = 1;
+                const color = isFrontPSI ? 'blue' : 'green';
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Apply breathing effect to all LEDs
+                    const dimLevel = Math.floor(brightness / 33);
+                    const colorMap = {
+                        0: 'off',
+                        1: 'dim-' + color,
+                        2: color,
+                        3: color
+                    };
+                    
+                    leds.forEach((led, index) => {
+                        if (led) {
+                            setLED(index, colorMap[dimLevel] || 'off');
+                        }
+                    });
+                    
+                    brightness += direction * 5;
+                    if (brightness >= 100) {
+                        brightness = 100;
+                        direction = -1;
+                    } else if (brightness <= 0) {
+                        brightness = 0;
+                        direction = 1;
+                    }
+                }, 50);
+            },
+            
+            matrixRain: function() {
+                const drops = [];
+                
+                // Initialize drops
+                for (let col = 0; col < 10; col++) {
+                    drops[col] = {
+                        row: Math.floor(Math.random() * 6) - 6,
+                        speed: 0.5 + Math.random() * 0.5
+                    };
+                }
+                
+                return setInterval(() => {
+                    // Fade all LEDs
+                    leds.forEach((led, index) => {
+                        if (led && led.className.includes('green')) {
+                            led.className = 'led dim-white';
+                        } else if (led && led.className.includes('dim-white')) {
+                            led.className = 'led off';
+                        }
+                    });
+                    
+                    // Update drops
+                    for (let col = 0; col < 10; col++) {
+                        drops[col].row += drops[col].speed;
+                        
+                        // Draw the drop
+                        const row = Math.floor(drops[col].row);
+                        if (row >= 0 && row < 6) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1) {
+                                setLED(ledIndex, 'green');
+                            }
+                        }
+                        
+                        // Reset drop when it falls off
+                        if (drops[col].row > 6) {
+                            drops[col].row = -Math.random() * 3;
+                            drops[col].speed = 0.5 + Math.random() * 0.5;
+                        }
+                    }
+                }, 100);
+            },
+            
+            fireEffect: function() {
+                const heat = new Array(10).fill(0).map(() => new Array(6).fill(0));
+                
+                return setInterval(() => {
+                    // Cool down all cells
+                    for (let col = 0; col < 10; col++) {
+                        for (let row = 0; row < 6; row++) {
+                            heat[col][row] = Math.max(0, heat[col][row] - Math.random() * 0.1);
+                        }
+                    }
+                    
+                    // Heat bottom row
+                    for (let col = 0; col < 10; col++) {
+                        if (Math.random() > 0.3) {
+                            heat[col][5] = 0.8 + Math.random() * 0.2;
+                        }
+                    }
+                    
+                    // Rise and diffuse heat
+                    for (let row = 0; row < 5; row++) {
+                        for (let col = 0; col < 10; col++) {
+                            const below = heat[col][row + 1];
+                            heat[col][row] = (heat[col][row] + below * 0.8) / 2;
+                        }
+                    }
+                    
+                    // Display fire
+                    for (let col = 0; col < 10; col++) {
+                        for (let row = 0; row < 6; row++) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1) {
+                                const h = heat[col][row];
+                                let color = 'off';
+                                if (h > 0.9) color = 'white';
+                                else if (h > 0.7) color = 'yellow';
+                                else if (h > 0.5) color = 'orange';
+                                else if (h > 0.3) color = 'red';
+                                else if (h > 0.1) color = 'dim-red';
+                                
+                                setLED(ledIndex, color);
+                            }
+                        }
+                    }
+                }, 100);
+            },
+            
+            rainbowWave: function() {
+                let offset = 0;
+                const colors = ['red', 'orange', 'yellow', 'green', 'blue', 'white'];
+                
+                return setInterval(() => {
+                    for (let col = 0; col < 10; col++) {
+                        const colorIndex = (col + offset) % colors.length;
+                        fillColumn(col, colors[colorIndex]);
+                    }
+                    
+                    offset = (offset + 1) % colors.length;
+                }, 200);
+            },
+            
+            countdownTimer: function() {
+                let number = 9;
+                const numbers = {
+                    9: [[0,1,1,1,0], [1,0,0,0,1], [1,0,0,0,1], [0,1,1,1,1], [0,0,0,0,1], [0,1,1,1,0]],
+                    8: [[0,1,1,1,0], [1,0,0,0,1], [0,1,1,1,0], [1,0,0,0,1], [1,0,0,0,1], [0,1,1,1,0]],
+                    7: [[1,1,1,1,1], [0,0,0,0,1], [0,0,0,1,0], [0,0,1,0,0], [0,1,0,0,0], [1,0,0,0,0]],
+                    6: [[0,1,1,1,0], [1,0,0,0,0], [1,1,1,1,0], [1,0,0,0,1], [1,0,0,0,1], [0,1,1,1,0]],
+                    5: [[1,1,1,1,1], [1,0,0,0,0], [1,1,1,1,0], [0,0,0,0,1], [0,0,0,0,1], [1,1,1,1,0]],
+                    4: [[0,0,0,1,0], [0,0,1,1,0], [0,1,0,1,0], [1,1,1,1,1], [0,0,0,1,0], [0,0,0,1,0]],
+                    3: [[0,1,1,1,0], [1,0,0,0,1], [0,0,1,1,0], [0,0,0,0,1], [1,0,0,0,1], [0,1,1,1,0]],
+                    2: [[0,1,1,1,0], [1,0,0,0,1], [0,0,0,1,0], [0,0,1,0,0], [0,1,0,0,0], [1,1,1,1,1]],
+                    1: [[0,0,1,0,0], [0,1,1,0,0], [0,0,1,0,0], [0,0,1,0,0], [0,0,1,0,0], [0,1,1,1,0]],
+                    0: [[0,1,1,1,0], [1,0,0,0,1], [1,0,0,0,1], [1,0,0,0,1], [1,0,0,0,1], [0,1,1,1,0]]
+                };
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Display the number centered
+                    const pattern = numbers[number];
+                    if (pattern) {
+                        for (let row = 0; row < 6; row++) {
+                            for (let col = 0; col < 5; col++) {
+                                const actualCol = col + 2; // Center the 5-wide number
+                                const ledIndex = ledMatrix[actualCol][row];
+                                if (ledIndex !== -1 && pattern[row][col] === 1) {
+                                    setLED(ledIndex, number === 0 ? 'red' : 'white');
+                                }
+                            }
+                        }
+                    }
+                    
+                    number--;
+                    if (number < 0) {
+                        // Flash red at zero
+                        number = 0;
+                        setTimeout(() => {
+                            leds.forEach((led, index) => {
+                                if (led) setLED(index, 'red');
+                            });
+                        }, 300);
+                        setTimeout(() => {
+                            clearLEDs();
+                            number = 9; // Reset
+                        }, 600);
+                    }
+                }, 600); // Faster countdown - completes in 6 seconds
+            },
+            
+            communicationStatic: function() {
+                let clearChance = 0.1;
+                
+                return setInterval(() => {
+                    // Random chance of clear signal
+                    if (Math.random() < clearChance) {
+                        // Show clear signal (primary color)
+                        const color = isFrontPSI ? 'blue' : 'green';
+                        leds.forEach((led, index) => {
+                            if (led) setLED(index, color);
+                        });
+                        clearChance = 0.05;
+                    } else {
+                        // Static
+                        leds.forEach((led, index) => {
+                            if (led && Math.random() > 0.5) {
+                                const colors = ['white', 'grey', 'dim-white', 'off'];
+                                setLED(index, colors[Math.floor(Math.random() * colors.length)]);
+                            }
+                        });
+                        clearChance += 0.02;
+                    }
+                }, 50);
+            },
+            
+            dualColorChase: function() {
+                let position1 = 0;
+                let position2 = 5;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Draw two colors chasing each other
+                    fillColumn(position1, 'red');
+                    fillColumn((position1 + 1) % 10, 'dim-red');
+                    
+                    fillColumn(position2, 'blue');
+                    fillColumn((position2 + 1) % 10, 'dim-blue');
+                    
+                    position1 = (position1 + 1) % 10;
+                    position2 = (position2 + 1) % 10;
+                }, 150);
+            },
+            
+            emergencyStrobe: function() {
+                let pattern = 0;
+                const strobePatterns = [
+                    [1,1,0,0,1,1,0,0,1,1,0,0,0,0,0,0], // Quick double flash
+                    [1,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0], // SOS pattern start
+                    [1,1,1,0,1,1,1,0,1,1,1,0,0,0,0,0], // SOS middle
+                    [1,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0]  // SOS end
+                ];
+                let patternIndex = 0;
+                let step = 0;
+                
+                return setInterval(() => {
+                    if (strobePatterns[patternIndex][step]) {
+                        leds.forEach((led, index) => {
+                            if (led) setLED(index, 'white');
+                        });
+                    } else {
+                        clearLEDs();
+                    }
+                    
+                    step++;
+                    if (step >= strobePatterns[patternIndex].length) {
+                        step = 0;
+                        patternIndex = (patternIndex + 1) % strobePatterns.length;
+                    }
+                }, 100);
+            },
+            
+            rippleEffect: function() {
+                let ripples = [];
+                
+                return setInterval(() => {
+                    // Fade existing LEDs
+                    leds.forEach((led, index) => {
+                        if (led) {
+                            const current = led.className;
+                            if (current.includes('white')) led.className = 'led grey';
+                            else if (current.includes('grey')) led.className = 'led dim-white';
+                            else if (current.includes('dim-white')) led.className = 'led off';
+                        }
+                    });
+                    
+                    // Add new ripple occasionally
+                    if (Math.random() < 0.1 && ripples.length < 3) {
+                        ripples.push({
+                            x: 4.5,
+                            y: 2.5,
+                            radius: 0
+                        });
+                    }
+                    
+                    // Update and draw ripples
+                    ripples = ripples.filter(ripple => {
+                        ripple.radius += 0.5;
+                        
+                        // Draw ripple ring
+                        for (let col = 0; col < 10; col++) {
+                            for (let row = 0; row < 6; row++) {
+                                const ledIndex = ledMatrix[col][row];
+                                if (ledIndex !== -1) {
+                                    const dx = col - ripple.x;
+                                    const dy = row - ripple.y;
+                                    const distance = Math.sqrt(dx * dx + dy * dy);
+                                    
+                                    if (Math.abs(distance - ripple.radius) < 0.7) {
+                                        setLED(ledIndex, 'white');
+                                    }
+                                }
+                            }
+                        }
+                        
+                        return ripple.radius < 8;
+                    });
+                }, 100);
+            },
+            
+            spinningSegments: function() {
+                let angle = 0;
+                const segments = 6;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    for (let col = 0; col < 10; col++) {
+                        for (let row = 0; row < 6; row++) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1) {
+                                // Calculate angle from center
+                                const dx = col - 4.5;
+                                const dy = row - 2.5;
+                                const ledAngle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
+                                
+                                // Determine which segment this LED belongs to
+                                const segmentSize = 360 / segments;
+                                const activeSegment = Math.floor((angle % 360) / segmentSize);
+                                const ledSegment = Math.floor(ledAngle / segmentSize);
+                                
+                                if (ledSegment === activeSegment || ledSegment === (activeSegment + 1) % segments) {
+                                    setLED(ledIndex, 'blue');
+                                } else if (ledSegment === (activeSegment + segments/2) % segments || 
+                                         ledSegment === (activeSegment + segments/2 + 1) % segments) {
+                                    setLED(ledIndex, 'orange');
+                                }
+                            }
+                        }
+                    }
+                    
+                    angle += 15;
+                }, 100);
+            },
+            
+            morseCode: function() {
+                // Morse code for "R2D2"
+                const morse = {
+                    'R': [1,0,1,1,1,0,1,0,0,0], // .-. 
+                    '2': [1,0,1,0,1,1,1,0,1,1,1,0,1,1,1,0,0,0], // ..---
+                    'D': [1,1,1,0,1,0,1,0,0,0]  // -..
+                };
+                const message = 'R2D2';
+                let charIndex = 0;
+                let morseIndex = 0;
+                
+                return setInterval(() => {
+                    const currentChar = message[charIndex];
+                    const morsePattern = morse[currentChar];
+                    
+                    if (morsePattern && morseIndex < morsePattern.length) {
+                        if (morsePattern[morseIndex]) {
+                            leds.forEach((led, index) => {
+                                if (led) setLED(index, 'white');
+                            });
+                        } else {
+                            clearLEDs();
+                        }
+                        
+                        morseIndex++;
+                    } else {
+                        clearLEDs();
+                        morseIndex = 0;
+                        charIndex = (charIndex + 1) % message.length;
+                    }
+                }, 150);
+            },
+            
+            plasmaEffect: function() {
+                let time = 0;
+                
+                return setInterval(() => {
+                    for (let col = 0; col < 10; col++) {
+                        for (let row = 0; row < 6; row++) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1) {
+                                // Generate plasma using sine waves
+                                const value1 = Math.sin((col * 0.5 + time * 0.02) * Math.PI);
+                                const value2 = Math.sin((row * 0.5 + time * 0.03) * Math.PI);
+                                const value3 = Math.sin((Math.sqrt((col-5)*(col-5) + (row-3)*(row-3)) + time * 0.01) * Math.PI);
+                                
+                                const combined = (value1 + value2 + value3) / 3;
+                                const normalized = (combined + 1) / 2;
+                                
+                                let color = 'off';
+                                if (normalized > 0.8) color = 'white';
+                                else if (normalized > 0.6) color = 'yellow';
+                                else if (normalized > 0.4) color = 'orange';
+                                else if (normalized > 0.2) color = 'red';
+                                
+                                setLED(ledIndex, color);
+                            }
+                        }
+                    }
+                    time++;
+                }, 50);
+            },
+            
+            dnaHelix: function() {
+                let offset = 0;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    for (let row = 0; row < 6; row++) {
+                        // Calculate helix positions
+                        const phase = (row + offset) * 0.8;
+                        const x1 = Math.sin(phase) * 3 + 4.5;
+                        const x2 = Math.sin(phase + Math.PI) * 3 + 4.5;
+                        
+                        // Draw the two strands
+                        const col1 = Math.round(x1);
+                        const col2 = Math.round(x2);
+                        
+                        if (col1 >= 0 && col1 < 10) {
+                            const led1 = ledMatrix[col1][row];
+                            if (led1 !== -1) setLED(led1, 'blue');
+                        }
+                        
+                        if (col2 >= 0 && col2 < 10) {
+                            const led2 = ledMatrix[col2][row];
+                            if (led2 !== -1) setLED(led2, 'red');
+                        }
+                        
+                        // Draw connections between strands
+                        if (row % 2 === 0) {
+                            const midCol = Math.round((x1 + x2) / 2);
+                            if (midCol >= 0 && midCol < 10) {
+                                const midLed = ledMatrix[midCol][row];
+                                if (midLed !== -1) setLED(midLed, 'white');
+                            }
+                        }
+                    }
+                    
+                    offset += 0.2;
+                }, 100);
+            },
+            
+            loadingBar: function() {
+                let progress = 0;
+                let direction = 1;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Draw loading bar frame
+                    for (let col = 0; col < 10; col++) {
+                        // Top and bottom borders
+                        const topLed = ledMatrix[col][1];
+                        const bottomLed = ledMatrix[col][4];
+                        if (topLed !== -1) setLED(topLed, 'dim-white');
+                        if (bottomLed !== -1) setLED(bottomLed, 'dim-white');
+                    }
+                    
+                    // Side borders
+                    for (let row = 1; row <= 4; row++) {
+                        const leftLed = ledMatrix[1][row];
+                        const rightLed = ledMatrix[8][row];
+                        if (leftLed !== -1) setLED(leftLed, 'dim-white');
+                        if (rightLed !== -1) setLED(rightLed, 'dim-white');
+                    }
+                    
+                    // Fill progress
+                    const fillCols = Math.floor(progress * 6 / 100);
+                    for (let col = 2; col < 2 + fillCols; col++) {
+                        for (let row = 2; row <= 3; row++) {
+                            const led = ledMatrix[col][row];
+                            if (led !== -1) {
+                                const color = progress < 33 ? 'red' : progress < 66 ? 'yellow' : 'green';
+                                setLED(led, color);
+                            }
+                        }
+                    }
+                    
+                    progress += direction * 5;
+                    if (progress >= 100) {
+                        progress = 100;
+                        direction = -1;
+                    } else if (progress <= 0) {
+                        progress = 0;
+                        direction = 1;
+                    }
+                }, 100);
+            },
+            
+            theaterChase: function() {
+                let step = 0;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    leds.forEach((led, index) => {
+                        if (led && index % 3 === step) {
+                            setLED(index, 'yellow');
+                        }
+                    });
+                    
+                    step = (step + 1) % 3;
+                }, 150);
+            },
+            
+            starField: function() {
+                const stars = [];
+                
+                // Initialize some stars
+                for (let i = 0; i < 15; i++) {
+                    stars.push({
+                        led: Math.floor(Math.random() * 48),
+                        brightness: Math.random(),
+                        speed: 0.01 + Math.random() * 0.02
+                    });
+                }
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    stars.forEach(star => {
+                        // Twinkle effect
+                        star.brightness += star.speed;
+                        if (star.brightness > 1) {
+                            star.brightness = 1;
+                            star.speed = -star.speed;
+                        } else if (star.brightness < 0) {
+                            star.brightness = 0;
+                            star.speed = -star.speed;
+                            star.led = Math.floor(Math.random() * 48);
+                        }
+                        
+                        if (leds[star.led]) {
+                            const color = star.brightness > 0.7 ? 'white' : 
+                                         star.brightness > 0.3 ? 'grey' : 'dim-white';
+                            setLED(star.led, color);
+                        }
+                    });
+                }, 50);
+            },
+            
+            warpSpeed: function() {
+                const stars = [];
+                for (let i = 0; i < 48; i++) {
+                    stars.push({
+                        led: i,
+                        speed: Math.random() * 0.5 + 0.5,
+                        brightness: 0
+                    });
+                }
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    stars.forEach(star => {
+                        star.brightness += star.speed * 0.1;
+                        
+                        if (star.brightness > 1) {
+                            star.brightness = 0;
+                            star.speed = Math.random() * 0.5 + 0.5;
+                        }
+                        
+                        if (leds[star.led]) {
+                            const col = Math.floor(star.led / 6);
+                            const distFromCenter = Math.abs(col - 4.5);
+                            const brightness = star.brightness * (1 - distFromCenter / 5);
+                            
+                            if (brightness > 0.6) setLED(star.led, 'white');
+                            else if (brightness > 0.3) setLED(star.led, 'blue');
+                            else if (brightness > 0.1) setLED(star.led, 'dim-blue');
+                        }
+                    });
+                }, 30);
+            },
+            
+            heartbeat: function() {
+                let phase = 0;
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Calculate heartbeat rhythm (double beat)
+                    const beat = Math.sin(phase) * 0.5 + 0.5;
+                    const beat2 = Math.sin(phase + 0.3) * 0.5 + 0.5;
+                    const intensity = Math.max(beat, beat2);
+                    
+                    // Draw expanding/contracting circle
+                    const radius = 1 + intensity * 2;
+                    
+                    for (let col = 0; col < 10; col++) {
+                        for (let row = 0; row < 6; row++) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1) {
+                                const dx = col - 4.5;
+                                const dy = row - 2.5;
+                                const distance = Math.sqrt(dx * dx + dy * dy);
+                                
+                                if (distance < radius) {
+                                    const fade = 1 - (distance / radius);
+                                    if (fade > 0.7) setLED(ledIndex, 'red');
+                                    else if (fade > 0.3) setLED(ledIndex, 'dim-red');
+                                }
+                            }
+                        }
+                    }
+                    
+                    phase += 0.15;
+                }, 50);
+            },
+            
+            pendulum: function() {
+                let angle = Math.PI / 4; // Start at 45 degrees
+                let velocity = 0;
+                const gravity = 0.08; // Increased from 0.02
+                const damping = 0.98; // Reduced damping for longer swings
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Physics simulation
+                    const acceleration = -gravity * Math.sin(angle);
+                    velocity += acceleration;
+                    velocity *= damping;
+                    angle += velocity;
+                    
+                    // Draw pendulum
+                    for (let row = 0; row < 6; row++) {
+                        const x = 4.5 + Math.sin(angle) * (row + 1);
+                        const col = Math.round(x);
+                        
+                        if (col >= 0 && col < 10) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1) {
+                                if (row === 5) setLED(ledIndex, 'yellow'); // Bob
+                                else setLED(ledIndex, 'grey'); // String
+                            }
+                        }
+                    }
+                    
+                    // Add energy periodically to demonstrate full swings
+                    if (Math.abs(velocity) < 0.01 || Math.random() < 0.02) {
+                        velocity += (Math.random() - 0.5) * 0.2;
+                    }
+                }, 30); // Faster update rate
+            },
+            
+            simonSays: function() {
+                const sequence = [];
+                const colors = ['red', 'green', 'blue', 'yellow'];
+                const quadrants = [
+                    {cols: [0,1,2,3,4], rows: [0,1,2]},     // Top left
+                    {cols: [5,6,7,8,9], rows: [0,1,2]},     // Top right
+                    {cols: [0,1,2,3,4], rows: [3,4,5]},     // Bottom left
+                    {cols: [5,6,7,8,9], rows: [3,4,5]}      // Bottom right
+                ];
+                let showing = true;
+                let currentIndex = 0;
+                
+                // Add to sequence every 1.5 seconds
+                setInterval(() => {
+                    if (sequence.length < 8) {
+                        sequence.push(Math.floor(Math.random() * 4));
+                    }
+                }, 1500);
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    if (showing && currentIndex < sequence.length) {
+                        const quad = sequence[currentIndex];
+                        const color = colors[quad];
+                        
+                        // Light up quadrant
+                        quadrants[quad].cols.forEach(col => {
+                            quadrants[quad].rows.forEach(row => {
+                                const ledIndex = ledMatrix[col][row];
+                                if (ledIndex !== -1) setLED(ledIndex, color);
+                            });
+                        });
+                    }
+                    
+                    // Toggle showing
+                    showing = !showing;
+                    if (!showing) {
+                        currentIndex++;
+                        if (currentIndex >= sequence.length) {
+                            currentIndex = 0;
+                        }
+                    }
+                }, 300); // Faster display rate
+            },
+            
+            snakeGame: function() {
+                let snake = [{x: 5, y: 3}, {x: 4, y: 3}, {x: 3, y: 3}];
+                let direction = {x: 1, y: 0};
+                let food = {x: 8, y: 2};
+                let frame = 0;
+                let growthPending = 0;
+                
+                // Simple AI to move towards food
+                function getSmartDirection() {
+                    const head = snake[0];
+                    const possibleDirs = [
+                        {x: 1, y: 0}, {x: -1, y: 0}, 
+                        {x: 0, y: 1}, {x: 0, y: -1}
+                    ];
+                    
+                    // Filter out directions that would cause immediate collision
+                    const validDirs = possibleDirs.filter(dir => {
+                        const newX = head.x + dir.x;
+                        const newY = head.y + dir.y;
+                        
+                        // Check boundaries
+                        if (newX < 0 || newX >= 10 || newY < 0 || newY >= 6) return false;
+                        
+                        // Don't go backwards
+                        if (dir.x === -direction.x && dir.y === -direction.y) return false;
+                        
+                        // Don't hit ourselves
+                        return !snake.some(seg => seg.x === newX && seg.y === newY);
+                    });
+                    
+                    if (validDirs.length === 0) return direction; // No valid moves
+                    
+                    // Choose direction that gets us closer to food
+                    let bestDir = validDirs[0];
+                    let bestDistance = Infinity;
+                    
+                    validDirs.forEach(dir => {
+                        const newX = head.x + dir.x;
+                        const newY = head.y + dir.y;
+                        
+                        // Calculate simple distance to food (no wrapping)
+                        const dx = Math.abs(newX - food.x);
+                        const dy = Math.abs(newY - food.y);
+                        const distance = dx + dy;
+                        
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            bestDir = dir;
+                        }
+                    });
+                    
+                    return bestDir;
+                }
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Move snake every 3 frames (faster for better gameplay)
+                    if (frame % 3 === 0) {
+                        // Get smart direction 80% of the time
+                        if (Math.random() < 0.8) {
+                            direction = getSmartDirection();
+                        }
+                        
+                        const head = {
+                            x: snake[0].x + direction.x,
+                            y: snake[0].y + direction.y
+                        };
+                        
+                        // Check if hit boundary - if so, reset
+                        if (head.x < 0 || head.x >= 10 || head.y < 0 || head.y >= 6) {
+                            snake = [{x: 5, y: 3}, {x: 4, y: 3}, {x: 3, y: 3}];
+                            direction = {x: 1, y: 0};
+                            return;
+                        }
+                        
+                        snake.unshift(head);
+                        
+                        // Check food collision
+                        if (head.x === food.x && head.y === food.y) {
+                            growthPending = 2; // Grow by 2 segments
+                            
+                            // Place new food away from snake
+                            let newFood;
+                            do {
+                                newFood = {
+                                    x: Math.floor(Math.random() * 10),
+                                    y: Math.floor(Math.random() * 6)
+                                };
+                            } while (snake.some(seg => seg.x === newFood.x && seg.y === newFood.y));
+                            food = newFood;
+                        }
+                        
+                        // Handle growth or normal movement
+                        if (growthPending > 0) {
+                            growthPending--;
+                            // Don't remove tail when growing
+                        } else {
+                            snake.pop();
+                        }
+                        
+                        // Reset if snake gets too long (victory lap)
+                        if (snake.length > 20) {
+                            // Flash victory
+                            for (let i = 0; i < 3; i++) {
+                                setTimeout(() => {
+                                    leds.forEach((led, index) => {
+                                        if (led) setLED(index, i % 2 ? 'green' : 'off');
+                                    });
+                                }, i * 200);
+                            }
+                            // Reset snake
+                            setTimeout(() => {
+                                snake = [{x: 5, y: 3}, {x: 4, y: 3}, {x: 3, y: 3}];
+                                direction = {x: 1, y: 0};
+                            }, 600);
+                        }
+                    }
+                    
+                    // Draw snake with gradient
+                    snake.forEach((segment, i) => {
+                        const ledIndex = ledMatrix[segment.x][segment.y];
+                        if (ledIndex !== -1) {
+                            if (i === 0) {
+                                setLED(ledIndex, 'green'); // Head
+                            } else if (i < snake.length / 3) {
+                                setLED(ledIndex, 'white'); // Body
+                            } else if (i < 2 * snake.length / 3) {
+                                setLED(ledIndex, 'grey'); // Mid body
+                            } else {
+                                setLED(ledIndex, 'dim-white'); // Tail
+                            }
+                        }
+                    });
+                    
+                    // Draw food (pulsing)
+                    const pulse = Math.sin(frame * 0.3) > 0;
+                    const foodLed = ledMatrix[food.x][food.y];
+                    if (foodLed !== -1) setLED(foodLed, pulse ? 'red' : 'yellow');
+                    
+                    frame++;
+                }, 100);
+            },
+            
+            audioSpectrum: function() {
+                let frequencies = new Array(10).fill(0);
+                
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    // Simulate audio frequencies
+                    frequencies = frequencies.map((freq, i) => {
+                        const change = (Math.random() - 0.5) * 2;
+                        const newFreq = Math.max(0, Math.min(6, freq + change));
+                        // Bass frequencies (left) change slower
+                        return i < 3 ? freq * 0.9 + newFreq * 0.1 : newFreq;
+                    });
+                    
+                    // Draw spectrum
+                    frequencies.forEach((level, col) => {
+                        const height = Math.floor(level);
+                        for (let row = 5; row >= (6 - height); row--) {
+                            const ledIndex = ledMatrix[col][row];
+                            if (ledIndex !== -1) {
+                                let color = 'green';
+                                if (col < 3) color = 'red';        // Bass
+                                else if (col < 7) color = 'yellow'; // Mid
+                                else color = 'blue';                // Treble
+                                
+                                setLED(ledIndex, color);
+                            }
+                        }
+                    });
+                }, 100);
+            },
+            
+            clockDisplay: function() {
+                return setInterval(() => {
+                    clearLEDs();
+                    
+                    const now = new Date();
+                    const hours = now.getHours() % 12 || 12;
+                    const minutes = now.getMinutes();
+                    const seconds = now.getSeconds();
+                    
+                    // Hour hand
+                    const hourAngle = (hours + minutes / 60) * 30 - 90;
+                    const hourRad = hourAngle * Math.PI / 180;
+                    for (let r = 0; r < 2; r++) {
+                        const x = Math.round(4.5 + Math.cos(hourRad) * r);
+                        const y = Math.round(2.5 + Math.sin(hourRad) * r);
+                        if (x >= 0 && x < 10 && y >= 0 && y < 6) {
+                            const led = ledMatrix[x][y];
+                            if (led !== -1) setLED(led, 'red');
+                        }
+                    }
+                    
+                    // Minute hand
+                    const minAngle = minutes * 6 - 90;
+                    const minRad = minAngle * Math.PI / 180;
+                    for (let r = 0; r < 3; r++) {
+                        const x = Math.round(4.5 + Math.cos(minRad) * r);
+                        const y = Math.round(2.5 + Math.sin(minRad) * r);
+                        if (x >= 0 && x < 10 && y >= 0 && y < 6) {
+                            const led = ledMatrix[x][y];
+                            if (led !== -1) setLED(led, 'white');
+                        }
+                    }
+                    
+                    // Second indicator (blinking center)
+                    if (seconds % 2 === 0) {
+                        const centerLed = ledMatrix[4][2];
+                        if (centerLed !== -1) setLED(centerLed, 'yellow');
+                        const centerLed2 = ledMatrix[5][2];
+                        if (centerLed2 !== -1) setLED(centerLed2, 'yellow');
+                    }
+                }, 1000);
+            },
+            
+            particleExplosion: function() {
+                let particles = [];
+                
+                return setInterval(() => {
+                    // Fade existing
+                    leds.forEach((led, index) => {
+                        if (led) {
+                            const current = led.className;
+                            if (current.includes('white')) led.className = 'led yellow';
+                            else if (current.includes('yellow')) led.className = 'led orange';
+                            else if (current.includes('orange')) led.className = 'led red';
+                            else if (current.includes('red')) led.className = 'led dim-red';
+                            else led.className = 'led off';
+                        }
+                    });
+                    
+                    // Create explosion occasionally
+                    if (Math.random() < 0.05) {
+                        const cx = Math.random() * 10;
+                        const cy = Math.random() * 6;
+                        
+                        for (let i = 0; i < 20; i++) {
+                            const angle = Math.random() * Math.PI * 2;
+                            particles.push({
+                                x: cx,
+                                y: cy,
+                                vx: Math.cos(angle) * (0.2 + Math.random() * 0.3),
+                                vy: Math.sin(angle) * (0.2 + Math.random() * 0.3),
+                                life: 1
+                            });
+                        }
+                    }
+                    
+                    // Update particles
+                    particles = particles.filter(p => {
+                        p.x += p.vx;
+                        p.y += p.vy;
+                        p.vy += 0.02; // gravity
+                        p.life -= 0.05;
+                        
+                        if (p.x >= 0 && p.x < 10 && p.y >= 0 && p.y < 6 && p.life > 0) {
+                            const led = ledMatrix[Math.floor(p.x)][Math.floor(p.y)];
+                            if (led !== -1) setLED(led, 'white');
+                            return true;
+                        }
+                        return false;
+                    });
+                }, 50);
+            }
+        };
+        
+        // Control functions
+        function startAnimation(name) {
+            stopAnimation();
+            
+            const modeDescriptions = {
+                'off': 'Mode 0: All LEDs Off',
+                'swipe': 'Mode 1: Default Swipe Pattern',
+                'flash': 'Mode 2: Fast Flash (4 seconds)',
+                'alarm': 'Mode 3: Slow Flash/Alarm (4 seconds)',
+                'shortCircuit': 'Mode 4: Short Circuit Effect (10 seconds)',
+                'scream': 'Mode 5: Scream (same as Alarm)',
+                'leia': 'Mode 6: Leia Message (34 seconds)',
+                'iHeartU': 'Mode 7: I ❤ U Message (10 seconds)',
+                'radar': 'Mode 8: Quarter Panel Sweep (7 seconds)',
+                'heart': 'Mode 9: Heart (Front) / Pulse (Rear)',
+                'starWarsScroll': 'Mode 10: Star Wars Title Scroll (15 seconds)',
+                'march': 'Mode 11: Imperial March (47 seconds)',
+                'disco': 'Mode 12: Disco Ball (4 seconds)',
+                'discoForever': 'Mode 13: Disco Ball (Indefinite)',
+                'rebel': 'Mode 14: Rebel Alliance Symbol (5 seconds)',
+                'knightRider': 'Mode 15: Knight Rider Scanner (20 seconds)',
+                'testWhite': 'Mode 16: Test - All White (Indefinite)',
+                'redOn': 'Mode 17: All Red (Indefinite)',
+                'greenOn': 'Mode 18: All Green (Indefinite)',
+                'lightsaber': 'Mode 19: Lightsaber Battle',
+                'starWarsIntro': 'Mode 20: Star Wars Intro Text (10 seconds)',
+                'vuMeter': 'Mode 21: VU Meter (4 seconds)',
+                'vuMeterForever': 'Mode 92: VU Meter (Indefinite)',
+                // New animation ideas
+                'spiral': 'Idea: Spiral Pattern - LEDs light from center outward',
+                'radarSweep': 'Idea: Radar Sweep - Rotating scan line effect',
+                'breathingGlow': 'Idea: Breathing Glow - Smooth fade in/out',
+                'matrixRain': 'Idea: Matrix Rain - Digital rain effect',
+                'fireEffect': 'Idea: Fire Effect - Flickering flame simulation',
+                'rainbowWave': 'Idea: Rainbow Wave - Color gradient sweep',
+                'countdownTimer': 'Idea: Countdown Timer - Numbers 9 to 0',
+                'communicationStatic': 'Idea: Communication Static - Signal interference',
+                'dualColorChase': 'Idea: Dual Color Chase - Two colors racing',
+                'emergencyStrobe': 'Idea: Emergency Strobe - SOS pattern',
+                'rippleEffect': 'Idea: Ripple Effect - Water drop ripples',
+                'spinningSegments': 'Idea: Spinning Segments - Rotating pie slices',
+                'morseCode': 'Idea: Morse Code - R2D2 in morse',
+                'plasmaEffect': 'Idea: Plasma Effect - Animated plasma waves',
+                'dnaHelix': 'Idea: DNA Helix - Double helix rotation',
+                'loadingBar': 'Idea: Loading Bar - Progress indicator',
+                'theaterChase': 'Idea: Theater Chase - Classic marquee lights',
+                'starField': 'Idea: Star Field - Twinkling stars'
+            };
+            
+            document.getElementById('animationName').textContent = modeDescriptions[name] || name;
+            
+            if (animations[name]) {
+                currentAnimation = name;
+                animationInterval = animations[name]();
+                
+                // Update active button
+                document.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+                event.target.classList.add('active');
+            }
+        }
+        
+        function stopAnimation() {
+            if (animationInterval) {
+                clearInterval(animationInterval);
+                animationInterval = null;
+            }
+            clearLEDs();
+            document.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('animationName').textContent = 'Animation stopped';
+        }
+        
+        function setPSIType(type) {
+            isFrontPSI = (type === 'front');
+            document.getElementById('psiType').textContent = 
+                isFrontPSI ? 'Front PSI (Blue/Red)' : 'Rear PSI (Green/Yellow)';
+            
+            // Restart current animation if running
+            if (currentAnimation) {
+                const temp = currentAnimation;
+                stopAnimation();
+                // Small delay to ensure clean restart
+                setTimeout(() => {
+                    const buttons = document.querySelectorAll('button');
+                    buttons.forEach(btn => {
+                        if (btn.onclick && btn.onclick.toString().includes(temp)) {
+                            btn.click();
+                        }
+                    });
+                }, 100);
+            }
+        }
+        
+        // Function to reject an idea and move it to rejected section
+        function rejectIdea(animationId, buttonText) {
+            // Stop the animation if it's currently running
+            if (currentAnimation === animationId) {
+                stopAnimation();
+            }
+            
+            // Find the button container in the ideas section
+            const ideaControls = document.getElementById('ideaControls');
+            const containers = ideaControls.getElementsByClassName('idea-button-container');
+            
+            let containerToMove = null;
+            for (let container of containers) {
+                const button = container.querySelector('button');
+                if (button && button.onclick.toString().includes(animationId)) {
+                    containerToMove = container;
+                    break;
+                }
+            }
+            
+            if (containerToMove) {
+                // Remove the reject button
+                const rejectBtn = containerToMove.querySelector('.reject-button');
+                if (rejectBtn) {
+                    rejectBtn.remove();
+                }
+                
+                // Move to rejected section
+                const rejectedControls = document.getElementById('rejectedControls');
+                rejectedControls.appendChild(containerToMove);
+                
+                // Save to localStorage
+                const rejectedIds = JSON.parse(localStorage.getItem('rejectedPSIAnimations') || '[]');
+                if (!rejectedIds.includes(animationId)) {
+                    rejectedIds.push(animationId);
+                    localStorage.setItem('rejectedPSIAnimations', JSON.stringify(rejectedIds));
+                }
+            }
+        }
+        
+        // Function to reset all rejections
+        function resetRejections() {
+            localStorage.removeItem('rejectedPSIAnimations');
+            location.reload();
+        }
+        
+        // Function to load previously rejected ideas
+        function loadRejectedIdeas() {
+            const rejectedIds = JSON.parse(localStorage.getItem('rejectedPSIAnimations') || '[]');
+            
+            rejectedIds.forEach(animationId => {
+                // Find the button container in the ideas section
+                const ideaControls = document.getElementById('ideaControls');
+                const containers = ideaControls.getElementsByClassName('idea-button-container');
+                
+                let containerToMove = null;
+                for (let container of containers) {
+                    const button = container.querySelector('button');
+                    if (button && button.onclick.toString().includes(animationId)) {
+                        containerToMove = container;
+                        break;
+                    }
+                }
+                
+                if (containerToMove) {
+                    // Remove the reject button
+                    const rejectBtn = containerToMove.querySelector('.reject-button');
+                    if (rejectBtn) {
+                        rejectBtn.remove();
+                    }
+                    
+                    // Move to rejected section
+                    const rejectedControls = document.getElementById('rejectedControls');
+                    rejectedControls.appendChild(containerToMove);
+                }
+            });
+        }
+        
+        // Initialize on load
+        initializeLEDs();
+        loadRejectedIdeas();
+    </script>
+</body>
+</html>

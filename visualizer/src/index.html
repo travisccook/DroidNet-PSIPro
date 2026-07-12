@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSI Dual Visualizer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="left-panel">
+        <h1>PSI Visualizer</h1>
+        <div class="info" id="animationName">Select an animation</div>
+        
+        <div style="display: flex; flex-direction: column; gap: 20px; align-items: center;">
+            <div class="psi-container">
+                <div class="led-matrix" id="frontMatrix"></div>
+                <div class="psi-label">Front PSI</div>
+            </div>
+            
+            <div class="psi-container">
+                <div class="led-matrix" id="rearMatrix"></div>
+                <div class="psi-label">Rear PSI</div>
+            </div>
+        </div>
+        
+        <button id="stopButton" style="margin-top: 20px; background-color: #990000;">Stop Animation</button>
+    </div>
+    
+    <div class="right-panel">
+        <div class="control-section">
+            <h3>Core Animations</h3>
+            <div class="controls" id="coreControls"></div>
+        </div>
+        
+        <div class="control-section">
+            <h3>Pattern Animations</h3>
+            <div class="controls" id="patternControls"></div>
+        </div>
+        
+        <div class="control-section">
+            <h3>Visual Effects</h3>
+            <div class="controls" id="effectControls"></div>
+        </div>
+        
+        <div class="control-section">
+            <h3>Interactive</h3>
+            <div class="controls" id="interactiveControls"></div>
+        </div>
+        
+        <div class="control-section">
+            <h3>Ideas / Experiments</h3>
+            <div class="controls" id="ideaControls"></div>
+        </div>
+        
+        <div class="control-section rejected-section" style="margin-top: 40px;">
+            <h3>Rejected Ideas</h3>
+            <p style="color: #ff9999; font-size: 14px; margin: 10px 0;">These animation ideas were reviewed but not selected for implementation</p>
+            <button id="resetRejectionsBtn" style="background-color: #990000; margin-top: 10px;">Reset All Rejections</button>
+            <div class="controls" id="rejectedControls"></div>
+        </div>
+    </div>
+
+    <script src="bundle.js"></script>
+</body>
+</html>

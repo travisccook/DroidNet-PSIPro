@@ -1,0 +1,51 @@
+# PSIPro Clang-Tidy Configuration
+# SparkFun Pro Micro with FastLED
+
+InheritParentConfig: false
+
+# Enable checks suitable for Pro Micro/FastLED development
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-integer-division,
+  performance-*,
+  -performance-no-int-to-ptr,
+  -performance-avoid-endl,
+  readability-*,
+  -readability-magic-numbers,
+  -readability-uppercase-literal-suffix,
+  -readability-avoid-const-params-in-decls,
+  -readability-convert-member-functions-to-static,
+  -readability-isolate-declaration,
+  -readability-implicit-bool-conversion,
+  misc-*,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  modernize-use-nullptr
+
+# Pro Micro specific settings
+CheckOptions:
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: camelBack
+  - key: readability-identifier-naming.VariableCase
+    value: camelBack
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-function-size.LineThreshold
+    value: '70'
+  - key: readability-function-size.StatementThreshold
+    value: '35'
+  - key: readability-function-size.BranchThreshold
+    value: '12'
+
+# Suppress warnings in system headers and FastLED
+HeaderFilterRegex: '^((?!\.pio|Arduino|FastLED|SoftwareSerial).)*$'
+
+AnalyzeTemporaryDtors: false
+FormatStyle: file
