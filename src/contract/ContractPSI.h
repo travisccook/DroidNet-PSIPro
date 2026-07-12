@@ -106,6 +106,52 @@ inline void _renderComet() {
   }
 }
 
+// ---- chase (fx spatial helper; brightness rides the global 3P path only) ----
+inline void _renderChase() {
+  uint32_t elapsed = millis() - g_effectStartMs;
+  CRGB off(0, 0, 0);
+  for (int p = 0; p < COLUMNS; p++) {
+    bool lit = fxChaseLit(p, elapsed, g_speed);
+    fill_column((uint8_t)p, lit ? g_contractColor : off, 0);
+  }
+}
+
+// ---- wipe (fx spatial helper; brightness rides the global 3P path only) -----
+inline void _renderWipe() {
+  uint32_t elapsed = millis() - g_effectStartMs;
+  CRGB off(0, 0, 0);
+  for (int p = 0; p < COLUMNS; p++) {
+    bool lit = fxWipeLit(p, elapsed, g_speed, COLUMNS);
+    fill_column((uint8_t)p, lit ? g_contractColor : off, 0);
+  }
+}
+
+// ---- gradient (fx hue helper; brightness rides the global 3P path only) -----
+inline void _renderGradient() {
+  uint32_t elapsed = millis() - g_effectStartMs;
+  for (int p = 0; p < COLUMNS; p++) {
+    RGB c = fxHsv2rgb(fxGradientHue(p, COLUMNS, 0, elapsed, g_speed), 255, 255);
+    fill_column((uint8_t)p, CRGB(c.r, c.g, c.b), 0);
+  }
+}
+
+// ---- colorcycle (fx hue helper; brightness rides the global 3P path only) ---
+inline void _renderColorcycle() {
+  uint32_t elapsed = millis() - g_effectStartMs;
+  RGB c = fxHsv2rgb(fxCycleHue(0, elapsed, g_speed), 255, 255);
+  allON(CRGB(c.r, c.g, c.b), true, 0);
+}
+
+// ---- twinkle (fx per-LED helper; brightness rides the global 3P path only) --
+inline void _renderTwinkle() {
+  uint32_t now = millis();
+  for (int i = 0; i < NUM_LEDS; i++) {
+    uint8_t tb = fxTwinkleBright(i, now, g_speed);
+    leds[i] = CRGB((g_contractColor.r * tb) / 255, (g_contractColor.g * tb) / 255, (g_contractColor.b * tb) / 255);
+  }
+  FastLED.show(brightness());
+}
+
 // ---- strobe-capped flash toggle (reuses allON/allOFF; enforces < ~3 Hz) -----
 static inline void _renderFlash(const CRGB& c, uint16_t delayMs) {
   uint32_t half = STROBE_MIN_STATE_MS;
@@ -134,6 +180,11 @@ inline void runContractAnim() {
     case CE_RAINBOW: _renderRainbow(d);                             break;
     case CE_SCAN:    scanCol(d, 0, g_contractColor, true);          break;
     case CE_COMET:   _renderComet();                                break;
+    case CE_CHASE:   _renderChase();                                break;
+    case CE_WIPE:    _renderWipe();                                 break;
+    case CE_GRADIENT:_renderGradient();                             break;
+    case CE_COLORCYCLE: _renderColorcycle();                        break;
+    case CE_TWINKLE: _renderTwinkle();                              break;
     case CE_SPARKLE: DiscoBall(d, 0, 3, g_contractColor, 0);        break;
     case CE_METER:   VUMeter(d, 0, 0);                              break;  // level[] fed by verb L
     case CE_NATIVE:  runPattern(g_nativeCode);                      break;
