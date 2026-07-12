@@ -16,6 +16,7 @@ int main() {
     "!P*A:i=flash,c=ff0000,s=200",
     "!P*A:i=cylon,c=f97316",
     "!P*A:i=scan,c=00aaff,s=180",
+    "!P*A:i=comet,c=3B82F6,s=200",
     "!P*A:i=sparkle,c=ffffff",
     "!P*A:i=rainbow",
     "!P*A:i=meter",

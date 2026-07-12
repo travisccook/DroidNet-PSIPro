@@ -95,6 +95,17 @@ static inline void _renderRainbow(uint16_t delayMs) {
   FastLED.show(brightness());
 }
 
+// ---- comet (fx spatial helpers; brightness rides the global 3P path only) ---
+inline void _renderComet() {
+  uint32_t elapsed = millis() - g_effectStartMs;
+  int head = fxHead(elapsed, g_speed, COLUMNS);
+  for (int p = 0; p < COLUMNS; p++) {
+    uint8_t cb = fxCometBright(p, head, COLUMNS);
+    CRGB c(( g_contractColor.r * cb) / 255, (g_contractColor.g * cb) / 255, (g_contractColor.b * cb) / 255);
+    fill_column((uint8_t)p, c, 0);
+  }
+}
+
 // ---- strobe-capped flash toggle (reuses allON/allOFF; enforces < ~3 Hz) -----
 static inline void _renderFlash(const CRGB& c, uint16_t delayMs) {
   uint32_t half = STROBE_MIN_STATE_MS;
@@ -122,6 +133,7 @@ inline void runContractAnim() {
     case CE_PULSE:   allON(g_contractColor, true, 0);                  break;  // envelope pumps brightness
     case CE_RAINBOW: _renderRainbow(d);                             break;
     case CE_SCAN:    scanCol(d, 0, g_contractColor, true);          break;
+    case CE_COMET:   _renderComet();                                break;
     case CE_SPARKLE: DiscoBall(d, 0, 3, g_contractColor, 0);        break;
     case CE_METER:   VUMeter(d, 0, 0);                              break;  // level[] fed by verb L
     case CE_NATIVE:  runPattern(g_nativeCode);                      break;

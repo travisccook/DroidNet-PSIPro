@@ -6,6 +6,7 @@
 //   scanCol(unsigned long,int,CRGB,bool)           main.cpp:727
 //   DiscoBall(unsigned long,int,int,CRGB,unsigned long)  main.cpp:1759
 //   VUMeter(unsigned long,uint8_t,unsigned long)   main.cpp:1677
+//   fill_column(uint8_t,CRGB,uint8_t=0)            main.cpp:517
 //   runPattern(int)                                main.cpp:2116
 //   uint8_t brightness()                           main.cpp:2593
 //   leds[NUM_LEDS] CRGB / level[10] int            main.cpp:296 / 327
@@ -65,5 +66,6 @@ inline void allOFF(bool, unsigned long = 0) {}
 inline void scanCol(unsigned long, int, CRGB, bool) {}
 inline void DiscoBall(unsigned long, int, int, CRGB, unsigned long) {}
 inline void VUMeter(unsigned long, uint8_t, unsigned long) {}
+inline void fill_column(uint8_t, CRGB, uint8_t = 0) {}
 inline void runPattern(int) {}
 inline uint8_t brightness() { return useTempInternalBrightness ? tempGlobalBrightnessValue : 20; }
