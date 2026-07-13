@@ -189,6 +189,24 @@ inline uint8_t beatAccentAmount(uint8_t am, const BeatPos& bp, uint8_t beatMod, 
   return (uint8_t)amt;
 }
 
+// Beat-pumped brightness — THE shared envelope. All three forks (Logics/PSI/HPs)
+// call this so an identical cue renders at an identical level on every board.
+//
+// Semantics (spec §3 "accent depth is scaled by the look's m"):
+//   * b= (bright) is the CEILING. The render never exceeds it, and hits it exactly
+//     at full accent (amt=255).
+//   * m= (beatMod) is the DEPTH knob: between accents the level dips to the floor
+//     bright*(255-m)/255, then the accent rides it back up toward bright.
+//     m=0 => no pump at all (returns bright verbatim, for any amt).
+//   * amt = this frame's accent envelope from beatAccentAmount() (already m-scaled,
+//     so a shallow m both raises the floor and softens the ride — one knob, one feel).
+// AVR-safe: no float, every 8x8 product is widened to uint16_t first (int is 16-bit
+// on AVR), and fl <= bright always, so (bright - fl) can never go negative.
+inline uint8_t envBright(uint8_t bright, uint8_t beatMod, uint8_t amt) {
+  uint8_t fl = (uint8_t)(((uint16_t)bright * (uint16_t)(255u - (uint16_t)beatMod)) / 255u);
+  return (uint8_t)((uint16_t)fl + ((uint16_t)amt * (uint16_t)(bright - fl)) / 255u);
+}
+
 // A per-unit section-schedule entry (Phase-2 score, built from verb A + at=).
 struct ScoreEntry {
   int32_t        atBeat = 0;

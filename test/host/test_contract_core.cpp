@@ -101,6 +101,60 @@ static void test_accent_envelope() {
   CHECK(beatAccentAmount(3, down, 255, 1.0f) > 200);   // build at full progress -> strong
 }
 
+// envBright() is THE shared beat-pump envelope — all three forks (Logics/PSI/HPs)
+// render through it, so these vectors are the cross-board level contract. Pinning
+// them here is what stops one board drifting back to its own ad-hoc math (the
+// RSeries fork used to hardcode a 40% floor: b=200,m=64 rendered 80..110 while the
+// other two rendered ~149..161 — the SAME cue at HALF the level).
+static void test_env_bright() {
+  // beatMod = 0 -> pump disabled: bright passes through verbatim, for ANY amt.
+  CHECK(envBright(200, 0, 0) == 200);
+  CHECK(envBright(200, 0, 128) == 200);
+  CHECK(envBright(200, 0, 255) == 200);
+
+  // amt = 255 (full accent) -> reaches EXACTLY bright, at every depth. b= is the
+  // ceiling and it is reachable (the old RSeries 40%-floor math could not do this
+  // at any m<255 given amt is itself m-scaled).
+  CHECK(envBright(200, 64, 255) == 200);
+  CHECK(envBright(200, 128, 255) == 200);
+  CHECK(envBright(200, 255, 255) == 200);
+  CHECK(envBright(255, 255, 255) == 255);
+
+  // m = depth knob: amt=0 is the between-beat floor = bright*(255-m)/255.
+  CHECK(envBright(200, 64, 0) == 149);    // ~25% dip
+  CHECK(envBright(200, 128, 0) == 99);    // ~50% dip
+  CHECK(envBright(200, 255, 0) == 0);     // full dip to black between accents
+
+  // mid-accent ride-back (exact bytes from the real integer implementation).
+  CHECK(envBright(200, 64, 64) == 161);   // the (b=200,m=64) on-beat peak: am=2 amt maxes at m
+  CHECK(envBright(200, 128, 128) == 149);
+  CHECK(envBright(200, 255, 128) == 100);
+  CHECK(envBright(100, 32, 16) == 87);
+  CHECK(envBright(255, 64, 64) == 207);
+
+  // bright = 0 stays black regardless.
+  CHECK(envBright(0, 128, 255) == 0);
+
+  // Invariants across the whole (bright, beatMod, amt) space: never exceeds the
+  // b= ceiling, never decreases as the accent rises, amt=255 lands on b=, m=0 is
+  // a no-op. Guards the AVR-safe integer math against overflow/truncation regressions.
+  int violations = 0;
+  for (int b = 0; b < 256; b++) {
+    for (int m = 0; m < 256; m++) {
+      uint8_t prev = 0;
+      for (int a = 0; a < 256; a++) {
+        uint8_t v = envBright((uint8_t)b, (uint8_t)m, (uint8_t)a);
+        if (v > b) violations++;               // ceiling
+        if (a && v < prev) violations++;       // monotonic in amt
+        prev = v;
+      }
+      if (envBright((uint8_t)b, (uint8_t)m, 255) != (uint8_t)b) violations++;  // full accent == b
+      if (envBright((uint8_t)b, 0, (uint8_t)m) != (uint8_t)b) violations++;    // m=0 no-op
+    }
+  }
+  CHECK(violations == 0);
+}
+
 static void test_score() {
   ScoreEntry s[8]; int n = 0, cap = 8;
   ScoreEntry a; a.atBeat = 0;  a.effect = CE_SOLID;
@@ -217,6 +271,7 @@ int main() {
   test_params();
   test_beat_clock();
   test_accent_envelope();
+  test_env_bright();
   test_score();
   test_fx_helpers();
   test_fx_spatial_helpers();

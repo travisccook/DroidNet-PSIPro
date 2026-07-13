@@ -342,13 +342,17 @@ inline bool contractLoopTick() {
     }
   }
 
-  // beat accent envelope -> volatile brightness pump (never EEPROM)
+  // beat accent envelope -> volatile brightness pump (never EEPROM).
+  // Level math lives in contract_core's envBright() — the SHARED envelope all three
+  // boards render through (b= is the ceiling, m= is the dip depth). Do not reintroduce
+  // a board-local floor here: it desyncs the PSIs from the Logics/HPs on every cue.
+  // am=0 (an explicit "calm" section) means NO pump — without that guard the accent
+  // is always 0 and the board would sit parked at the dip floor (parity w/ RSeries/Flthy).
   uint8_t effBright = g_bright;
-  if (g_clock.running && g_beatMod) {
+  if (g_clock.running && g_beatMod && g_activeAccentMode) {
     BeatPos bp = beatPosAt(g_clock, now);
     uint8_t env = beatAccentAmount(g_activeAccentMode, bp, g_beatMod, 0.0f);
-    uint16_t depth = (uint16_t)g_bright * g_beatMod / 255;          // max dip between beats
-    effBright = (uint8_t)(g_bright - (depth * (uint16_t)(255 - env)) / 255);
+    effBright = envBright(g_bright, g_beatMod, env);
   }
   useTempInternalBrightness = true;                    // 3P volatile path only
   tempGlobalBrightnessValue = _clampBright(effBright);
