@@ -60,9 +60,7 @@ community. To be plain about where we stand:
 - The PSI Pro firmware is (c) Neil Hutchison and contributors. It is theirs. Not ours.
 - This is a hobby project. It is entirely non-commercial. Nothing here is sold, and nothing here ever
   will be.
-- **We have contacted Neil** to ask permission for this fork to exist, and to invite him to add a
-  license of his choosing to the upstream project — whatever license he wants, or none at all. That
-  is his call and nobody else's.
+- Whether to license the upstream project, and how, is Neil's call and nobody else's.
 - **If Neil, or Krijn, or Malcolm, or Skelmir would rather this did not exist, we will take it down
   immediately and without argument.** Open an issue on this repo, or reach the owner any way you
   like, and it is gone. No discussion needed.
