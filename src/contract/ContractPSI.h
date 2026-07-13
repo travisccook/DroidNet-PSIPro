@@ -62,6 +62,10 @@ static uint8_t    g_activeAccentMode = 2;
 static ScoreEntry g_score[8];
 static int        g_scoreCount = 0;
 static int        g_scoreIndex = -1;
+// beat span of the active score section, for the am=3 ("build") ramp. Set on every
+// section switch; only read while g_scoreIndex >= 0 (parity w/ ContractLogics.h:80-81).
+static int32_t    g_sectionStart = 0;
+static int32_t    g_sectionEnd   = 0;
 
 // ---- small local helpers (no Arduino map/min dependency) --------------------
 static inline uint8_t _clampBright(int v) {
@@ -342,6 +346,10 @@ inline bool contractLoopTick() {
     if (idx >= 0 && idx != g_scoreIndex) {
       g_scoreIndex = idx;
       const ScoreEntry& e = g_score[idx];
+      // section span drives the am=3 build ramp; the last section has no successor, so
+      // give it a long tail rather than a zero-width span (parity w/ ContractLogics.h:308-309).
+      g_sectionStart = e.atBeat;
+      g_sectionEnd   = (idx + 1 < g_scoreCount) ? g_score[idx + 1].atBeat : (e.atBeat + 9999);
       g_effect = e.effect;
       if (e.effect == CE_NATIVE && e.nativeCode >= 0) g_nativeCode = e.nativeCode;  // scored native section -> authored code, not stale g_nativeCode
       g_contractColor = _scaled(e.color);
@@ -361,7 +369,15 @@ inline bool contractLoopTick() {
   uint8_t effBright = g_bright;
   if (g_clock.running && g_beatMod && g_activeAccentMode) {
     BeatPos bp = beatPosAt(g_clock, now);
-    uint8_t env = beatAccentAmount(g_activeAccentMode, bp, g_beatMod, 0.0f);
+    // am=3 ("build") scales the accent by progress THROUGH THE SECTION. Passing a
+    // constant 0 here made every build section return an accent of exactly 0 — i.e. the
+    // board parked at the envelope floor for the section's whole length (fully black at
+    // m=255). Derive real progress from the score span; beatAccentAmount clamps to 0..1
+    // and ignores it for every other accent mode.
+    float prog = 0.0f;
+    if (g_scoreIndex >= 0 && g_sectionEnd > g_sectionStart)
+      prog = (float)(bp.beatIndex - g_sectionStart) / (float)(g_sectionEnd - g_sectionStart);
+    uint8_t env = beatAccentAmount(g_activeAccentMode, bp, g_beatMod, prog);
     effBright = envBright(g_bright, g_beatMod, env);
   }
   useTempInternalBrightness = true;                    // 3P volatile path only

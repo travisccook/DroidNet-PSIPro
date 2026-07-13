@@ -149,6 +149,41 @@ int main() {
     parseContract("!**X");
   }
 
-  printf("ContractPSI.h type-check + score-native/latch/score-clear guards OK\n");
+  // behavioral guard (I5): an am=3 ("build") section must actually RAMP.
+  // sectionProgress was hardcoded to 0.0f, so beatAccentAmount() returned exactly 0 for
+  // every build frame and the board sat at the envelope floor — fully black at m=255 —
+  // for the entire section. Score two 16-beat sections at 120 BPM and sample the accent
+  // early vs. late in the first one.
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=0000ff,d=0");          // arm, no deadline
+    parseContract("!P*A:i=solid,c=0000ff,at=0,am=3,m=255");
+    parseContract("!P*A:i=solid,c=00ff00,at=16,am=3,m=255");
+    uint32_t t0 = _mock_millis;
+    parseContract("!**C:bpm=120,bpb=4,beat=0");          // anchor = now, 500 ms/beat
+
+    // sample on a downbeat (barPos 0, phase ~0) at 1/4 and 3/4 through the section
+    _mock_millis = t0 + 4 * 500 + 10;                    // beat 4 of 0..16 -> progress 0.25
+    contractLoopTick();
+    uint8_t early = tempGlobalBrightnessValue;
+    _mock_millis = t0 + 12 * 500 + 10;                   // beat 12 of 0..16 -> progress 0.75
+    contractLoopTick();
+    uint8_t late = tempGlobalBrightnessValue;
+
+    if (early == 0 || late == 0) {                       // the bug: floor at m=255 is black
+      printf("FAIL: am=3 build section is parked at the envelope floor "
+             "(early=%u late=%u) — sectionProgress is not being derived\n",
+             (unsigned)early, (unsigned)late);
+      return 1;
+    }
+    if (late <= early) {
+      printf("FAIL: am=3 build does not ramp with section progress (early=%u late=%u)\n",
+             (unsigned)early, (unsigned)late);
+      return 1;
+    }
+    parseContract("!**X");
+  }
+
+  printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp guards OK\n");
   return 0;
 }
