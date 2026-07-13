@@ -79,7 +79,16 @@ inline ContractEffect _effectFromName(const char* s, size_t len, int& nativeCode
   return CE_NONE;
 }
 // One key=value token. k/kl and v/vl are slices into the (null-terminated) source
-// buffer; numeric parses (atoi/strtoul) read v up to the next ',' or '\0'.
+// buffer; numeric parses (atoi/strtol/strtoul) read v up to the next ',' or '\0'.
+//
+// AVR NOTE: `int` is 16 BITS on the ATmega32U4 (PSI) and ATmega2560 (Flthy), so atoi()
+// returns a 16-bit value there. The two int32_t beat fields (at=, beat=) must therefore
+// use strtol() — a `long` is 32-bit on every target we ship — or any beat index past
+// 32767 wraps NEGATIVE before it is ever stored (a ~4.5 min show at 120 BPM only reaches
+// beat ~540, but `beat=` is an absolute re-anchor and a long set could exceed it, and a
+// negative atBeat sorts to the front of the score and fires the section immediately).
+// The uint8_t-clamped params (s/b/m/am/v/bpb) are unaffected by the narrower int, and
+// d=/ph= already use strtoul for the same reason.
 inline void _applyParam(ContractParams& pr, const char* k, size_t kl, const char* v, size_t vl) {
   auto key = [&](const char* s) { return kl == strlen(s) && strncmp(k, s, kl) == 0; };
   if (key("i")) {
@@ -91,14 +100,14 @@ inline void _applyParam(ContractParams& pr, const char* k, size_t kl, const char
   else if (key("d"))    { pr.hasDur = true;     pr.durMs = (uint32_t)strtoul(v, nullptr, 10); }
   else if (key("b"))    { pr.hasBright = true;  pr.bright = (uint8_t)atoi(v); }
   else if (key("m"))    { pr.hasBeatMod = true; pr.beatMod = (uint8_t)atoi(v); }
-  else if (key("at"))   { pr.hasAt = true;      pr.atBeat = atoi(v); }
+  else if (key("at"))   { pr.hasAt = true;      pr.atBeat = (int32_t)strtol(v, nullptr, 10); }
   else if (key("am"))   { pr.hasAm = true;      pr.accentMode = (uint8_t)atoi(v); }
   else if (key("v"))    { pr.hasLevel = true;   pr.level = (uint8_t)atoi(v);
                           if (vl > 0 && (v[0] == 's' || v[0] == 'i')) pr.mode = v[0]; }
   else if (key("bpm"))  { pr.hasBpm = true;     pr.bpm = (uint16_t)atoi(v); }
   else if (key("ph"))   { pr.hasPh = true;      pr.phMs = (uint32_t)strtoul(v, nullptr, 10); }
   else if (key("bpb"))  { pr.hasBpb = true;     pr.bpb = (uint8_t)atoi(v); }
-  else if (key("beat")) { pr.hasBeat = true;    pr.beatAnchor = atoi(v); }
+  else if (key("beat")) { pr.hasBeat = true;    pr.beatAnchor = (int32_t)strtol(v, nullptr, 10); }
   // "sw" (swing) and any unknown key: parsed-and-ignored (forward-compatible)
 }
 inline void _parseParams(const char* s, ContractParams& pr) {
@@ -279,15 +288,25 @@ inline RGB fxHsv2rgb(uint8_t h, uint8_t s, uint8_t v) {
 // brightness for a comet trailing behind the head (linear falloff, wraps around
 // N). fxChaseLit: classic marquee-chase lit/unlit test. fxWipeLit: ping-pong
 // fill wipe (fills 0..N-1 then drains back), lit test per position.
+//
+// AVR NOTE (widen-before-multiply): `int` is 16 BITS on the ATmega32U4/2560, so every
+// product built from the strand length N or a position must be widened to uint32_t
+// BEFORE the multiply, not after. `(uint32_t)(dist * 255)` evaluates dist*255 in a
+// 16-bit int and casts the ALREADY-WRAPPED result. The host build (32-bit int) computes
+// the right answer either way, so these are invisible to the test suite by construction —
+// they can only be caught by inspection. All widenings below are value-preserving on the
+// host, so the pinned vectors and the JS visualizer's parity mirror are unchanged.
 inline int fxHead(uint32_t elapsed, uint8_t speed, int N) {
   if (N <= 0) return 0; uint32_t s = fxStepMs(speed); if (!s) s = 1;
   return (int)((elapsed / s) % (uint32_t)N);
 }
 inline uint8_t fxCometBright(int p, int head, int N) {
-  if (N <= 0) return 0; int trail = (2 * N) / 5; if (trail < 2) trail = 2;
+  if (N <= 0) return 0;
+  int trail = (int)(((uint32_t)N * 2u) / 5u); if (trail < 2) trail = 2;   // 2*N wraps 16-bit int for N > 16383
   int dist = (head - p) % N; if (dist < 0) dist += N;
   if (dist >= trail) return 0;
-  return (uint8_t)(255 - (dist * 255) / trail);
+  // dist*255 wraps a 16-bit int for dist > 128, i.e. any strand with N > ~322.
+  return (uint8_t)(255u - ((uint32_t)dist * 255u) / (uint32_t)trail);
 }
 inline bool fxChaseLit(int p, uint32_t elapsed, uint8_t speed) {
   uint32_t s = fxStepMs(speed); if (!s) s = 1;
@@ -295,7 +314,7 @@ inline bool fxChaseLit(int p, uint32_t elapsed, uint8_t speed) {
 }
 inline bool fxWipeLit(int p, uint32_t elapsed, uint8_t speed, int N) {
   if (N <= 0) return false; uint32_t s = fxStepMs(speed); if (!s) s = 1;
-  uint32_t ph = (elapsed / s) % (uint32_t)(2 * N);
+  uint32_t ph = (elapsed / s) % ((uint32_t)N * 2u);   // 2*N wraps a 16-bit int for N > 16383
   if (ph < (uint32_t)N) return p <= (int)ph;
   return p > (int)(ph - (uint32_t)N);
 }
@@ -306,12 +325,20 @@ inline bool fxWipeLit(int p, uint32_t elapsed, uint8_t speed, int N) {
 // over time (half the drift rate of the gradient's per-position spread).
 // fxTwinkleBright: per-LED (fxHash16-seeded) triangle-wave brightness so each
 // index twinkles at its own hashed period/phase.
+//
+// The gradient's time drift and the cycle's rotation are deliberately coupled: fxCycleHue
+// divides elapsed by fxStepMs(speed) * 2, EXACTLY twice fxGradientHue's divisor, so at the
+// same speed knob a whole-strip colorcycle rotates at HALF the rate the gradient's own hue
+// drifts. That 2u is the contract between the two effects (and with the JS visualizer's
+// mirror of them) — it is pinned as a relationship, not just as vectors, in the host tests.
 inline uint8_t fxGradientHue(int p, int N, uint8_t baseHue, uint32_t elapsed, uint8_t speed) {
   int span = (N > 1) ? (N - 1) : 1; uint32_t s = fxStepMs(speed); if (!s) s = 1;
-  return (uint8_t)((uint32_t)baseHue + (uint32_t)(p * 128) / (uint32_t)span + elapsed / s);
+  // AVR: p*128 wraps a 16-bit int for any strand position >= 256 — widen p BEFORE the
+  // multiply. `(uint32_t)(p * 128)` would cast the already-wrapped 16-bit product.
+  return (uint8_t)((uint32_t)baseHue + ((uint32_t)p * 128u) / (uint32_t)span + elapsed / s);
 }
 inline uint8_t fxCycleHue(uint8_t baseHue, uint32_t elapsed, uint8_t speed) {
-  uint32_t s = fxStepMs(speed) * 2u; if (!s) s = 1;
+  uint32_t s = fxStepMs(speed) * 2u; if (!s) s = 1;   // *2u: half the gradient's drift rate
   return (uint8_t)((uint32_t)baseHue + elapsed / s);
 }
 inline uint8_t fxTwinkleBright(int idx, uint32_t now, uint8_t speed) {
