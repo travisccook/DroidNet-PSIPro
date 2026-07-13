@@ -38,8 +38,57 @@
 //   * Addressing = JUMP_FRONT_REAR jumper (config.h:101-105, main.cpp:358):
 //     HIGH=front (!P F), LOW=rear (!P R).
 #pragma once
-#include <stdio.h>          // snprintf (verb Q ack line)
+// NO <stdio.h>. The verb-Q ack (CV_QUERY) was the one and only stdio call site in this
+// firmware, and that single snprintf() linked in avr-libc's vfprintf (918 B) +
+// __ultoa_invert (188 B) + fputc (96 B) + snprintf (90 B) + strnlen/strnlen_P (44 B) —
+// ~1.3 KB of a 28 KB image — to emit one status line. The stock upstream firmware links
+// none of it. The ack is now built by the _fmtStr/_fmtU16/_fmtHex8 helpers below, whose
+// output is byte-identical (pinned by host guard A10). Do not re-add this include.
 #include "contract_core.h"
+
+// ---- forward declaration: fill_column ---------------------------------------
+// Every OTHER board primitive this layer calls (allON/allOFF/scanCol/DiscoBall/VUMeter/
+// runPattern/brightness) is declared in include/functions.h, which main.cpp pulls in via
+// preamble.h at line 286 — well above our include point at main.cpp:357. fill_column() is
+// the one exception: it is DEFINED at main.cpp:517 but declared in no header at all, so at
+// our include point the name is not yet in scope and the real avr-gcc build fails with
+// "'fill_column' was not declared in this scope". The host mock DEFINED it, which is
+// precisely why the mock type-check could never see this.
+// Declared WITHOUT the default argument (main.cpp:517 already supplies `= 0`; repeating it
+// here would be an illegal redefinition of a default argument). Our call sites pass all
+// three arguments explicitly.
+// Upstream's own signature, verbatim — do not "improve" it:
+void fill_column(uint8_t column, CRGB color, uint8_t scale_brightness);
+
+// ---- PSI_NOINLINE: a FLASH-SIZE knob, not a behaviour knob -------------------
+// Zero semantic effect — it only tells GCC where to EMIT a function, never what it
+// computes. On the ATmega32U4 the 28 KB flash budget is the binding constraint, and the
+// leaf helpers below are what blew it.
+//
+// WHY (measured, not guessed): every helper here is marked `inline`. To GCC that is not a
+// hint but nearly a directive — a function DECLARED inline is exempt from the size
+// heuristics that hold ordinary functions back, so neither -Os nor even
+// -fno-inline-small-functions will stop it being copied into every call site. (That flag,
+// by definition, only applies to functions NOT declared inline — which is exactly why it
+// did not catch these.) _scaled()/_clampBright() have ~15 call sites between them inside
+// applyContract(), which itself inlines into parseContract(), so each tiny body was being
+// stamped out fifteen times — and a CRGB construction or a 3-way clamp is not tiny once it
+// is in AVR registers. Forcing these four leaves out of line emits ONE copy and calls it:
+// -1,360 B on its own. parseContract() went 4,294 -> 2,010 B.
+//
+// The opposite hypothesis — that the BIG parse/apply functions were being duplicated — was
+// tested and is FALSE: they are each called exactly once, and outlining them
+// (-fno-inline-functions-called-once) COSTS 1,364 B.
+//
+// Portability: contract_core.h stays untouched (it must remain byte-identical across the
+// three fork repos) and the attribute is confined to __AVR__, so host clang and the ESP32
+// builds see an empty macro and are bit-for-bit unaffected. Do not "clean this up" back to
+// a plain `inline` — that is the regression this exists to prevent.
+#if defined(__AVR__)
+  #define PSI_NOINLINE __attribute__((noinline))
+#else
+  #define PSI_NOINLINE
+#endif
 
 // ---- safety caps (fork spec §11) --------------------------------------------
 static const uint8_t  SAFE_MAX_BRIGHTNESS = 200;   // USB-power/heat clamp (config: cap 200)
@@ -86,23 +135,55 @@ static int32_t    g_sectionStart = 0;
 static int32_t    g_sectionEnd   = 0;
 
 // ---- small local helpers (no Arduino map/min dependency) --------------------
-static inline uint8_t _clampBright(int v) {
+static PSI_NOINLINE inline uint8_t _clampBright(int v) {
   return (uint8_t)(v < 0 ? 0 : (v > SAFE_MAX_BRIGHTNESS ? SAFE_MAX_BRIGHTNESS : v));
 }
 // contract speed (0..255, higher=faster) -> primitive time_delay ms (inverse map).
-static inline uint16_t _speedToDelay(uint8_t s) {
+static PSI_NOINLINE inline uint16_t _speedToDelay(uint8_t s) {
   // s=0 -> 400 ms (slow), s=255 -> 20 ms (fast)
   return (uint16_t)(400 - ((uint32_t)s * (400 - 20)) / 255);
 }
-static inline CRGB _scaled(const RGB& c) { return CRGB(c.r, c.g, c.b); }
+static PSI_NOINLINE inline CRGB _scaled(const ContractRGB& c) { return CRGB(c.r, c.g, c.b); }
 // Scale a color by a 0..255 factor. The uint16_t widening is REQUIRED, not cosmetic:
 // `uint8_t * uint8_t` promotes to `int`, which is 16-bit on AVR, so a full-bright
 // channel (255 * 255 = 65025) overflows a signed 16-bit int — undefined behavior on
 // this board, and in practice a wrapped-negative channel (a bright pixel rendering
 // dark/garbage). Widen the left operand first, exactly as the Logics/HPs forks do
 // (ContractLogics.h:56-57, ContractFlthy.h:109-111).
-static inline CRGB _scaleC(const CRGB& c, uint8_t v) {
+static PSI_NOINLINE inline CRGB _scaleC(const CRGB& c, uint8_t v) {
   return CRGB((uint16_t)c.r * v / 255, (uint16_t)c.g * v / 255, (uint16_t)c.b * v / 255);
+}
+
+// ---- tiny formatters for the verb-Q ack (see CV_QUERY) -----------------------
+// These exist to keep <stdio.h> OUT of this firmware. The verb-Q ack was the ONLY
+// stdio call site in the whole image, and that one snprintf() dragged in avr-libc's
+// vfprintf + __ultoa_invert + fputc + strnlen — ~1.3 KB of a 28 KB flash budget — to
+// print one status line. The stock upstream firmware links no stdio at all.
+// Each helper writes at `p` and returns the new write cursor. No bounds checking: the
+// one caller sizes its buffer for the widest possible line (see CV_QUERY).
+//
+// NOTE — no signed-decimal helper: the only %d in the old format string was
+// (int)g_effect, and ContractEffect is `enum : uint8_t` (contract_core.h:31), so it is
+// ALWAYS 0..255 and can never carry a sign. An unsigned conversion is therefore
+// byte-identical to the old %d, and a signed helper would be dead flash.
+static char* _fmtStr(char* p, const char* s) {          // literal, no NUL written
+  while (*s) *p++ = *s++;
+  return p;
+}
+static char* _fmtU16(char* p, uint16_t v) {             // unsigned decimal, unpadded ("0" for 0)
+  char tmp[5];                                          // uint16_t max = 65535 => 5 digits
+  uint8_t n = 0;
+  do { tmp[n++] = (char)('0' + (v % 10)); v /= 10; } while (v);
+  while (n) *p++ = tmp[--n];                            // emit most-significant first
+  return p;
+}
+static char* _fmtHex8(char* p, uint8_t v) {             // 2-digit ZERO-PADDED LOWER-CASE hex
+  // computed, not a lookup table: on AVR a `static const char[]` lands in .data (RAM),
+  // and this board has 2.5 KB total. Two compares cost less than 17 bytes of RAM.
+  const uint8_t hi = (uint8_t)(v >> 4), lo = (uint8_t)(v & 0x0f);
+  *p++ = (char)(hi < 10 ? '0' + hi : 'a' + (hi - 10));
+  *p++ = (char)(lo < 10 ? '0' + lo : 'a' + (lo - 10));
+  return p;
 }
 
 // ---- addressing (fork spec §4) ----------------------------------------------
@@ -174,7 +255,7 @@ inline void _renderWipe(const CRGB& col, uint32_t t0) {
 inline void _renderGradient(uint32_t t0) {
   uint32_t elapsed = millis() - t0;
   for (int p = 0; p < COLUMNS; p++) {
-    RGB c = fxHsv2rgb(fxGradientHue(p, COLUMNS, 0, elapsed, g_speed), 255, 255);
+    ContractRGB c = fxHsv2rgb(fxGradientHue(p, COLUMNS, 0, elapsed, g_speed), 255, 255);
     fill_column((uint8_t)p, CRGB(c.r, c.g, c.b), 0);
   }
   FastLED.show(brightness());
@@ -183,7 +264,7 @@ inline void _renderGradient(uint32_t t0) {
 // ---- colorcycle (fx hue helper; brightness rides the global 3P path only) ---
 inline void _renderColorcycle(uint32_t t0) {
   uint32_t elapsed = millis() - t0;
-  RGB c = fxHsv2rgb(fxCycleHue(0, elapsed, g_speed), 255, 255);
+  ContractRGB c = fxHsv2rgb(fxCycleHue(0, elapsed, g_speed), 255, 255);
   allON(CRGB(c.r, c.g, c.b), true, 0);
 }
 
@@ -276,13 +357,16 @@ static inline bool _fireAccent(ContractEffect fx, const CRGB& c, uint32_t durMs,
 }
 
 // ---- verb dispatch ----------------------------------------------------------
-inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
+// PSI_NOINLINE: called once, so this duplicates nothing — but folded into applyContract()
+// (which folds into parseContract()) it made that one function big enough to spill the
+// register allocator. Emitting it separately is -106 B. See the PSI_NOINLINE note above.
+PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
   // Phase-2: an A carrying at= schedules a section instead of applying now.
   if (pr.hasAt) {
     ScoreEntry e;
     e.atBeat     = pr.atBeat;
     e.effect     = pr.hasEffect ? pr.effect : CE_SOLID;
-    e.color      = pr.hasColor ? pr.color : RGB{ g_contractColor.r, g_contractColor.g, g_contractColor.b };
+    e.color      = pr.hasColor ? pr.color : ContractRGB{ g_contractColor.r, g_contractColor.g, g_contractColor.b };
     e.speed      = pr.hasSpeed ? pr.speed : g_speed;
     e.beatMod    = pr.hasBeatMod ? pr.beatMod : g_beatMod;
     e.accentMode = pr.hasAm ? pr.accentMode : 0;
@@ -393,15 +477,31 @@ inline void applyContract(const ParsedContract& p) {
       }
       break;
 
-    case CV_QUERY:                                     // optional ack (targeted only)
+    case CV_QUERY: {                                   // optional ack (targeted only)
       if (p.unit == 'F' || p.unit == 'R') {
-        char buf[56];
-        snprintf(buf, sizeof(buf), "!P%cq:ver=1.2,phase=2,i=%d,c=%02x%02x%02x,bpm=%u\r",
-                 p.unit, (int)g_effect, g_contractColor.r, g_contractColor.g, g_contractColor.b,
-                 (unsigned)g_clock.bpm);
+        // Hand-rolled formatting — byte-identical to the snprintf() this replaces:
+        //   "!P%cq:ver=1.2,phase=2,i=%d,c=%02x%02x%02x,bpm=%u\r"
+        // Dropping that one call drops all of avr-libc's stdio (~1.3 KB) from the image.
+        // test/host/compile_contract.cpp guard A10 pins these bytes exactly.
+        // Widest line: "!PF"(3) + "q:ver=1.2,phase=2,i="(20) + i(<=3) + ",c="(3) + hex(6)
+        //              + ",bpm="(5) + bpm(<=5) + "\r"(1) + NUL(1) = 47 B.
+        char  buf[48];
+        char* w = buf;
+        *w++ = '!'; *w++ = 'P'; *w++ = p.unit;
+        w = _fmtStr(w, "q:ver=1.2,phase=2,i=");
+        w = _fmtU16(w, (uint16_t)g_effect);            // uint8_t enum => never negative
+        w = _fmtStr(w, ",c=");
+        w = _fmtHex8(w, g_contractColor.r);
+        w = _fmtHex8(w, g_contractColor.g);
+        w = _fmtHex8(w, g_contractColor.b);
+        w = _fmtStr(w, ",bpm=");
+        w = _fmtU16(w, g_clock.bpm);
+        *w++ = '\r';
+        *w   = '\0';
         serialPort->print(buf);
       }
       break;
+    }
 
     default:
       break;

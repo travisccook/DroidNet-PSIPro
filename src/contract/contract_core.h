@@ -14,7 +14,16 @@
 #include <stdlib.h>
 #include <math.h>
 
-struct RGB { uint8_t r, g, b; };
+// NOT named `RGB`. FastLED (which the PSI and the RSeries Logics both pull in ahead of
+// this header) declares `RGB` as an ENUMERATOR of fl::EOrder — `enum EOrder { RGB=0012,
+// GRB=0102, ... }`, hoisted into the global namespace by its compatibility shim. A class
+// name is hidden by a variable/enumerator of the same name in the same scope (C++
+// [basic.scope.hiding]), so `struct RGB {...}` would still COMPILE here and then every
+// later use of the plain type name would fail with "'RGB' does not name a type" — which
+// is exactly what the real avr-gcc/xtensa builds reported. The host mocks never modelled
+// EOrder, so this was invisible to the mock type-check by construction. Keep the name
+// qualified; do not "simplify" it back to RGB.
+struct ContractRGB { uint8_t r, g, b; };
 
 enum ContractVerb : uint8_t {
   CV_NONE = 0, CV_ANIMATE, CV_PULSE, CV_CLOCK, CV_BRIGHT, CV_LEVEL, CV_STOP, CV_MODE, CV_QUERY
@@ -26,7 +35,7 @@ enum ContractEffect : uint8_t {
 
 struct ContractParams {
   bool hasEffect = false;  ContractEffect effect = CE_NONE;  int nativeCode = -1;
-  bool hasColor = false;   RGB color{0, 0, 0};
+  bool hasColor = false;   ContractRGB color{0, 0, 0};
   bool hasSpeed = false;   uint8_t speed = 0;
   bool hasDur = false;     uint32_t durMs = 0;
   bool hasBright = false;  uint8_t bright = 0;
@@ -47,7 +56,7 @@ struct ContractParams {
   //     can fire the SAME effect-swap accent autonomously, without the Pi.
   // Absent on the wire => hasAccentFx stays false => the entry behaves EXACTLY as v1.1.
   bool hasAccentFx = false;    ContractEffect accentFx = CE_NONE;   // ae=<effect name>
-  bool hasAccentColor = false; RGB accentColor{0, 0, 0};            // ac=<rrggbb>
+  bool hasAccentColor = false; ContractRGB accentColor{0, 0, 0};            // ac=<rrggbb>
   bool hasAccentDur = false;   uint16_t accentDurMs = 0;            // ad=<ms>, clamped <= 2550
 };
 
@@ -73,7 +82,7 @@ inline int _hexNib(char c) {
   if (c >= 'A' && c <= 'F') return c - 'A' + 10;
   return -1;
 }
-inline bool _parseHex6(const char* s, size_t len, RGB& out) {
+inline bool _parseHex6(const char* s, size_t len, ContractRGB& out) {
   if (len < 6) return false;
   int v[6];
   for (int i = 0; i < 6; i++) { v[i] = _hexNib(s[i]); if (v[i] < 0) return false; }
@@ -115,36 +124,83 @@ inline bool accentEffectAllowed(ContractEffect e) {
     default: return false;   // CE_NONE, CE_SCAN, CE_SPARKLE, CE_METER, CE_NATIVE
   }
 }
-// One key=value token. k/kl and v/vl are slices into the (null-terminated) source
-// buffer; numeric parses (atoi/strtol/strtoul) read v up to the next ',' or '\0'.
+// ---- decimal parsers -------------------------------------------------------------
+// These replace strtol()/strtoul(), which cost 548 B + 460 B = 1008 B of avr-libc on the
+// ATmega32U4 — ~3.5% of the PSI's 28 KB flash — to parse the handful of integers the wire
+// carries. atoi() is NOT replaced: on AVR it is 58 B of hand-written assembly that does
+// not pull in strtol at all (verified with avr-nm/avr-objdump), so the uint8_t-clamped
+// params (s/b/m/am/v/bpb/bpm) keep using it. Only the 32-bit fields moved here.
 //
-// AVR NOTE: `int` is 16 BITS on the ATmega32U4 (PSI) and ATmega2560 (Flthy), so atoi()
-// returns a 16-bit value there. The two int32_t beat fields (at=, beat=) must therefore
-// use strtol() — a `long` is 32-bit on every target we ship — or any beat index past
-// 32767 wraps NEGATIVE before it is ever stored (a ~4.5 min show at 120 BPM only reaches
-// beat ~540, but `beat=` is an absolute re-anchor and a long set could exceed it, and a
-// negative atBeat sorts to the front of the score and fires the section immediately).
-// The uint8_t-clamped params (s/b/m/am/v/bpb) are unaffected by the narrower int, and
-// d=/ph= already use strtoul for the same reason.
+// _decDigits reads the grammar the wire can actually carry — optional leading whitespace,
+// an optional '+'/'-', then ASCII decimal digits, stopping at the first non-digit (which
+// _parseParams guarantees is ',' or '\0'). The whitespace skip is not decoration: the PSI's
+// buildCommand() copies every byte up to '\r' verbatim, so a hand-typed "ad= 180" really can
+// reach a value slice, and strtol() would have skipped that space. Same isspace() set atoi
+// uses (0x09..0x0D, 0x20), so every numeric param on the line now behaves alike.
+//
+// WIDTH: fixed at uint32_t on ALL targets. `long` is 64-bit on the host but 32-bit on
+// AVR/ESP32, so the old strtol/strtoul silently parsed to a different width under the host
+// tests than on the boards. Pinning 32 bits means the 263 host checks now gate the exact
+// values the ATmega32U4 computes.
+//
+// OVERFLOW: saturating, like strtol/strtoul (which return LONG_MAX/ULONG_MAX + ERANGE).
+// The magnitude latches at 0xFFFFFFFF and stays there for any further digits, so a stray
+// `ad=99999999999` can never wrap small and slip under the 2550 clamp below.
+inline uint32_t _decDigits(const char*& s, bool& neg) {
+  while (*s == ' ' || (*s >= '\t' && *s <= '\r')) s++;   // isspace(), as strtol/atoi do
+  neg = (*s == '-');
+  if (neg || *s == '+') s++;
+  uint32_t acc = 0;
+  while (*s >= '0' && *s <= '9') {
+    uint8_t d = (uint8_t)(*s++ - '0');
+    // 4294967295 == 429496729*10 + 5, so this is the exact last-safe-multiply test.
+    if (acc > 429496729UL || (acc == 429496729UL && d > 5)) acc = 0xFFFFFFFFUL;  // latch
+    else acc = acc * 10UL + d;
+  }
+  return acc;
+}
+// d= / ph= / ad=: unsigned. Matches strtoul, including its wrap-the-sign behaviour
+// (strtoul("-5") == ULONG_MAX-4) for every in-range input the wire can carry.
+inline uint32_t _parseU32(const char* s) {
+  bool neg; uint32_t m = _decDigits(s, neg);
+  return neg ? (uint32_t)(0UL - m) : m;
+}
+// at= / beat=: signed int32 BEAT INDICES that must survive past 32767 — `int` is 16 BITS on
+// the ATmega32U4 (PSI) and ATmega2560 (Flthy), so parsing these with atoi() would wrap
+// `at=40000` NEGATIVE, and a negative atBeat sorts to the FRONT of the score and fires its
+// section immediately, at show start. Saturates at INT32_MIN/INT32_MAX exactly as a 32-bit
+// strtol does, so an out-of-range beat still sorts to the END of the score, never the front.
+inline int32_t _parseI32(const char* s) {
+  bool neg; uint32_t m = _decDigits(s, neg);
+  // "magnitude does not fit in int32" is exactly "bit 31 set" (m >= 2^31), which on AVR is a
+  // one-byte bit test instead of a four-byte compare against 2147483647/2147483648. Note the
+  // negative ceiling is 2^31 EXACTLY == INT32_MIN, so -2147483648 lands on INT32_MIN either
+  // way, whether by saturating or by parsing exactly. Both roads meet.
+  if (m & 0x80000000UL) return neg ? (int32_t)(-2147483647L - 1L) : (int32_t)2147483647L;
+  return neg ? -(int32_t)m : (int32_t)m;
+}
+
+// One key=value token. k/kl and v/vl are slices into the (null-terminated) source
+// buffer; numeric parses (atoi/_parseU32/_parseI32) read v up to the next ',' or '\0'.
 inline void _applyParam(ContractParams& pr, const char* k, size_t kl, const char* v, size_t vl) {
   auto key = [&](const char* s) { return kl == strlen(s) && strncmp(k, s, kl) == 0; };
   if (key("i")) {
     int nc; ContractEffect e = _effectFromName(v, vl, nc);
     if (e != CE_NONE) { pr.hasEffect = true; pr.effect = e; pr.nativeCode = nc; }
   } else if (key("c")) {
-    RGB rgb; if (_parseHex6(v, vl, rgb)) { pr.hasColor = true; pr.color = rgb; }
+    ContractRGB rgb; if (_parseHex6(v, vl, rgb)) { pr.hasColor = true; pr.color = rgb; }
   } else if (key("s"))  { pr.hasSpeed = true;   pr.speed = (uint8_t)atoi(v); }
-  else if (key("d"))    { pr.hasDur = true;     pr.durMs = (uint32_t)strtoul(v, nullptr, 10); }
+  else if (key("d"))    { pr.hasDur = true;     pr.durMs = _parseU32(v); }
   else if (key("b"))    { pr.hasBright = true;  pr.bright = (uint8_t)atoi(v); }
   else if (key("m"))    { pr.hasBeatMod = true; pr.beatMod = (uint8_t)atoi(v); }
-  else if (key("at"))   { pr.hasAt = true;      pr.atBeat = (int32_t)strtol(v, nullptr, 10); }
+  else if (key("at"))   { pr.hasAt = true;      pr.atBeat = _parseI32(v); }
   else if (key("am"))   { pr.hasAm = true;      pr.accentMode = (uint8_t)atoi(v); }
   else if (key("v"))    { pr.hasLevel = true;   pr.level = (uint8_t)atoi(v);
                           if (vl > 0 && (v[0] == 's' || v[0] == 'i')) pr.mode = v[0]; }
   else if (key("bpm"))  { pr.hasBpm = true;     pr.bpm = (uint16_t)atoi(v); }
-  else if (key("ph"))   { pr.hasPh = true;      pr.phMs = (uint32_t)strtoul(v, nullptr, 10); }
+  else if (key("ph"))   { pr.hasPh = true;      pr.phMs = _parseU32(v); }
   else if (key("bpb"))  { pr.hasBpb = true;     pr.bpb = (uint8_t)atoi(v); }
-  else if (key("beat")) { pr.hasBeat = true;    pr.beatAnchor = (int32_t)strtol(v, nullptr, 10); }
+  else if (key("beat")) { pr.hasBeat = true;    pr.beatAnchor = _parseI32(v); }
   // ---- v1.2 accent overlay (ae/ac/ad). key() is an EXACT-LENGTH compare, so these three
   // cannot alias a/at/am/b/c/d/i/s/m/v/bpm/ph/bpb/beat/sw.
   else if (key("ae"))   { int nc; ContractEffect e = _effectFromName(v, vl, nc);
@@ -152,11 +208,11 @@ inline void _applyParam(ContractParams& pr, const char* k, size_t kl, const char
                           // accentEffectAllowed) => hasAccentFx stays false => no accent.
                           if (e != CE_NONE && accentEffectAllowed(e)) { pr.hasAccentFx = true; pr.accentFx = e; }
                           (void)nc; }
-  else if (key("ac"))   { RGB rgb; if (_parseHex6(v, vl, rgb)) { pr.hasAccentColor = true; pr.accentColor = rgb; } }
-  else if (key("ad"))   { // strtoul, not atoi: `int` is 16-bit on AVR, so a stray ad=99999
+  else if (key("ac"))   { ContractRGB rgb; if (_parseHex6(v, vl, rgb)) { pr.hasAccentColor = true; pr.accentColor = rgb; } }
+  else if (key("ad"))   { // 32-bit, not atoi: `int` is 16-bit on AVR, so a stray ad=99999
                           // would wrap NEGATIVE before it could ever be clamped.
-                          unsigned long d = strtoul(v, nullptr, 10);
-                          if (d > 2550ul) d = 2550ul;                 // 255 * 10ms — the score stores /10
+                          uint32_t d = _parseU32(v);
+                          if (d > 2550UL) d = 2550UL;                 // 255 * 10ms — the score stores /10
                           pr.hasAccentDur = true; pr.accentDurMs = (uint16_t)d; }
   // "sw" (swing) and any unknown key: parsed-and-ignored (forward-compatible)
 }
@@ -299,7 +355,7 @@ struct ScoreEntry {
   int32_t        atBeat = 0;
   ContractEffect effect = CE_SOLID;
   int            nativeCode = -1;      // for effect==CE_NATIVE (an iconic native look)
-  RGB            color{0, 0, 0};
+  ContractRGB            color{0, 0, 0};
   uint8_t        speed = 128;
   uint8_t        beatMod = 0;
   uint8_t        accentMode = 0;
@@ -307,7 +363,7 @@ struct ScoreEntry {
   // The firmware's beat-edge trigger tests `accentFx == CE_NONE` and bails, so an entry
   // built from a v1.1 line (no ae=) can never arm the overlay.
   ContractEffect accentFx = CE_NONE;   // 1B; never CE_NATIVE/CE_SCAN/... (rejected at parse)
-  RGB            accentColor{0, 0, 0}; // 3B; RESOLVED at insert: ac= if given, else the entry's color
+  ContractRGB            accentColor{0, 0, 0}; // 3B; RESOLVED at insert: ac= if given, else the entry's color
   uint8_t        accentDur10 = 18;     // 1B; duration / 10ms (18 => 180ms). Keeps the entry small
                                        // on AVR: a 2550ms ceiling is far beyond any musical accent.
 };
@@ -353,20 +409,20 @@ inline int scoreInsert(ScoreEntry* entries, int n, int cap, const ScoreEntry& e)
 // fxHsv2rgb: standard 6-sextant HSV->RGB (integer division, matches the JS parity port).
 inline uint32_t fxStepMs(uint8_t speed) { return 30u + (uint32_t)(255 - speed) / 2u; }
 inline uint16_t fxHash16(uint32_t x) { x ^= x << 13; x ^= x >> 17; x ^= x << 5; return (uint16_t)(x & 0xFFFFu); }
-inline RGB fxHsv2rgb(uint8_t h, uint8_t s, uint8_t v) {
-  if (s == 0) return RGB{ v, v, v };
+inline ContractRGB fxHsv2rgb(uint8_t h, uint8_t s, uint8_t v) {
+  if (s == 0) return ContractRGB{ v, v, v };
   uint8_t region = h / 43;
   uint8_t rem = (uint8_t)(((uint16_t)(h - region * 43) * 6));
   uint8_t p = (uint8_t)(((uint16_t)v * (255 - s)) / 255);
   uint8_t q = (uint8_t)(((uint16_t)v * (255 - (((uint16_t)s * rem) / 255))) / 255);
   uint8_t t = (uint8_t)(((uint16_t)v * (255 - (((uint16_t)s * (255 - rem)) / 255))) / 255);
   switch (region) {
-    case 0:  return RGB{ v, t, p };
-    case 1:  return RGB{ q, v, p };
-    case 2:  return RGB{ p, v, t };
-    case 3:  return RGB{ p, q, v };
-    case 4:  return RGB{ t, p, v };
-    default: return RGB{ v, p, q };
+    case 0:  return ContractRGB{ v, t, p };
+    case 1:  return ContractRGB{ q, v, p };
+    case 2:  return ContractRGB{ p, v, t };
+    case 3:  return ContractRGB{ p, q, v };
+    case 4:  return ContractRGB{ t, p, v };
+    default: return ContractRGB{ v, p, q };
   }
 }
 // ===== END FX SCALAR HELPERS =====

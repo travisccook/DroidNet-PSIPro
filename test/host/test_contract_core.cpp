@@ -340,11 +340,11 @@ static void test_score_accent_fields() {
   // path, and a scoreActiveIndex lookup — the board reads them straight off the entry the
   // active index points at, so a field lost in the shift is a silently accent-less section.
   ScoreEntry s[8]; int n = 0; const int cap = 8;
-  ScoreEntry a; a.atBeat = 0;  a.effect = CE_SOLID;    a.color = RGB{1, 2, 3};   // v1.1 entry
+  ScoreEntry a; a.atBeat = 0;  a.effect = CE_SOLID;    a.color = ContractRGB{1, 2, 3};   // v1.1 entry
   ScoreEntry b; b.atBeat = 64; b.effect = CE_FLASH;
-  b.accentFx = CE_COMET; b.accentColor = RGB{0xFF, 0xEE, 0xDD}; b.accentDur10 = 25;
+  b.accentFx = CE_COMET; b.accentColor = ContractRGB{0xFF, 0xEE, 0xDD}; b.accentDur10 = 25;
   ScoreEntry c; c.atBeat = 32; c.effect = CE_RAINBOW;
-  c.accentFx = CE_PULSE; c.accentColor = RGB{0x11, 0x22, 0x33}; c.accentDur10 = 18;
+  c.accentFx = CE_PULSE; c.accentColor = ContractRGB{0x11, 0x22, 0x33}; c.accentDur10 = 18;
   n = scoreInsert(s, n, cap, a);
   n = scoreInsert(s, n, cap, b);
   n = scoreInsert(s, n, cap, c);                       // shifts b one slot right
@@ -479,10 +479,10 @@ static void test_fx_helpers() {
   // fxHsv2rgb: standard 6-sextant HSV->RGB, integer math. Exact bytes captured
   // by running the real implementation (integer division makes the greenish
   // sextant land at (3,255,0), not the ideal (0,255,0)).
-  { RGB c = fxHsv2rgb(0, 255, 255);   CHECK(c.r == 255 && c.g == 0 && c.b == 0); }      // red
-  { RGB c = fxHsv2rgb(85, 255, 255);  CHECK(c.g == 255); CHECK(c.r <= 8 && c.b <= 8);
+  { ContractRGB c = fxHsv2rgb(0, 255, 255);   CHECK(c.r == 255 && c.g == 0 && c.b == 0); }      // red
+  { ContractRGB c = fxHsv2rgb(85, 255, 255);  CHECK(c.g == 255); CHECK(c.r <= 8 && c.b <= 8);
                                        CHECK(c.r == 3 && c.b == 0); }                    // ~green, pinned exact
-  { RGB c = fxHsv2rgb(0, 0, 120);     CHECK(c.r == 120 && c.g == 120 && c.b == 120); }   // greyscale
+  { ContractRGB c = fxHsv2rgb(0, 0, 120);     CHECK(c.r == 120 && c.g == 120 && c.b == 120); }   // greyscale
 
   // fxHash16: distinct inputs -> distinct outputs (xorshift hash). Exact
   // outputs captured by running the real implementation.

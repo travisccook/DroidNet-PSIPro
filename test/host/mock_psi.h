@@ -82,9 +82,26 @@ struct _FastLED {
 
 inline void mock_resetLatch() { mock_showCount = 0; mock_fillColumnCount = 0; }
 
-struct _Stream { void print(const char*) {} };
+// ---- serial capture (test-only) ---------------------------------------------
+// The verb-Q ack is the ONE thing the fork layer writes back to the bus, and it is a
+// wire-format contract: Studio parses those exact bytes. This mock used to DISCARD the
+// string (`void print(const char*) {}`), so nothing in the suite could see the ack — a
+// formatting regression (a dropped zero-pad, an upper-case hex digit, a missing \r) was
+// invisible to the host tests. Capture it verbatim so a test can pin the bytes.
+static char mock_serialOut[256] = {0};
+static int  mock_serialLen      = 0;
+
+struct _Stream {
+  void print(const char* s) {
+    for (int i = 0; s[i] && mock_serialLen < (int)sizeof(mock_serialOut) - 1; i++)
+      mock_serialOut[mock_serialLen++] = s[i];
+    mock_serialOut[mock_serialLen] = '\0';
+  }
+};
 static _Stream  _sp;
 static _Stream* serialPort = &_sp;
+
+inline void mock_resetSerial() { mock_serialLen = 0; mock_serialOut[0] = '\0'; }
 
 // render primitives + parser targets (exact signatures from src/main.cpp).
 // Bodies model ONLY whether the primitive latches the frame (FastLED.show), which is

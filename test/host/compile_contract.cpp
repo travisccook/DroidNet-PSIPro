@@ -13,6 +13,7 @@
 #include "mock_psi.h"
 #include "../../src/contract/ContractPSI.h"
 #include <cstdio>
+#include <cstring>
 
 // ---- v1.2 accent-overlay probe ----------------------------------------------
 // The mock is a LATCH model, so the accent guards below assert on (a) the overlay state
@@ -676,8 +677,56 @@ int main() {
     parseContract("!**X");
   }
 
+  // ---- A10: verb-Q ack is a BYTE-EXACT wire contract ---------------------------
+  // The ack is the only thing this layer writes back to the bus, and Studio parses those
+  // exact bytes. It used to be built with snprintf(); it is now hand-rolled (to keep
+  // avr-libc's vfprintf — ~1.3 KB — out of a 28 KB image), so the formatting is OUR code
+  // and a regression in it is silent on the bench. Pin the bytes: unpadded decimal for
+  // i= and bpm=, ZERO-PADDED LOWER-CASE 2-digit hex per colour byte, trailing \r, and
+  // NOTHING for an unaddressed unit.
+  {
+    struct QCase { const char* setup[3]; const char* query; const char* want; };
+    const QCase cases[] = {
+      // effect index, mid colour, 3-digit bpm. 0x80/0xff pin lower-case + the high bit.
+      { {"!P*A:i=solid,c=0080ff,d=0", "!**C:bpm=128,ph=0,bpb=4,beat=0", nullptr}, "!PFQ",
+        "!PFq:ver=1.2,phase=2,i=2,c=0080ff,bpm=128\r" },
+      // TWO-DIGIT effect index (colorcycle=14) + every colour byte < 0x10 => the zero-pad
+      // is load-bearing: without it "0a0b0c" collapses to "abc" and Studio mis-parses.
+      { {"!P*A:i=colorcycle,c=0A0B0C,d=0", "!**C:bpm=7,ph=0,bpb=4,beat=0", nullptr}, "!PFQ",
+        "!PFq:ver=1.2,phase=2,i=14,c=0a0b0c,bpm=7\r" },
+      // bpm=0 (clock stopped) must render as a literal "0", not an empty field.
+      { {"!P*A:i=flash,c=ffffff,d=0", "!**C:bpm=0,beat=0", nullptr}, "!PFQ",
+        "!PFq:ver=1.2,phase=2,i=3,c=ffffff,bpm=0\r" },
+    };
+    for (const QCase& qc : cases) {
+      for (int i = 0; i < 3 && qc.setup[i]; i++) parseContract(qc.setup[i]);
+      mock_resetSerial();
+      parseContract(qc.query);
+      if (strcmp(mock_serialOut, qc.want) != 0) {
+        printf("FAIL: verb-Q ack bytes drifted.\n  want: \"%s\"\n  got:  \"%s\"\n",
+               qc.want, mock_serialOut);
+        return 1;
+      }
+    }
+    // A broadcast Q, and a Q aimed at the OTHER unit, must both stay SILENT — the ack is
+    // targeted-only. (This mock reads the JUMP_FRONT_REAR jumper HIGH => this board is
+    // 'F'.) Two boards share one bus: if either of these acked, both would answer at once
+    // and the replies would collide.
+    const char* quietCmds[] = {"!P*Q", "!PRQ"};
+    for (const char* quiet : quietCmds) {
+      mock_resetSerial();
+      parseContract(quiet);
+      if (mock_serialLen != 0) {
+        printf("FAIL: '%s' emitted an ack (\"%s\") — the ack must be targeted at THIS unit only\n",
+               quiet, mock_serialOut);
+        return 1;
+      }
+    }
+    parseContract("!**X");
+  }
+
   printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp/scale "
          "+ v1.2 accent-overlay guards (A1-A9: A7 flash strobes, A8 strobe cap unbypassable, "
-         "A9 a resend replaces the show) OK\n");
+         "A9 a resend replaces the show) + A10 verb-Q ack bytes OK\n");
   return 0;
 }

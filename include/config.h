@@ -42,16 +42,36 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 ////////// CONTRACT FLASH ESCAPE HATCH ///////////
 /////////////////////////////////////////////////
 
-// OPT-IN ONLY. The default build keeps every native novelty mode for backward
-// compatibility. Uncomment CONTRACT_SLIM *only* if the AVR linker overflows the
-// ~28 KB flash after adding the Driveable-Animation Contract fork. It drops the
-// heaviest novelty native modes (Modes 7 i_heart_u, 9 red_heart front half,
-// 11 Imperial March, 19 lightsaberBattle, 20 StarWarsIntro) to reclaim ~3-5 KB.
-// Under -ffunction-sections/--gc-sections these functions then become unreferenced
-// and are stripped. DiscoBall (12/13) is kept because the contract 'sparkle' effect
-// maps to it.
+// REQUIRED, NOT OPTIONAL — and it was not always so. This was written as an opt-in
+// "only if the linker overflows" hatch, back when nothing had ever been cross-compiled
+// and the absolute flash cost was unknown. It has now been linked for real, and the
+// honest numbers are:
+//
+//   stock upstream PSI Pro, no contract ....... 25,106 B of 28,672 B (87.6%)
+//   + contract layer, this hatch OFF .......... 38,790 B  (135.3% — WILL NOT LINK)
+//   + contract layer, this hatch ON ........... 32,394 B  (113.0% — WILL NOT LINK)
+//   + hatch ON, + the codegen work in
+//     platformio.ini and ContractPSI.h ........ fits, with room to spare
+//
+// Upstream already used 87.6% of this chip. Only ~3.5 KB was ever free and the contract
+// layer needs ~13.7 KB, so the hatch alone cannot save the build — it reclaims 6,400 B
+// (not the "~3-5 KB" originally guessed here), and that still leaves it 3,722 B over.
+// It fits only in combination with the flash work in platformio.ini's build_flags and the
+// PSI_NOINLINE leaf-outlining in src/contract/ContractPSI.h. Turn any one of those three
+// off and the image overflows again.
+//
+// WHAT IT COSTS YOU: the heaviest novelty native modes are dropped — Mode 7 (i_heart_u),
+// Mode 9 (red_heart, front half), Mode 11 (Imperial March), Mode 19 (lightsaberBattle),
+// Mode 20 (StarWarsIntro). Under -ffunction-sections/--gc-sections they become
+// unreferenced and are stripped. Everything else — every other native mode, the whole
+// JawaLite grammar, the I2C intake — is untouched. DiscoBall (12/13) is deliberately KEPT,
+// because the contract's 'sparkle' effect maps onto it.
+//
+// If you do not want to lose those five modes, do not build this fork: flash Neil
+// Hutchison's upstream PSI Pro instead. There is no configuration of this fork that keeps
+// them AND fits in 28,672 B.
 
-//#define CONTRACT_SLIM
+#define CONTRACT_SLIM
 
 
 ///////////////////////////////////////////////////
