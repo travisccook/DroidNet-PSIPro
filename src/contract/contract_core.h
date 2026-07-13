@@ -321,10 +321,13 @@ inline int scoreActiveIndex(const ScoreEntry* entries, int n, int32_t beatIndex)
   return found;
 }
 
-// Forget every scheduled section and the active-section cursor. Firmware MUST call this
-// wherever a show ends — verb X (stop) and verb M:v=idle — so the next show starts from
-// an empty table. scoreInsert() drops silently at cap, so a table left populated means
-// the second show's sections are discarded and the board replays the FIRST show forever.
+// Forget every scheduled section and the active-section cursor. Firmware MUST call this at
+// EVERY show boundary — verb X (stop), verb M:v=idle, AND verb M:v=show — so the next show
+// starts from an empty table. v=show is the boundary that is easy to miss and the one the
+// product actually hits: Studio's Deliver "Resend" pushes `!**M:v=show` and then the new
+// score, with NO intervening stop, so a board that clears only on X/idle ACCUMULATES show B
+// into show A. scoreInsert() drops silently at cap, so the merged table replays A's sections
+// in between B's and, once it is full, discards B's sections outright.
 // (activeIndex goes to -1, not 0: -1 is "no section yet", which is what scoreActiveIndex
 // returns before the first entry and what the render loop compares against to detect a
 // section change.)

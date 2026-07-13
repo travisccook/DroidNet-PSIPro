@@ -380,7 +380,11 @@ inline void applyContract(const ParsedContract& p) {
         g_contractArmed = true;
         g_lastEffect = CE_NONE;
         g_effectStartMs = now;
-        g_lastAccentBeat = BEAT_NONE;                  // M:v=show is the first line of a load burst
+        // M:v=show is the FIRST line of a load burst, and Studio's Resend re-sends that burst
+        // with no intervening X — so show entry means "a FRESH show". Without this, show B's
+        // sections merge into show A's and, past the 8-entry cap, are dropped silently.
+        scoreClear(g_scoreCount, g_scoreIndex);
+        g_lastAccentBeat = BEAT_NONE;                  // ...and no beat edge survives the boundary
       } else if (pr.mode == 'i') {                     // idle: hand back to native autonomy
         g_contractArmed = false;
         scoreClear(g_scoreCount, g_scoreIndex);        // parity with X and with the Logics fork

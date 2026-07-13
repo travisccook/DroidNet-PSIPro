@@ -585,7 +585,99 @@ int main() {
                                                                 (unsigned)half.r, (unsigned)half.g, (unsigned)half.b); return 1; }
   }
 
+  // A9 (SPEC): a RE-SENT show must REPLACE the last one, not ACCUMULATE into it.
+  // I2 above proves X and M:v=idle clear the score. The boundary they do NOT cover is the
+  // one the product actually hits: Studio's Deliver "Resend" re-pushes the load burst with
+  // NO intervening stop, and that burst is `!**M:v=show` FIRST and the scored A entries
+  // after it (web/studio/src/dome/blueprint-emit.js: `const load = ['!**M:v=show']`, then a
+  // `load.push(...)` per section). So show entry must mean "a FRESH show" — otherwise show B
+  // is inserted INTO show A. Two failure modes, one leg each: (a) the tables MERGE and the
+  // board plays A's sections in between B's; (b) at the 8-entry cap scoreInsert() silently
+  // DROPS B and the board replays A forever.
+  {
+    // (a) MERGE — both shows fit under the cap, so the interleave is the only thing on trial.
+    //     A: RED@0, PURPLE@200.  B: GREEN@100, BLUE@300.
+    //     Merged, beat 250 lands on A's PURPLE@200; cleanly, it lands on B's GREEN@100.
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=000000,d=0");         // d=0: no stale anim deadline
+    uint32_t t0 = _mock_millis;
+    parseContract("!**C:bpm=120,bpb=4,beat=0");         // anchor = now, 500 ms/beat
+    parseContract("!**M:v=show");
+    parseContract("!P*A:i=solid,c=ff0000,at=0");
+    parseContract("!P*A:i=solid,c=800080,at=200");
+    if (g_scoreCount != 2) { printf("FAIL: show A did not load (count=%d)\n", g_scoreCount); return 1; }
+    _mock_millis = t0 + 210 * 500 + 10;                 // beat 210: A's 2nd section is PLAYING
+    contractLoopTick();
+    if (g_scoreIndex != 1 || g_contractColor.r != 0x80 || g_contractColor.b != 0x80) {
+      printf("FAIL: show A is not playing its purple @200 section at beat 210 "
+             "(index=%d rgb=%u,%u,%u) — the rest of A9 would prove nothing\n", g_scoreIndex,
+             (unsigned)g_contractColor.r, (unsigned)g_contractColor.g, (unsigned)g_contractColor.b);
+      return 1;
+    }
+
+    parseContract("!**M:v=show");                       // ---- the Resend. No stop. ----
+    if (g_scoreCount != 0 || g_scoreIndex != -1) {
+      printf("FAIL: M:v=show did not CLEAR the score (count=%d index=%d) — Studio's Resend "
+             "sends v=show and then the new sections, so show B is now merging into show A\n",
+             g_scoreCount, g_scoreIndex);
+      return 1;
+    }
+    parseContract("!P*A:i=solid,c=00ff00,at=100");
+    parseContract("!P*A:i=solid,c=0000ff,at=300");
+    if (g_scoreCount != 2 || g_score[0].atBeat != 100 || g_score[0].color.g != 0xff
+        || g_score[1].atBeat != 300 || g_score[1].color.b != 0xff) {
+      printf("FAIL: the score is not EXACTLY show B's two sections (count=%d, first at=%ld) — "
+             "a section of show A survived the resend\n", g_scoreCount, (long)g_score[0].atBeat);
+      return 1;
+    }
+    _mock_millis = t0 + 250 * 500 + 10;                 // beat 250
+    contractLoopTick();
+    if (g_scoreIndex != 0 || g_contractColor.g != 0xff || g_contractColor.r != 0
+        || g_contractColor.b != 0) {
+      printf("FAIL: at beat 250 the re-sent show rendered rgb=%u,%u,%u — it is playing a "
+             "section from the PREVIOUS show (purple 800080 @200), which outlived the resend "
+             "and now sits between show B's sections\n", (unsigned)g_contractColor.r,
+             (unsigned)g_contractColor.g, (unsigned)g_contractColor.b);
+      return 1;
+    }
+
+    // (b) CAP DROP — fill show A to the cap, then resend. scoreInsert() returns unchanged at
+    //     cap, so with the score uncleared show B is discarded OUTRIGHT. B's beats sit BELOW
+    //     A's so a merge cannot hide the drop behind an exact-atBeat replace.
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=000000,d=0");
+    t0 = _mock_millis;
+    parseContract("!**C:bpm=120,bpb=4,beat=0");
+    parseContract("!**M:v=show");
+    for (int i = 0; i < 8; i++) {                       // show A: fill the 8-entry table
+      char c[40]; snprintf(c, sizeof(c), "!P*A:i=solid,c=ff0000,at=%d", i * 10);
+      parseContract(c);
+    }
+    if (g_scoreCount != 8) {                            // non-vacuous: the table really IS full
+      printf("FAIL: show A did not fill the score to cap (count=%d)\n", g_scoreCount); return 1;
+    }
+    parseContract("!**M:v=show");                       // ---- the Resend. No stop. ----
+    parseContract("!P*A:i=solid,c=00ff00,at=5");
+    parseContract("!P*A:i=solid,c=0000ff,at=15");
+    if (g_scoreCount != 2) {
+      printf("FAIL: after a resend onto a FULL score the table holds %d entries, not show B's "
+             "2 — scoreInsert() silently dropped show B at the 8-entry cap\n", g_scoreCount);
+      return 1;
+    }
+    _mock_millis = t0 + 6 * 500 + 10;                   // beat 6 => show B's GREEN@5
+    contractLoopTick();
+    if (g_contractColor.g != 0xff || g_contractColor.r != 0) {
+      printf("FAIL: the re-sent show is playing show A's RED section (rgb=%u,%u,%u) — every one "
+             "of show B's sections was dropped at the cap, so the board replays the FIRST show "
+             "forever\n", (unsigned)g_contractColor.r, (unsigned)g_contractColor.g,
+             (unsigned)g_contractColor.b);
+      return 1;
+    }
+    parseContract("!**X");
+  }
+
   printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp/scale "
-         "+ v1.2 accent-overlay guards (A1-A8: A7 flash strobes, A8 strobe cap unbypassable) OK\n");
+         "+ v1.2 accent-overlay guards (A1-A9: A7 flash strobes, A8 strobe cap unbypassable, "
+         "A9 a resend replaces the show) OK\n");
   return 0;
 }
