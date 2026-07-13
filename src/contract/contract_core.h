@@ -40,6 +40,15 @@ struct ContractParams {
   bool hasBeat = false;    int32_t beatAnchor = 0;
   bool hasLevel = false;   uint8_t level = 0;   // verb L value
   char mode = 0;           // verb M: 's'(how) | 'i'(dle)
+  // ===== v1.2: accent-effect overlay =====
+  // The ONE overlay primitive, reachable from two triggers:
+  //   * live  (Phase 1): verb P, which carries the overlay in i=/c=/d=;
+  //   * score (Phase 2): verb A + at=, which carries it in ae=/ac=/ad= so the board
+  //     can fire the SAME effect-swap accent autonomously, without the Pi.
+  // Absent on the wire => hasAccentFx stays false => the entry behaves EXACTLY as v1.1.
+  bool hasAccentFx = false;    ContractEffect accentFx = CE_NONE;   // ae=<effect name>
+  bool hasAccentColor = false; RGB accentColor{0, 0, 0};            // ac=<rrggbb>
+  bool hasAccentDur = false;   uint16_t accentDurMs = 0;            // ad=<ms>, clamped <= 2550
 };
 
 struct ParsedContract {
@@ -86,6 +95,26 @@ inline ContractEffect _effectFromName(const char* s, size_t len, int& nativeCode
   if (len > 7 && strncmp(s, "native:", 7) == 0) { nativeCode = atoi(s + 7); return CE_NATIVE; }
   return CE_NONE;
 }
+// v1.2: which effects are legal as a one-shot ACCENT overlay (ae=)?
+// ONLY the stateless renders — a pure function of (elapsed-ms, colour), safe to swap in
+// for ~180ms and swap back out.
+//   * CE_SCAN / CE_SPARKLE / CE_METER are STATEFUL: they keep per-unit frame counters
+//     (Flthy u.frame/u.frameMs, PSI firstTime + scanCol/DiscoBall/VUMeter internals) that
+//     they SHARE with the base look. A swap-and-restore corrupts the base look's state
+//     machine mid-song.
+//   * CE_NATIVE hands the frame to a renderer we do not own (RSeries _select(), Flthy
+//     LED_command[].LEDFunction), so the contract's per-frame render — and therefore the
+//     overlay's EXPIRY CHECK — never runs. A native accent would latch the board into the
+//     native look forever.
+// A rejected ae= leaves accentFx == CE_NONE, i.e. NO accent. Fail-safe, never a latch.
+inline bool accentEffectAllowed(ContractEffect e) {
+  switch (e) {
+    case CE_OFF: case CE_SOLID: case CE_FLASH: case CE_PULSE: case CE_RAINBOW:
+    case CE_COMET: case CE_CHASE: case CE_WIPE: case CE_GRADIENT:
+    case CE_COLORCYCLE: case CE_TWINKLE: return true;
+    default: return false;   // CE_NONE, CE_SCAN, CE_SPARKLE, CE_METER, CE_NATIVE
+  }
+}
 // One key=value token. k/kl and v/vl are slices into the (null-terminated) source
 // buffer; numeric parses (atoi/strtol/strtoul) read v up to the next ',' or '\0'.
 //
@@ -116,6 +145,19 @@ inline void _applyParam(ContractParams& pr, const char* k, size_t kl, const char
   else if (key("ph"))   { pr.hasPh = true;      pr.phMs = (uint32_t)strtoul(v, nullptr, 10); }
   else if (key("bpb"))  { pr.hasBpb = true;     pr.bpb = (uint8_t)atoi(v); }
   else if (key("beat")) { pr.hasBeat = true;    pr.beatAnchor = (int32_t)strtol(v, nullptr, 10); }
+  // ---- v1.2 accent overlay (ae/ac/ad). key() is an EXACT-LENGTH compare, so these three
+  // cannot alias a/at/am/b/c/d/i/s/m/v/bpm/ph/bpb/beat/sw.
+  else if (key("ae"))   { int nc; ContractEffect e = _effectFromName(v, vl, nc);
+                          // native:<n> and the stateful effects are rejected here (see
+                          // accentEffectAllowed) => hasAccentFx stays false => no accent.
+                          if (e != CE_NONE && accentEffectAllowed(e)) { pr.hasAccentFx = true; pr.accentFx = e; }
+                          (void)nc; }
+  else if (key("ac"))   { RGB rgb; if (_parseHex6(v, vl, rgb)) { pr.hasAccentColor = true; pr.accentColor = rgb; } }
+  else if (key("ad"))   { // strtoul, not atoi: `int` is 16-bit on AVR, so a stray ad=99999
+                          // would wrap NEGATIVE before it could ever be clamped.
+                          unsigned long d = strtoul(v, nullptr, 10);
+                          if (d > 2550ul) d = 2550ul;                 // 255 * 10ms — the score stores /10
+                          pr.hasAccentDur = true; pr.accentDurMs = (uint16_t)d; }
   // "sw" (swing) and any unknown key: parsed-and-ignored (forward-compatible)
 }
 inline void _parseParams(const char* s, ContractParams& pr) {
@@ -189,12 +231,40 @@ inline BeatPos beatPosAt(const BeatClock& bc, uint32_t nowMs) {
   return out;
 }
 
+// Sentinel for "this unit has not accented any beat yet". A show must never inherit a
+// stale beat edge from the previous one, so every show boundary (stop / mode idle / mode
+// show / clock re-seed / score load) resets the per-unit guard to this.
+// Why not -1 or 0: beatPosAt() legitimately returns a NEGATIVE beatIndex before the anchor,
+// and a re-anchored show restarts at beat 0 — either would swallow a real first edge. This
+// sentinel is outside any reachable beat index, so the first beat of a new show always fires.
+static const int32_t BEAT_NONE = (int32_t)0x80000000;
+
+// Does accent mode `am` fire an accent on a beat at bar position `barPos`?
+// am: 0 none, 1 downbeat, 2 every-beat, 3 build, 4 drop (-> downbeat).
+// THE single definition of the fire predicate. beatAccentAmount() gates its brightness
+// envelope on this, and the firmware's once-per-beat effect-swap overlay (v1.2) fires on
+// this — so the brightness pump and the effect accent can never disagree about WHICH beats
+// carry an accent. Extracted verbatim from beatAccentAmount(); it is the same expression.
+inline bool beatAccentFires(uint8_t am, uint8_t barPos) {
+  return (am == 2) || ((am == 1 || am == 4) && barPos == 0) || (am == 3);
+}
+
+// Consume a beat edge. Returns true EXACTLY ONCE per new beat index.
+// Advances the guard UNCONDITIONALLY — a beat that does not fire must still consume its
+// edge, or the very next tick (still inside the same beat) re-tests and re-fires every frame.
+// So callers must call this FIRST and test the fire predicate afterwards.
+inline bool beatEdge(int32_t& lastBeat, int32_t beatIndex) {
+  if (beatIndex == lastBeat) return false;
+  lastBeat = beatIndex;
+  return true;
+}
+
 // Accent envelope amount 0..255 for the current beat, per accent mode + depth.
 // am: 0 none, 1 downbeat, 2 every-beat, 3 build (uses sectionProgress 0..1), 4 drop (->downbeat).
 inline uint8_t beatAccentAmount(uint8_t am, const BeatPos& bp, uint8_t beatMod, float sectionProgress) {
-  if (am == 0 || beatMod == 0) return 0;
-  bool fire = (am == 2) || ((am == 1 || am == 4) && bp.barPos == 0) || (am == 3);
-  if (!fire) return 0;
+  if (am == 0 || beatMod == 0) return 0;   // (the am==0 half is now redundant with
+                                           // beatAccentFires(0,x)==false; the beatMod==0 half is NOT)
+  if (!beatAccentFires(am, bp.barPos)) return 0;
   float env = (1.0f - bp.phase) * (1.0f - bp.phase);  // fast attack, slow decay
   if (bp.barPos == 0) { env *= 1.3f; if (env > 1.0f) env = 1.0f; }   // downbeat emphasis
   if (am == 3) {                                       // build: scale by section progress
@@ -233,6 +303,13 @@ struct ScoreEntry {
   uint8_t        speed = 128;
   uint8_t        beatMod = 0;
   uint8_t        accentMode = 0;
+  // ---- v1.2 accent overlay. accentFx == CE_NONE => no overlay => EXACT v1.1 behaviour.
+  // The firmware's beat-edge trigger tests `accentFx == CE_NONE` and bails, so an entry
+  // built from a v1.1 line (no ae=) can never arm the overlay.
+  ContractEffect accentFx = CE_NONE;   // 1B; never CE_NATIVE/CE_SCAN/... (rejected at parse)
+  RGB            accentColor{0, 0, 0}; // 3B; RESOLVED at insert: ac= if given, else the entry's color
+  uint8_t        accentDur10 = 18;     // 1B; duration / 10ms (18 => 180ms). Keeps the entry small
+                                       // on AVR: a 2550ms ceiling is far beyond any musical accent.
 };
 
 // Index of the last entry with atBeat <= beatIndex (-1 if none yet). Entries sorted asc.

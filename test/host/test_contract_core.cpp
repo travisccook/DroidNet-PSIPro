@@ -123,6 +123,254 @@ static void test_accent_envelope() {
   CHECK(beatAccentAmount(3, down, 255, 1.0f) > 200);   // build at full progress -> strong
 }
 
+// ===================== v1.2: the accent-effect overlay =====================
+// The v1.1 fire predicate, TRANSCRIBED VERBATIM from the body of beatAccentAmount()
+// as it stood BEFORE the v1.2 refactor extracted it:
+//     bool fire = (am == 2) || ((am == 1 || am == 4) && bp.barPos == 0) || (am == 3);
+// beatAccentFires() must agree with this on every reachable input, or the extraction
+// changed behaviour for an existing show. This is the "unchanged by construction" proof,
+// mechanised.
+static bool v11_fire_reference(uint8_t am, uint8_t barPos) {
+  return (am == 2) || ((am == 1 || am == 4) && barPos == 0) || (am == 3);
+}
+
+static void test_beat_accent_fires() {
+  // exhaustive am 0..4 x barPos 0..7 against the transcribed v1.1 predicate
+  int mismatches = 0, fired = 0, silent = 0;
+  for (int am = 0; am <= 4; am++) {
+    for (int bp = 0; bp < 8; bp++) {
+      bool got = beatAccentFires((uint8_t)am, (uint8_t)bp);
+      if (got != v11_fire_reference((uint8_t)am, (uint8_t)bp)) mismatches++;
+      if (got) fired++; else silent++;
+    }
+  }
+  CHECK(mismatches == 0);
+  CHECK(fired > 0 && silent > 0);   // not vacuous: both outcomes really occur in the grid
+
+  // Spot pins, so a predicate broken the SAME way in both places can't quietly agree.
+  CHECK(beatAccentFires(0, 0) == false);   // am=0: never
+  CHECK(beatAccentFires(1, 0) == true);    // am=1: downbeat only
+  CHECK(beatAccentFires(1, 1) == false);
+  CHECK(beatAccentFires(1, 3) == false);
+  CHECK(beatAccentFires(2, 0) == true);    // am=2: every beat
+  CHECK(beatAccentFires(2, 3) == true);
+  CHECK(beatAccentFires(3, 0) == true);    // am=3: build — every beat (progress-scaled)
+  CHECK(beatAccentFires(3, 5) == true);
+  CHECK(beatAccentFires(4, 0) == true);    // am=4: drop -> downbeat only
+  CHECK(beatAccentFires(4, 2) == false);
+  CHECK(beatAccentFires(9, 0) == false);   // unknown mode: silent, never a surprise strobe
+
+  // NON-DIVERGENCE: the brightness pump and the (firmware) effect-swap accent must never
+  // disagree about WHICH beats carry an accent. beatAccentAmount() > 0 implies the predicate
+  // fires; the predicate not firing implies a zero envelope. (One-directional: am=3 at
+  // progress 0 fires the predicate yet yields amount 0 — that is the build ramping in.)
+  int divergences = 0, sawPositive = 0, sawFiringZero = 0;
+  for (int am = 0; am <= 4; am++) {
+    for (int bpos = 0; bpos < 8; bpos++) {
+      for (int mod = 0; mod < 256; mod += 17) {
+        for (int ph = 0; ph < 10; ph++) {
+          for (int pg = 0; pg <= 2; pg++) {
+            BeatPos bp; bp.barPos = (uint8_t)bpos; bp.phase = (float)ph / 10.0f;
+            uint8_t amt = beatAccentAmount((uint8_t)am, bp, (uint8_t)mod, (float)pg * 0.5f);
+            bool f = beatAccentFires((uint8_t)am, (uint8_t)bpos);
+            if (amt > 0 && !f) divergences++;      // pump fired on a beat the accent skips
+            if (!f && amt != 0) divergences++;
+            if (amt > 0) sawPositive++;
+            if (f && amt == 0) sawFiringZero++;
+          }
+        }
+      }
+    }
+  }
+  CHECK(divergences == 0);
+  CHECK(sawPositive > 0);      // the implication is not vacuously true (amounts do go > 0)
+  CHECK(sawFiringZero > 0);    // ...and the one-directionality really is exercised
+}
+
+static void test_beat_edge() {
+  // A show's FIRST beat is always an edge (the guard starts at the sentinel).
+  int32_t last = BEAT_NONE;
+  CHECK(beatEdge(last, 0) == true);
+  CHECK(last == 0);
+  // Same beat, later frames: NO re-fire. This is what stops a 180ms accent from being
+  // re-armed on every render tick inside one beat.
+  CHECK(beatEdge(last, 0) == false);
+  CHECK(beatEdge(last, 0) == false);
+  CHECK(beatEdge(last, 1) == true);
+  CHECK(beatEdge(last, 2) == true);
+
+  // The guard advances UNCONDITIONALLY — even when the caller then decides not to fire
+  // (am says this beat is silent). If it did not, the next tick would re-test the same
+  // beat forever.
+  int32_t l2 = BEAT_NONE;
+  CHECK(beatEdge(l2, 3) == true && l2 == 3);   // caller may now skip on the am= test
+  CHECK(beatEdge(l2, 3) == false);             // ...and beat 3 is still consumed
+
+  // A backward re-anchor (Play/seek moves the beat origin) IS an edge.
+  CHECK(beatEdge(l2, 1) == true && l2 == 1);
+
+  // Negative beat indices (before the clock anchor) are reachable and work.
+  int32_t l3 = BEAT_NONE;
+  CHECK(beatEdge(l3, -4) == true);
+  CHECK(beatEdge(l3, -4) == false);
+  CHECK(BEAT_NONE < -1000000);   // ...so the sentinel must sit outside any reachable index
+
+  // Show boundary: a unit that ended the last show ON beat 0 must still fire the new
+  // show's beat 0. That only works if stop/idle/show/clock-reseed reset to BEAT_NONE
+  // (a reset to 0 or -1 would swallow the first accent of the next show).
+  int32_t l4 = 0;
+  CHECK(beatEdge(l4, 0) == false);   // stale guard: the new show's beat 0 is swallowed
+  l4 = BEAT_NONE;                    // what CV_STOP / CV_MODE / CV_CLOCK / score-load must do
+  CHECK(beatEdge(l4, 0) == true);
+}
+
+static void test_accent_effect_allowed() {
+  // Allowed: the STATELESS renders — a pure function of (elapsed, colour), safe to swap
+  // in for ~180ms and swap back out.
+  const ContractEffect ok[] = { CE_OFF, CE_SOLID, CE_FLASH, CE_PULSE, CE_RAINBOW,
+                                CE_COMET, CE_CHASE, CE_WIPE, CE_GRADIENT, CE_COLORCYCLE, CE_TWINKLE };
+  for (unsigned i = 0; i < sizeof(ok) / sizeof(ok[0]); i++) CHECK(accentEffectAllowed(ok[i]));
+
+  // Denied — and these denials are the safety property, not a nicety:
+  //  * scan/sparkle/meter keep per-unit frame counters SHARED with the base look; a
+  //    swap-and-restore corrupts the base look's state machine mid-song.
+  //  * native:<n> hands the frame to a renderer we do not own, so the contract's render —
+  //    and hence the overlay's EXPIRY check — never runs: the board would latch forever.
+  CHECK(!accentEffectAllowed(CE_SCAN));
+  CHECK(!accentEffectAllowed(CE_SPARKLE));
+  CHECK(!accentEffectAllowed(CE_METER));
+  CHECK(!accentEffectAllowed(CE_NATIVE));
+  CHECK(!accentEffectAllowed(CE_NONE));
+}
+
+static void test_accent_params() {
+  ParsedContract p;
+
+  // ---- ABSENT => defaults. A v1.1 line is bit-identical after the new parse branches.
+  CHECK(contractParse("L*A:i=solid,c=3b82f6,at=64,am=2,m=200", p));
+  CHECK(!p.params.hasAccentFx && p.params.accentFx == CE_NONE);
+  CHECK(!p.params.hasAccentColor);
+  CHECK(p.params.accentColor.r == 0 && p.params.accentColor.g == 0 && p.params.accentColor.b == 0);
+  CHECK(!p.params.hasAccentDur && p.params.accentDurMs == 0);
+  CHECK(p.params.hasAt && p.params.atBeat == 64 && p.params.accentMode == 2 && p.params.beatMod == 200);
+
+  // ---- A fully-loaded v1.2 scored entry.
+  CHECK(contractParse("L*A:i=colorcycle,c=3b82f6,at=1234,am=2,m=200,ae=flash,ac=ffffff,ad=250", p));
+  CHECK(p.params.hasEffect && p.params.effect == CE_COLORCYCLE);
+  CHECK(p.params.hasAccentFx && p.params.accentFx == CE_FLASH);
+  CHECK(p.params.hasAccentColor && p.params.accentColor.r == 0xFF
+        && p.params.accentColor.g == 0xFF && p.params.accentColor.b == 0xFF);
+  CHECK(p.params.hasAccentDur && p.params.accentDurMs == 250);
+  // COLLISION GUARD: key() is an exact-LENGTH compare, so ae/ac/ad cannot alias a/at/am/c/d.
+  // The pre-existing keys must still land on their own fields alongside the new ones.
+  CHECK(p.params.hasAt && p.params.atBeat == 1234);
+  CHECK(p.params.hasAm && p.params.accentMode == 2);
+  CHECK(p.params.hasBeatMod && p.params.beatMod == 200);
+  CHECK(p.params.hasColor && p.params.color.r == 0x3b && p.params.color.g == 0x82 && p.params.color.b == 0xf6);
+  CHECK(!p.params.hasDur && p.params.durMs == 0);   // ad= must NOT be read as d=
+
+  // ...and key ORDER must not matter (ae before at, ac before am, ad before i).
+  CHECK(contractParse("L*A:ae=comet,at=7,ac=00ff00,am=1,ad=170,i=solid", p));
+  CHECK(p.params.accentFx == CE_COMET && p.params.atBeat == 7 && p.params.accentMode == 1);
+  CHECK(p.params.accentColor.r == 0x00 && p.params.accentColor.g == 0xFF && p.params.accentColor.b == 0x00);
+  CHECK(p.params.accentDurMs == 170 && p.params.effect == CE_SOLID);
+
+  // ---- every ALLOWED accent effect name parses through ae=
+  CHECK(contractParse("L*A:ae=off", p)        && p.params.accentFx == CE_OFF);
+  CHECK(contractParse("L*A:ae=solid", p)      && p.params.accentFx == CE_SOLID);
+  CHECK(contractParse("L*A:ae=flash", p)      && p.params.accentFx == CE_FLASH);
+  CHECK(contractParse("L*A:ae=pulse", p)      && p.params.accentFx == CE_PULSE);
+  CHECK(contractParse("L*A:ae=rainbow", p)    && p.params.accentFx == CE_RAINBOW);
+  CHECK(contractParse("L*A:ae=comet", p)      && p.params.accentFx == CE_COMET);
+  CHECK(contractParse("L*A:ae=chase", p)      && p.params.accentFx == CE_CHASE);
+  CHECK(contractParse("L*A:ae=wipe", p)       && p.params.accentFx == CE_WIPE);
+  CHECK(contractParse("L*A:ae=gradient", p)   && p.params.accentFx == CE_GRADIENT);
+  CHECK(contractParse("L*A:ae=colorcycle", p) && p.params.accentFx == CE_COLORCYCLE);
+  CHECK(contractParse("L*A:ae=twinkle", p)    && p.params.accentFx == CE_TWINKLE);
+
+  // ---- REJECTED accents leave hasAccentFx FALSE => no accent at all. Fail-safe: a
+  // rejected ae= can never arm an overlay that would corrupt the base look or latch.
+  CHECK(contractParse("L*A:ae=native:3", p) && !p.params.hasAccentFx && p.params.accentFx == CE_NONE);
+  CHECK(contractParse("L*A:ae=scan", p)     && !p.params.hasAccentFx && p.params.accentFx == CE_NONE);
+  CHECK(contractParse("L*A:ae=sparkle", p)  && !p.params.hasAccentFx && p.params.accentFx == CE_NONE);
+  CHECK(contractParse("L*A:ae=meter", p)    && !p.params.hasAccentFx && p.params.accentFx == CE_NONE);
+  CHECK(contractParse("L*A:ae=bogus", p)    && !p.params.hasAccentFx && p.params.accentFx == CE_NONE);
+  // ...and a rejected ae= must not poison the rest of the line.
+  CHECK(contractParse("L*A:ae=scan,i=solid,at=9", p) && !p.params.hasAccentFx
+        && p.params.effect == CE_SOLID && p.params.hasAt && p.params.atBeat == 9);
+  // ...nor may an ae=native:<n> leak its code into nativeCode — i= owns that field.
+  CHECK(contractParse("L*A:i=native:105,ae=native:3", p));
+  CHECK(p.params.effect == CE_NATIVE && p.params.nativeCode == 105 && !p.params.hasAccentFx);
+
+  // ---- bad accent hex is rejected the same way c= is (leaves hasAccentColor false).
+  CHECK(contractParse("L*A:ae=flash,ac=ZZZZZZ", p) && p.params.hasAccentFx && !p.params.hasAccentColor);
+  CHECK(contractParse("L*A:ae=flash,ac=fff", p) && !p.params.hasAccentColor);   // too short
+
+  // ---- ad= clamp. The score stores the duration in 10ms units in ONE byte, so 2550ms is
+  // the ceiling; a bigger value must SATURATE, not wrap (atoi would wrap a 16-bit AVR int).
+  CHECK(contractParse("L*A:ae=flash,ad=2550", p)  && p.params.accentDurMs == 2550);
+  CHECK(contractParse("L*A:ae=flash,ad=2551", p)  && p.params.accentDurMs == 2550);
+  CHECK(contractParse("L*A:ae=flash,ad=99999", p) && p.params.accentDurMs == 2550);
+  CHECK(contractParse("L*A:ae=flash,ad=0", p) && p.params.hasAccentDur && p.params.accentDurMs == 0);
+  CHECK(contractParse("L*A:ae=flash,ad=180", p) && p.params.accentDurMs == 180);
+
+  // ---- WIRE BUDGET. The smallest command buffer on the three boards gives 63 usable
+  // chars today (RSeries Marcduino BUFFER_SIZE 64 / PSI CMD_MAX_LENGTH 64), and both
+  // TRUNCATE SILENTLY on overflow. A white flash accent over a colorcycle base is the
+  // most obvious thing a user will author and it does not fit — the firmware layers must
+  // raise those buffers to 96 (Studio also drops d=0 and elides default ae/ac/ad).
+  // Pins the worst emitted line against the bumped budget so a future key can't blow it.
+  const char* worst = "!L*A:i=colorcycle,c=3b82f6,at=1234,am=2,m=200,ae=colorcycle,ac=ffffff,ad=250";
+  CHECK(strlen(worst) <= 95);                          // <= 96-byte buffer, minus the NUL
+  CHECK(contractParse(worst + 1, p) && p.params.accentFx == CE_COLORCYCLE);   // ...and it parses whole
+  const char* common = "!L*A:i=colorcycle,c=3b82f6,at=1234,am=2,m=200,ae=flash,ac=ffffff";
+  CHECK(strlen(common) > 63);                          // THE line that busts today's 64B buffer
+}
+
+static void test_score_accent_fields() {
+  // A default-constructed entry — what a v1.1 line (no ae=) builds — carries NO accent.
+  // This is the bit-identical-to-v1.1 anchor: the firmware's beat-edge trigger tests
+  // `accentFx == CE_NONE` and bails, so such an entry can never arm the overlay.
+  ScoreEntry v11;
+  CHECK(v11.accentFx == CE_NONE);
+  CHECK(v11.accentDur10 == 18);   // 180ms default, in the score's 10ms quantum
+  CHECK(v11.accentColor.r == 0 && v11.accentColor.g == 0 && v11.accentColor.b == 0);
+
+  // The accent fields must survive scoreInsert's sorted shift, its replace-on-exact-match
+  // path, and a scoreActiveIndex lookup — the board reads them straight off the entry the
+  // active index points at, so a field lost in the shift is a silently accent-less section.
+  ScoreEntry s[8]; int n = 0; const int cap = 8;
+  ScoreEntry a; a.atBeat = 0;  a.effect = CE_SOLID;    a.color = RGB{1, 2, 3};   // v1.1 entry
+  ScoreEntry b; b.atBeat = 64; b.effect = CE_FLASH;
+  b.accentFx = CE_COMET; b.accentColor = RGB{0xFF, 0xEE, 0xDD}; b.accentDur10 = 25;
+  ScoreEntry c; c.atBeat = 32; c.effect = CE_RAINBOW;
+  c.accentFx = CE_PULSE; c.accentColor = RGB{0x11, 0x22, 0x33}; c.accentDur10 = 18;
+  n = scoreInsert(s, n, cap, a);
+  n = scoreInsert(s, n, cap, b);
+  n = scoreInsert(s, n, cap, c);                       // shifts b one slot right
+  CHECK(n == 3 && s[0].atBeat == 0 && s[1].atBeat == 32 && s[2].atBeat == 64);
+  CHECK(s[0].accentFx == CE_NONE);                     // the v1.1 entry still has no accent
+  CHECK(s[1].accentFx == CE_PULSE && s[1].accentDur10 == 18);
+  CHECK(s[1].accentColor.r == 0x11 && s[1].accentColor.g == 0x22 && s[1].accentColor.b == 0x33);
+  CHECK(s[2].accentFx == CE_COMET && s[2].accentDur10 == 25);          // survived the shift
+  CHECK(s[2].accentColor.r == 0xFF && s[2].accentColor.g == 0xEE && s[2].accentColor.b == 0xDD);
+
+  // scoreActiveIndex hands back the entry WITH its accent intact.
+  int i = scoreActiveIndex(s, n, 40);
+  CHECK(i == 1 && s[i].accentFx == CE_PULSE && s[i].accentDur10 == 18 && s[i].accentColor.g == 0x22);
+  i = scoreActiveIndex(s, n, 5);
+  CHECK(i == 0 && s[i].accentFx == CE_NONE);           // v1.1 section active => trigger bails
+
+  // Replace-on-exact-match must replace the ACCENT too — including replacing a v1.2 entry
+  // with a v1.1 one, which must turn the accent OFF (not leave the old one armed).
+  ScoreEntry c2; c2.atBeat = 32; c2.effect = CE_METER;   // no accent keys
+  n = scoreInsert(s, n, cap, c2);
+  CHECK(n == 3 && s[1].effect == CE_METER);
+  CHECK(s[1].accentFx == CE_NONE && s[1].accentDur10 == 18 && s[1].accentColor.r == 0);
+  CHECK(s[2].accentFx == CE_COMET);                    // ...and its neighbour is untouched
+}
+// =================== END v1.2 accent-effect overlay =======================
+
 // envBright() is THE shared beat-pump envelope — all three forks (Logics/PSI/HPs)
 // render through it, so these vectors are the cross-board level contract. Pinning
 // them here is what stops one board drifting back to its own ad-hoc math (the
@@ -376,8 +624,13 @@ int main() {
   test_params();
   test_beat_clock();
   test_accent_envelope();
+  test_beat_accent_fires();
+  test_beat_edge();
+  test_accent_effect_allowed();
+  test_accent_params();
   test_env_bright();
   test_score();
+  test_score_accent_fields();
   test_fx_helpers();
   test_fx_spatial_helpers();
   test_fx_hue_twinkle_helpers();
