@@ -1,361 +1,254 @@
-# PSIPro Version 1.7 - Released December 30th 2020
-
-## Author
-Written by Neil Hutchison
-
-## Thanks
-Main sequence transitions by Krijn Schaap, based on his PSI sketch.  Many thanks Krijn.
-
-Pattern Timing Tuning by Malcolm MacKenzie
-
-Thanks to Malcolm (Maxstang) for the boards, support, testing and encouragement.
-
-Thanks to Skelmir for bix fixes and the addition of support for a Mini
-
-## Version History
-
-    *  Version 1.7
-         * Bug fix for restoring the default pattern.
-         * Remove compiler warnings.
-         * Support for Mini added.
-
-    *  Version 1.6 - 14th May 2020
-         * Fixes for the Valid PSI address checks in the T command
-         *  Check for a valid pattern number, and ignore if the pattern does not match a known pattern.
-              Continue running the current pattern with the current timings.
-
-    *  Version 1.5 - 13th May 2020
-         * Added a check in the T command processing to prevent settig the global timing parameters
-           if the command is not addressed to a PSI (address 0,4,5)
-
-    *  Version 1.3 - 21st April 2020
-         * Minor fix for timing in Imperial March.
-
-    *  Version 1.2 -  16th April 2020
-	 * Correct comment typos
-	 * Always on was actually only on for 17 min. Changed to +4 hrs.
-	 * Change Star Wars Intro
-		
-	*  Version 1.1 - 13th April 2020
-     * Fixed a bug in the Rebel pattern where it would blink the first time a timing command was given
-	    Subsequent calls to Rebel with timing supplied worked
-     * Explicitly check in Fade Out and Lightsaber Battle for a timing parameter supplied and ignore it
-     * All CRGB:White changed to CRGB:Grey to reduce power consumption of the panel
-     * Max Brightness allowed upped to 200 from 175
-     * Renamed the Sketch to match the git repo
-
-     *  Version 1.0 - 11th April 2020
-	* Added 3Pyy command to set brightness without saving to EEPROM
-	* Limit the Max LED Brightness to 175 to preserve the LED Life.
-   
-    * Version 0.99_5 - 10th April 2020
-	* Renamed USB_DEBUG to USB_SERIAL
-
-    * Version 0.99_4 - 9th April 2020
-        * Fixed the Command line setting for per pattern timeout that was added
-            * Timings over 32 seconds did not work
-            * To set the pattern as "always On" Set the timing parameter to 256 which will
-            * run the pattern for 16 hours - I'll call that good enough for always on!
-         *  Added Firmware Average for the POT readings.  This works around the issue of not 
-             having a capacitor on the POT.
-
-    *  Version 0.98 - 8th April 2020
-       *  Added the ability for each sequence to run for a given time.
-           * Rather than try to set the time a pattern runs for by setting the loops, you can
-           * specify the total time the pattern should run for.  To disable the total run time
-           * and use a set number of loops, set the run time parameter to 0.
-       *  Added the ability to set the command duration in seconds via the command.
-           * This only applies to T commands.  
-           * Send the command using 0Tx|y where |y is optional.  y is in seconds.
-
-    *  Version 0.97 - 7th April 2020
-        *  Added ability to set Disco Ball and VU Meter on indefinitely.
-            * Mode 13 is the new Always on Disco Ball
-            * Mode 12 is the timed Disco Ball 
-            * Mode 92 is VU Meter (always on) to match Logic commanding
-            * Mode 21 is VU Meter timed
-        *  Restored the fast switch between USB Serial and Tx/Rx Pin Serial
-
-    *  Version 0.96 - 5th April 2020
-        *  Added address checking for T commands
-        *  0 is all
-        *  4 is Front PSI
-        *  5 is rear PSI as taken from Marc's Teeces command guide.
-
-        * Address field is interpreted as follows:
-            * 0 - global address, all displays that support the command are set
-            * 1 - TFLD (Top Front Logic Dislay)
-            * 2 - BFLD (Bottom Front Logic Display)
-            * 3 - RLD  (Rear Logic Display)
-            * 4 - Front PSI
-            * 5 - Rear PSI
-            * 6 - Front Holo (not implemented here)
-            * 7 - Rear Holo  (not implemented here)
-            * 8 - Top Holo   (not implemented here)
-
-    *  Version 0.9.5 - 5th April 2020
-        *  Star Wars scrolling text sequence added
-        *  Minor bug fixes
-
-    *  Version 0.94 - 4th April 2020
-        *  Comments cleanup and clarification
-        *  More timing tweaks
-        *  Work around added for serial difficulties with non Sparkfun Pro Micro
-
-    *  Version 0.93 - 1st April 2020 (Happy April Fools Day!)
-        *  Code cleanup, and code size reduction
-        *  Timing tweaks from Malcolm for various sequences.
-        *  Updated JawaLite To support A, D and P (P used to change always on mode)
-        *  T1 (Swipe) is now the default sequence, as MarcDuino sends 0T1 on startup.
-        *  Added the ability to set the default pattern in the config.h  
-        *      Note that MarcDuino will send 0T1, so whatever is in Mode 1 will be the starting pattern.
-        *      After that point when a sequence completes, it will restore the "defaultPattern" 
-        *      as defined in config.h
-        *  EEPROM Support added to store various global settings:
-        *      alwaysOn config
-        *      Internal or External POT use
-        *      Internal brightness setting if using Internal Brightness value (1P1 was sent)
-        *  Fixed a bug in the VU Meter Sequence.
-
-    *  Version 0.8 - 31st March 2020
-        *  Added Lightsaber Battle animation
-        *  Added Pulse for rear logic dsiplay on T9
-        *  Updated JawaLite Commanding on Serial to be 0Txx format
-        *  Added the ability to change the serial port by defining USB_DEBUG.  
-        *    Uncomment #define USB_DEBUG for serial communications using Tx and Rx (removed again)
-        *  Set the default behavior for unrecognized commands to just keep running the swipe pattern.
-        *  Configuration data moved to config.h rather than being scattered.
-
-    *  Version 0.7 - 30th March 2020
-        *  Non-Delay version of code.
-        *  Allows sequences to be interrupted at ay time.
-        *  Waiting for sequence completion is no longer required
-        *  Set the default brightness in setup from the Brightness POT
-
-    *  Version 0.6 - 29th March 2020
-        *  Base versions of most sequences implemented
-        *  Support for Front/Rear color selection using Jumper implemented
-        *  Brightness Pot implemented
-
-## Sketch Details
-
-This sketch is provided to control MaxStang's PSI Pro. Details on operation and setup will be provided here.
-
-Basic Operation
-
-
-
-  
-  
-                                  ***************************   
-                                  ********* WARNING *********
-                                  ***************************
-                                        
-           This PSI CAN DRAW MORE POWER THAN YOUR COMPUTER'S USB PORT CAN SUPPLY!! 
-      
-      When using the USB connection on the Pro Micro to power the PSI (during programming 
-      for instance) be sure to have the brightness POT turned nearly all the way COUNTERCLOCKWISE.  
-      Having the POT turned up too far when plugged into USB can damage the Pro Micro and/or your 
-      computer's USB port!!!! If you are using the internal brightness control and are connected 
-      to USB, KEEP THIS VALUE LOW, not higher than 20. The Pro Micro can also be removed from the 
-      PSI and programmed separately. 
-
-
-ESD SAFETY
-
-Like any sensitive piece of electronics, the PSI Pro Connected can be damaged by static discharge.  Before touching the PSI, be sure to ground yourself.  
-
-SET UP
-
-The PSI Pro Connected comes assembled and preprogrammed with standard front and rear PSI colors.  
-
-DEFAULT COLORS
-
-Placing the the included jumper on the Front/Back header on the back of the PSI will change the colors from red/blue to green/yellow.
-
-BRIGHTNESS ADJUSTMENT
-
-Brightness may be adjusted manually by turning the potentiometer on the back of the PSI. Take care not to force the potentiometer more than a single turn. DO NOT TURN THE BRIGHTNESS UP WHEN POWERING THE PSI THROUGH THE USB PORT ON THE PRO MICRO. Doing so may damage the Pro Micro.  Brightness may also be adjusted via software commands. See below. 
-
-POWERING THE PSI PRO
-
-The PSI Pro requires a regulated 5 volt power supply of at least 500mA.  IT may be powered through any one of the +5v input headers on the back of the PSI.  If powering the PSI Pro through a serial or I2c device chain, be sure the chain can supply at least 500mA to the PSI Pro.  The PSI can be temporarily powered during programming or testing through the USB port on the Pro Mini, but only with the brightness set to low.   
-
-The PSI will default to Mode 1 (SWIPE), with default colors and timings when powered on. Colors and timings may be customized by changing settings in the config.h tab of the PSI Pro Connected sketch (see below). 
-
- 
-
-COMMANDS AND COMMAND STRUCTURE 
-
-The PSI Pro's display Mode can be changed by sending JawaLite commands via serial or I2c.
-          
-  
-  
-   Supported JAWALite Commands via Serial or i2c:
- 
-   Serial:
- 
-   Command T - Trigger a numbered Mode.  Txx where xx is the pattern number below. When using the R2 Touch app, commands
-               should be in the form @0Tx\r or @0Txx\r. Please see below for address information for the T command. 
-               
-               The Optional time parameter can be sent by adding |yy to the T command.  Commands should be in the form
-               @0Tx|y.  y is a value in seconds.
-   
-   Command A - Go to Main mode of operation which is Standard Swipe Pattern.
-               @0A from R2 Touch
-   
-   Command D - Go to Default mode which is the Standard Swipe Pattern.
-               @0D from R2 Touch
-   
-   Command xPy - Sets various board parameters.
-                 If x is 0, Set the alwaysOn behavior of the panel
-                   The default mode for the panel is to display command sequences for 
-                   a given time, then revert to the default pattern.  
-                   By sending the xPy command, this can be changed.
-                   Y is either 0 or 1 (default or always on mode)
-                   0P0 - Default mode, where default pattern is restored after the sequence plays
-                   0P1 - The sequence continues to play until a new comand is received.
-				   
-                 If x is 1, Set the POT mode
-                   The default is to read the external POT value for setting brightness
-                   Y is either 0 or 1 (Pot or internal setting)
-                   1P0 - Default mode, uses the external POT to set the LED brightness
-                   1P1 - Use the internal brightness, which is set using command 2Py below
-                   
-                 If x is 2, Set the internal brightness value, overriding the POT.
-                   The default setting is that brightness is 20.
-                   Y is a value between 0 (off) and 255 (max brightness) Values over 200 
-                   will be limited to 200 to preserve the life of the LEDs.This value
-                   is saved to the EPROM and will persist after power down. 
-                   for example:  2Py or 2Pyy or 2Pyyy
-                   
-                 If x is 3, Set the internal brighness value, overriding the POT, but do not save to EEPROM.
-                   3P0 will restore the brightness to it's previous value.  If that was POT control, the POT setting
-                   will be used, if it was internal brightness, then the previous global internal brightness will be used.
-                   3Pyyy will set the brightness in the range 1 to 200.  Values over 200 will be limited to 200 to preserve
-                   the life of the LEDs.
-                
-                @xPy from R2 Touch (You don't need the '0' before the x when using the P command. 
-                                           
- 
-   i2c:
- 
-   When sending i2c command the Panel Address is defined on the config.h tab to be 22.  The command type and value are needed.  
-   To trigger a pattern, send an address (0 for all, 4 for front, 5 for rear) then the character 'T' and the Mode value corresponding 
-   to the pattern list below to trigger the corresponding sequence. Sequences must be terminated with a carriage return (\r).  
-   
-   Using i2c with the R2 Touch app, commands must be sent in hex. For example, &220T6\r would be spelled &22,x33,x54,x36,x0D\r
-   
-   Commands:
-   
-   Address modifiers for "T" commands.  The digit preceeding the T is the address:
-   
-   0 is all
-   4 is Front PSI
-   5 is Rear PSI as taken from Marc's Teeces command guide.
-   
-       Address field is interpreted as follows:
-       0 - global address, all displays that support the command are set
-       1 - TFLD (Top Front Logic Dislay)
-       2 - BFLD (Bottom Front Logic Display)
-       3 - RLD  (Rear Logic Display)
-       4 - Front PSI
-       5 - Rear PSI
-       6 - Front Holo (not implemented here)
-       7 - Rear Holo  (not implemented here)
-       8 - Top Holo   (not implemented here)
- 
-   Command T Modes
-	* Sensitivity to flashing lights can be as slow as 3x/second.  
-	* e.g. Flash, Alarm, Scream
-	* You must be cautious.
- 
-     Mode 0  - Turn Panel off (This will also turn stop the Teeces if they share the serial connection and the "0" address is used)
-     Mode 1  - Default (Swipe) The default mode can be changed on the config.h tab
-     Mode 2  - Flash (fast flash) (4 seconds) 
-     Mode 3  - Alarm (slow flash) (4 seconds)
-     Mode 4  - Short Circuit (10 seconds)
-     Mode 5  - Scream (4 seconds)
-     Mode 6  - Leia Message (34 seconds)
-     Mode 7  - I Heart U (10 seconds)
-     Mode 8  - Quarter Panel Sweep (7 seconds)
-     Mode 9  - Flashing Red Heart (Front PSI), Pulse Monitor (Rear PSI)
-     Mode 10 - Star Wars - Title Scroll (15 seconds)
-     Mode 11 - Imperial March (47 seconds)
-     Mode 12 - Disco Ball (4 seconds)
-     Mode 13 - Disco Ball -Runs Indefinitely
-     Mode 14 - Rebel Symbol (5 seconds)
-     Mode 15 - Knight Rider (20 seconds)
-     Mode 16 - Test Sequence (White on Indefinitely)
-     Mode 17 - Red on Indefinitely  
-     Mode 18 - Green on Indefinitely
-     Mode 19 - LightSaber Battle
-     Mode 20 - Star Wars Intro (scrolling yellow "text" getting smaller and dimmer)
-     Mode 21 - VU Meter (4 seconds)
-     Mode 92 - VU Meter - Runs Indefinitely (Spectrum on Teeces)
-
-
-SKETCH BASED PSI PRO SETTINGS
-
-	The PSI Pro's default behaviors may be changed by editing the config.h file of the PSI Pro sketch.  
-
-
-TIMER SETTINGS
-
-	The numbered pattern Modes have various preprogrammed lengths to match those of the Teeces Logic patterns. Some of the additional Modes have 
-	indefinite lengths.  To set ALL pattern Modes called using the Mode (T) command to remain on indefinitely, then set 'bool alwaysOn = false;' 
-	to true. The default is false, meaning that each selected pattern Mode will remain on for its set time, and then will return to the default 
-	pattern Mode. This can also be changed using command P as described above. 
-
-BAUD RATE
-
-	By default, the PSI Pro Connected uses a 2400bps baud rate.  This is due to the Teeces lighting running at this speed.  To change the default 
-	speed to a more reasonable 9600bps, uncomment '#define_9600BAUDSJEDI_' in the sketch. 
-
-SETTING THE DEFAULT PATTERN MODE
-
-	The PSI Pro is shipped with Mode 1 (SWIPE) as the default pattern mode, but any display Mode can be the default Mode the PSI returns to after 
-	completing a command initiated Mode.  To change the default mode, enter the mode number desired in 'uint8_t defaultPattern = 1;'.
-
-
-SWIPE MODE SETTINGS
-
-	Colors are divided into 
-		Primary (Default is Blue for the front PSI and Green for the Rear) and 
-		Secondary (Default is Red for the front PSI and Yellow for the rear).
-
-
-	The behavior of the default SWIPE mode may be changed by adjusting the following parameters:
-
-	Primary Color Duration Minimum/Maximum
-
-		Choose the maximum and minimum random number of milliseconds the PSI pauses on the Primary color before switching to the secondary color.
-
-		Choose the maximum and minimum random number of milliseconds the PSI pauses on the Secondary color before switching to the secondary color.
-
-		Choose the maximum and minimum random speed range of the swipe animation.
-
-		Define the chance proportion between the various options for the secondary color. Increasing a value compared to the others increases the 
-		likelihood of that option occurring. If the chance for an option is set to 0, it will not be occur.
-
-		Choose the maximum and minimum random number of columns to display the secondary color. 
-		The remainder of the columns will display the primary color. 
-
-		Choose the number of off (unlit) columns. This enables the 'half dark' PSI as seen in A New Hope. 
-
-		Choose the Primary and Secondary colors for the SWIPE mode.  These may be any RGB combination.  
-		Default colors are red/blue and green/yellow. 
-
-		Choose the colors determined by setting the Front/Rear jumper on the back of the PSI Pro. 
-
-SERIAL SETTINGS
-
-	If 'USB_SERIAL' is defined, the serial port on the USB of the Pro Micro will be used for communication, and debug output. Uncomment this if you 
-	want to debug, add new patterns etc, and are working via USB.  Note the brightness warning above! The normal mode is that any serial control 
-	device (MarcDuino, STEALTH etc) will be connected to the PSI via the header pins on the PSI PCB by default. These pins are referred to as Serial1. 
-	Uncommenting 'USB_SERIAL' switches to using the USB port and the Serial on the USB of the Pro Micro instead.
-
-I2C ADDRESS
-
-	By default, the PSI Pro's I2c address is 22.  This can be changed by inserting the desired address in 'byte I2CAdress = 22;'.
-	
+# DroidNet-PSIPro
+
+An additive fork of the **PSI Pro** firmware by **Neil Hutchison**, for MaxStang's PSI Pro board.
+
+Nearly everything in this repository is Neil's work (and his contributors'). We added one small
+layer on top of it. This README leads with the original project because that is where the credit
+belongs.
+
+---
+
+## The original project
+
+**PSI Pro firmware — by Neil Hutchison — <https://github.com/nhutchison/PSIPro>**
+
+If you own a PSI Pro, this is the firmware you want. Go get it from Neil, and go star the repo.
+
+It drives MaxStang's PSI Pro board (a 48-LED panel on a Sparkfun Pro Micro / ATmega32U4) and speaks
+JawaLite over serial and I2C, so it drops straight into an existing MarcDuino/Teeces/STEALTH droid
+without ceremony. Version 1.7, released 30 December 2020.
+
+Some specific things in it that are worth admiring, having now read the source closely:
+
+- **The v0.7 non-blocking rewrite.** There is no `delay()` in the sequence code. Every pattern is a
+  millis-driven state machine, which means any sequence can be interrupted the instant a new command
+  arrives — you never have to wait for the Imperial March to finish before the panel will listen to
+  you again. That is a genuinely hard thing to get right across two dozen animations, and Neil did it
+  on a part with about 2.5 KB of SRAM.
+- **The sequence library.** Leia, the Imperial March, the Star Wars title crawl, Knight Rider,
+  Lightsaber Battle, Short Circuit, a working VU meter — all on a small PSI panel. It is a delight,
+  and none of it was necessary. Somebody just wanted it to be good.
+- **The real-world engineering.** Brightness is capped to preserve LED life. There is an explicit,
+  loud warning about the brightness pot when the board is running off USB power, because that
+  combination can damage your Pro Micro. There is firmware averaging of the pot reading to work
+  around the missing hardware capacitor on the board. That is somebody thinking hard about the
+  person who will one day be soldering this into a droid.
+
+Neil's own README is preserved here, unchanged, as [README_UPSTREAM.md](README_UPSTREAM.md) — the
+full command reference, wiring notes, warnings and version history are all there, in his words. Read
+that one for how the board actually works.
+
+Neil credits these people in his own docs, and we carry that forward:
+
+- **Krijn Schaap** — the main sequence transitions, based on his PSI sketch.
+- **Malcolm "Maxstang" MacKenzie** — the PSI Pro boards, pattern timing tuning, support, testing and
+  encouragement.
+- **Skelmir** — bug fixes and Mini support.
+
+---
+
+## NOTICE — please read before you use, copy or redistribute this
+
+**The upstream PSI Pro project carries no license.** There is no LICENSE file and no permission
+statement anywhere in its source. Under default copyright law that means **all rights are reserved by
+Neil Hutchison and his contributors**. We have no grant to redistribute their code, and we claim no
+rights over it whatsoever.
+
+We are publishing this fork anyway, in the open, in the hope that it is a welcome addition to the
+community. To be plain about where we stand:
+
+- The PSI Pro firmware is (c) Neil Hutchison and contributors. It is theirs. Not ours.
+- This is a hobby project. It is entirely non-commercial. Nothing here is sold, and nothing here ever
+  will be.
+- **We have contacted Neil** to ask permission for this fork to exist, and to invite him to add a
+  license of his choosing to the upstream project — whatever license he wants, or none at all. That
+  is his call and nobody else's.
+- **If Neil, or Krijn, or Malcolm, or Skelmir would rather this did not exist, we will take it down
+  immediately and without argument.** Open an issue on this repo, or reach the owner any way you
+  like, and it is gone. No discussion needed.
+- If you want the PSI Pro firmware itself, **get it from Neil**: <https://github.com/nhutchison/PSIPro>.
+  Not from us.
+
+There is no LICENSE file in this repo that purports to license Neil's code, because we cannot license
+what is not ours. The only license file here,
+[LICENSE-DroidNet-Contract](LICENSE-DroidNet-Contract), covers *only* the handful of files we wrote
+ourselves, and says so explicitly.
+
+---
+
+## STOP: this has never run on hardware
+
+**Nothing in this fork has ever been flashed to a real PSI Pro. Not once.**
+
+Verification here is host-side only:
+
+- `bash test/host/run.sh` — 154 checks on the contract parser and effect math, plus a type-check of
+  the PSI render layer against a *mock* of the board API. It passes. It proves the code compiles and
+  the math is what we think it is. It proves nothing about a real panel.
+- It has **never been compiled for AVR**. The PSI is the tightest board of the three for flash
+  (roughly 28 KB usable on the ATmega32U4) and the contract layer adds an estimated 3-4 KB. There is a
+  real chance the linker overflows. A `CONTRACT_SLIM` build flag exists in `include/config.h` as an
+  escape hatch (it drops the heaviest novelty native modes to reclaim space), but that is a theory
+  too — nobody has watched it link.
+- No timing, no brightness, no power draw, no serial behaviour has been observed on a physical board.
+
+If you are thinking of putting this near a droid: **bench-compile it, bench-test it on a bare board,
+and check the current draw before you trust it.** Neil's warning about the brightness pot and USB
+power still applies, and applies harder to code nobody has run.
+
+---
+
+## What this fork adds
+
+One thing: a small, additive **Driveable-Animation Contract** so an external tool (Cantina Studio, a
+music-analysis and dome-lighting authoring tool) can drive the panel in time with a song.
+
+It is a wire grammar plus a render layer. That's it.
+
+```text
+!<cls><unit><verb>[:k=v,...]
+
+  cls    L = logic displays   P = PSI   H = holoprojectors   * = all
+  unit   F = front   R = rear   T = top   * = all
+  verb   A = animate (set the base look)      P = pulse (a beat accent)
+         C = beat-clock seed                  B = brightness
+         L = level (e.g. VU energy)           X = stop
+         M = mode (show / idle)               Q = query
+
+example: !PFA:i=comet,c=ff8800,s=200,m=64,am=1
+         (front PSI, animate, comet in orange, fast, accent on the downbeat)
+```
+
+The `!` prefix was chosen for one specific reason: **every stock board parser already ignores it.**
+That is what makes this layer additive rather than invasive. A board that has never heard of the
+contract just drops the line on the floor.
+
+What it buys:
+
+- **Arbitrary RGB**, not just the built-in palette choices.
+- **Beat-locked accents** — a pulse overlay that fires on the downbeat, on every beat, or as a build.
+- **A host-seeded beat clock**, so the panel stays in phase with the music instead of free-running.
+- **Autonomous board-side playback** — the host pushes a compact "score" (a handful of sections keyed
+  to beat numbers) once, and then the board plays the rest of the song by itself.
+
+Six new parametric effects render along the panel's 10 columns as a 1-D strand: **comet, chase, wipe,
+gradient, colorcycle, twinkle**. Their math lives in the shared core and is host-tested, so the same
+cue renders the same way on every board in the family.
+
+**Every native command of the original firmware still works exactly as before.** The whole JawaLite
+`<addr>T` / `A` / `D` / `xPy` grammar, all the modes 0-21 and 92, the I2C intake, the pot, the
+EEPROM settings, the jumper — untouched. The contract layer only takes over the frame while it is
+armed, and hands the panel straight back to `runPattern()` on stop. This is not a rewrite.
+
+### One bug fix, offered back
+
+While feeding longer command lines through `buildCommand()` we found a genuine out-of-bounds write in
+the upstream version: it writes the character *before* the bounds check, so `pos` can reach 64 and the
+function writes `cmdString[64]` — one byte past the end of a `char[64]`. On an ATmega32U4 that is
+silent stack corruption. It is fixed here (bounds-check before the write, clamp the terminator), and
+**the fix has been offered back to Neil.**
+
+This is not a gotcha. A bug like that is invisible until somebody starts pushing 40-character command
+strings at it, which nobody had a reason to do until now. The firmware is excellent; that is exactly
+why we read it closely enough to find this.
+
+---
+
+## What is theirs, and what is ours
+
+Be clear-eyed about the split. Their code is around 3,200 lines of carefully-tuned firmware. Ours is
+about 760 lines of new code plus a handful of hooks.
+
+**Theirs** (Neil Hutchison and contributors — do not attribute any of this to us):
+
+| Path | What it is |
+| --- | --- |
+| `src/main.cpp` | The firmware. Every sequence, the command parser, the pot/EEPROM/I2C handling. |
+| `include/config.h` | Board configuration, colors, timings. |
+| `include/matrices.h` | The LED matrix bitmaps. |
+| `include/functions.h`, `include/preamble.h` | Prototypes. |
+| `README_UPSTREAM.md` | Neil's own README, preserved verbatim. |
+| `visualizer/` | A browser preview of the PSI animations (added downstream of Neil, see Provenance). |
+
+**Ours** (the DroidNet contract layer — this is the entire extent of it):
+
+| Path | Lines | What it is |
+| --- | --- | --- |
+| `src/contract/contract_core.h` | 354 | Pure, dependency-free C++: the wire parser, the beat clock, the effect math, the score table. Byte-identical across all three DroidNet forks. |
+| `src/contract/ContractPSI.h` | 406 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`DiscoBall`/`VUMeter` primitives. Adds no new render primitives of its own. |
+| `test/host/` | ~695 | The host test harness (parser tests + a mock of the board API). |
+
+**Ours, inside their files** (small hooks, all of them additive):
+
+- `src/main.cpp` — one `#include`, one `if (!contractLoopTick())` guard in `loop()`, one
+  `contractPulseTick()` call, an `if (cmdString[0]=='!')` branch in `serialEvent()` and
+  `receiveEvent()`, the `buildCommand()` bounds fix, two `g_contractArmed` guards in `VUMeter()`, and
+  `#ifndef CONTRACT_SLIM` fences around five novelty modes.
+- `include/config.h` — the commented-out `CONTRACT_SLIM` flag.
+- `include/functions.h` — five prototypes for primitives the contract layer calls.
+
+That is the whole diff. `git diff 67bec26..HEAD -- src include` will show you exactly this.
+
+---
+
+## Building
+
+Heads up: there is no `platformio.ini` in this tree. The PlatformIO layout (`src/` + `include/`) came
+from the droid-side working collection this was seeded from, not from Neil — upstream is a flat
+Arduino sketch (`PSIPro.ino` + `config.h` + `matrices.h`). To build you will need to supply your own
+PlatformIO project file (board `sparkfun_promicro16`, framework `arduino`, deps FastLED) or copy the
+sources back into an Arduino sketch folder. Either way, **watch the flash number** — see the warning
+above.
+
+Host tests need only a C++17 compiler:
+
+```bash
+bash test/host/run.sh
+```
+
+---
+
+## Provenance
+
+The chain, honestly:
+
+1. **Neil Hutchison's PSI Pro firmware** (<https://github.com/nhutchison/PSIPro>), with sequence
+   transitions from Krijn Schaap, timing tuning and hardware from Malcolm "Maxstang" MacKenzie, and
+   fixes plus Mini support from Skelmir. This is the firmware.
+2. **Customizations made for one specific droid (C2B5)**, kept in a private working collection. That
+   is where the PlatformIO restructuring and the browser `visualizer/` came from. That collection is
+   private and will stay private, so there is no link to give you — but it sits in the middle of the
+   chain and it would be dishonest not to say so.
+3. **This repository** — the same code, plus the additive DroidNet contract layer described above.
+
+If any of this looks like it came from us and it isn't in the "Ours" table, it didn't.
+
+---
+
+## Credits
+
+- **Neil Hutchison** — the PSI Pro firmware. All of it.
+- **Krijn Schaap** — the main sequence transitions, based on his PSI sketch.
+- **Malcolm "Maxstang" MacKenzie** — the PSI Pro board itself, pattern timing tuning, support and
+  testing.
+- **Skelmir** — bug fixes and Mini support.
+- The FastLED project, on which the firmware depends.
+- **Travis Cook** — the contract layer in `src/contract/` and `test/host/`, and nothing else.
+
+---
+
+## License
+
+Read this together with the NOTICE at the top.
+
+- **The original firmware** (`src/main.cpp`, `include/*`, `README_UPSTREAM.md`, and everything not
+  listed as ours) is copyright Neil Hutchison and contributors. It carries **no license** — all
+  rights reserved. We are redistributing it here without a grant, in good faith, pending Neil's
+  word, and we will remove it on request.
+- **The contract layer only** (`src/contract/*` and `test/host/*`) is copyright 2026 Travis Cook and
+  is offered under the **MIT license** — see [LICENSE-DroidNet-Contract](LICENSE-DroidNet-Contract).
+  That file applies to those paths and to nothing else in this tree.
+
+`src/contract/contract_core.h` is shared byte-identically with the DroidNet RSeries and Flthy forks.
+Because the RSeries firmware is LGPL-2.1, that one file is dual-licensed by its author (LGPL-2.1-only
+when distributed as part of the LGPL fork, MIT here). Its header says so.
