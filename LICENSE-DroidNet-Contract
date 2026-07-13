@@ -1,0 +1,53 @@
+LICENSE FOR THE DROIDNET CONTRACT LAYER ONLY
+============================================
+
+SCOPE — READ THIS FIRST.
+
+This license applies to these paths, and to nothing else in this repository:
+
+    src/contract/contract_core.h
+    src/contract/ContractPSI.h
+    test/host/
+
+Those files are the "DroidNet Driveable-Animation Contract" layer. They were written by
+Travis Cook and are the only files here that he is in a position to license.
+
+EVERYTHING ELSE IN THIS TREE IS NOT COVERED BY THIS LICENSE.
+
+The PSI Pro firmware that this layer attaches to -- including but not limited to
+src/main.cpp, include/config.h, include/matrices.h, include/functions.h,
+include/preamble.h, README_UPSTREAM.md, and visualizer/ -- is the work of
+Neil Hutchison and his contributors (Krijn Schaap, Malcolm "Maxstang" MacKenzie,
+and Skelmir). The upstream project (https://github.com/nhutchison/PSIPro) carries no
+license file and no permission statement, which means ALL RIGHTS ARE RESERVED by its
+authors. Travis Cook claims no rights over it and grants no rights in it. Nothing in
+this file should be read as licensing, sublicensing, or relicensing any part of their
+work. See the NOTICE section of README.md.
+
+src/contract/contract_core.h is shared byte-identically with the DroidNet RSeries and
+Flthy forks. Its author dual-licenses that one file: LGPL-2.1-only when it is
+distributed as part of the LGPL-2.1 RSeries fork, and MIT (below) here.
+
+-------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2026 Travis Cook
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
