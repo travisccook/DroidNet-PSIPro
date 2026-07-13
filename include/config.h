@@ -247,8 +247,18 @@ byte I2CAdress = 22;
 
 
 // Command processing stuff
-// maximum number of characters in a command (63 chars since we need the null termination)
-#define CMD_MAX_LENGTH 64 
+// maximum number of characters in a command (95 chars since we need the null termination)
+//
+// DroidNet fork: raised 64 -> 96 (+32 B SRAM). buildCommand() DROPS every byte past
+// CMD_MAX_LENGTH-1 and terminates there — an over-long line is silently TRUNCATED and then
+// parsed as if it were complete. A v1.2 scored contract line carrying an accent, e.g.
+//   !P*A:i=colorcycle,c=3b82f6,at=1234,am=2,m=200,ae=flash,ac=ffffff
+// is 64 characters, one past the old 63-char ceiling: the trailing accent key would be
+// chopped and the section would silently render with no accent. 96 covers the longest line
+// the Studio emitter can produce (pinned by the buffer guard in test/host/run.sh).
+// NOTE: preamble.h defines this macro too, and is included FIRST (main.cpp:286) — the two
+// MUST be kept identical, or the definition that reaches buildCommand() is not this one.
+#define CMD_MAX_LENGTH 96
 
 // memory for command string processing
 char cmdString[CMD_MAX_LENGTH];

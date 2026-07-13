@@ -14,6 +14,39 @@
 #include "../../src/contract/ContractPSI.h"
 #include <cstdio>
 
+// ---- v1.2 accent-overlay probe ----------------------------------------------
+// The mock is a LATCH model, so the accent guards below assert on (a) the overlay state
+// the render path keys off — g_pulseActive / g_pulseFx / g_pulseColor / g_pulseStartMs —
+// and (b) what actually reached the strip (mock_fillColumnCount / mock_lastShowBright).
+// A "fire" is a NEW g_pulseStartMs stamp while the overlay is up: _fireAccent() is the one
+// and only place that stamps it, and every fire in a show lands on a distinct millis.
+struct AccentLog {
+  int     count = 0;
+  int32_t beat[64]   = {0};
+  uint8_t barPos[64] = {0};
+};
+// Drive `beats` beats of a running show in stepMs increments, logging every accent fire.
+// t0 MUST be the clock anchor (the millis at which the C command with beat=0 was parsed).
+static void runShow(uint32_t t0, uint32_t beatMs, int beats, uint32_t stepMs, uint8_t bpb,
+                    AccentLog& log) {
+  uint32_t prevStart = g_pulseStartMs;
+  for (uint32_t t = t0; t < t0 + beatMs * (uint32_t)beats; t += stepMs) {
+    _mock_millis = t;
+    mock_resetLatch();
+    contractPulseTick();
+    contractLoopTick();
+    if (g_pulseActive && g_pulseStartMs != prevStart) {     // a NEW accent was armed this frame
+      prevStart = g_pulseStartMs;
+      if (log.count < 64) {
+        int32_t b = (int32_t)((t - t0) / beatMs);
+        log.beat[log.count]   = b;
+        log.barPos[log.count] = (uint8_t)(b % (int32_t)bpb);
+        log.count++;
+      }
+    }
+  }
+}
+
 int main() {
   contractSetup();
 
@@ -191,6 +224,266 @@ int main() {
     parseContract("!**X");
   }
 
+  // ===================== v1.2 accent-overlay guards (A1..A6) =====================
+  // The gap these close: in Phase 2 the board's only beat expression was the brightness
+  // envelope — it could not fire the effect-swap accent Phase 1 gets from verb P. A scored
+  // entry now carries ae=/ac=/ad= and the board arms the SAME overlay on its own beat edge.
+
+  // A1: am=1 (downbeat) — an accent fires on EVERY downbeat and on NO other beat.
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=0000ff,b=200,d=0");                       // arm the base look
+    parseContract("!P*A:i=solid,c=0000ff,at=0,am=1,m=200,ae=flash,ac=ffffff,ad=200");
+    uint32_t t0 = _mock_millis + 500;   // clear of any prior test's 340 ms strobe cool-down
+    _mock_millis = t0;
+    parseContract("!**C:bpm=120,bpb=4,beat=0");                             // 500 ms/beat
+    AccentLog log;
+    runShow(t0, 500, 12, 25, 4, log);                                       // beats 0..11
+    if (log.count != 3) {
+      printf("FAIL: am=1 scored accent fired %d times over 12 beats, expected 3 "
+             "(one per downbeat)\n", log.count);
+      return 1;
+    }
+    for (int i = 0; i < log.count; i++) {
+      if (log.barPos[i] != 0) {
+        printf("FAIL: am=1 scored accent fired on beat %ld (barPos %u) — downbeats only\n",
+               (long)log.beat[i], (unsigned)log.barPos[i]);
+        return 1;
+      }
+    }
+    if (log.beat[0] != 0 || log.beat[1] != 4 || log.beat[2] != 8) {
+      printf("FAIL: am=1 accents landed on beats %ld/%ld/%ld, expected 0/4/8\n",
+             (long)log.beat[0], (long)log.beat[1], (long)log.beat[2]);
+      return 1;
+    }
+    if (g_pulseFx != CE_FLASH || g_pulseColor.r != 255 || g_pulseColor.g != 255 || g_pulseColor.b != 255) {
+      printf("FAIL: scored accent did not carry ae=flash/ac=ffffff into the overlay "
+             "(fx=%d rgb=%u,%u,%u)\n", (int)g_pulseFx,
+             (unsigned)g_pulseColor.r, (unsigned)g_pulseColor.g, (unsigned)g_pulseColor.b);
+      return 1;
+    }
+  }
+
+  // A2: am=2 (every beat) — EXACTLY one accent per beat, not one per 25 ms frame.
+  // 60 BPM keeps the beat (1000 ms) well clear of the 340 ms strobe cool-down, so a
+  // per-frame re-fire would show up as ~3 fires/beat rather than being coalesced away.
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=0000ff,b=200,d=0");
+    parseContract("!P*A:i=solid,c=0000ff,at=0,am=2,ae=flash,ad=200");
+    uint32_t t0 = _mock_millis + 500;   // clear of any prior test's 340 ms strobe cool-down
+    _mock_millis = t0;
+    parseContract("!**C:bpm=60,bpb=4,beat=0");                              // 1000 ms/beat
+    AccentLog log;
+    runShow(t0, 1000, 6, 25, 4, log);
+    if (log.count != 6) {
+      printf("FAIL: am=2 scored accent fired %d times over 6 beats, expected 6 "
+             "(once per beat, edge-triggered)\n", log.count);
+      return 1;
+    }
+    for (int i = 0; i < log.count; i++) {
+      if (log.beat[i] != i) {
+        printf("FAIL: am=2 accent #%d landed on beat %ld, expected %d\n",
+               i, (long)log.beat[i], i);
+        return 1;
+      }
+    }
+    // ac= was OMITTED above, so the accent colour must be RESOLVED (at insert) to the
+    // entry's own colour — blue. The score deliberately carries no has-colour flag, so a
+    // resolution that never happened shows up as a BLACK accent (an invisible "flash").
+    if (g_pulseColor.b != 255 || g_pulseColor.r != 0 || g_pulseColor.g != 0) {
+      printf("FAIL: an accent with no ac= did not inherit the entry's colour "
+             "(got %u,%u,%u, expected 0,0,255)\n", (unsigned)g_pulseColor.r,
+             (unsigned)g_pulseColor.g, (unsigned)g_pulseColor.b);
+      return 1;
+    }
+    // ad=200 must survive the /10 round-trip through the score (10 ms units).
+    if (g_pulseDeadline - g_pulseStartMs != 200) {
+      printf("FAIL: ad=200 became a %lu ms accent\n",
+             (unsigned long)(g_pulseDeadline - g_pulseStartMs));
+      return 1;
+    }
+  }
+
+  // A3: BACKWARD-COMPAT ANCHOR — a v1.1 scored entry (no ae=) must NEVER arm the overlay,
+  // however hot its accent mode is. This is the "a score entry without the new keys behaves
+  // exactly as it does today" contract, and it is what the CE_NONE guard in the edge
+  // trigger buys. Also covers a REJECTED ae= (native/stateful) falling back to no accent.
+  {
+    const char* entries[] = {
+      "!P*A:i=solid,c=0000ff,at=0,am=2,m=200",              // pure v1.1 (pump, no accent)
+      "!P*A:i=solid,c=0000ff,at=0,am=2,m=200,ae=native:3",  // rejected: would latch the board
+      "!P*A:i=solid,c=0000ff,at=0,am=2,m=200,ae=scan",      // rejected: stateful, corrupts base
+      "!P*A:i=solid,c=0000ff,at=0,am=2,m=200,ae=bogus",     // unknown effect name
+    };
+    for (const char* entry : entries) {
+      parseContract("!**X");
+      parseContract("!P*A:i=solid,c=0000ff,b=200,d=0");
+      parseContract(entry);
+      uint32_t t0 = _mock_millis + 500;   // clear of any prior test's 340 ms strobe cool-down
+      _mock_millis = t0;
+      parseContract("!**C:bpm=60,bpb=4,beat=0");
+      AccentLog log;
+      runShow(t0, 1000, 6, 25, 4, log);
+      if (log.count != 0 || g_pulseActive) {
+        printf("FAIL: '%s' armed the accent overlay %d time(s) — a v1.1 (or rejected-ae=) "
+               "entry must never self-accent\n", entry, log.count);
+        return 1;
+      }
+    }
+  }
+
+  // A4: the accent is an EFFECT SWAP, at the accent COLOUR, at the un-pumped CEILING.
+  // Base = solid blue (stages 0 columns, allON only); accent = comet red (stages all
+  // COLUMNS through fill_column). So mock_fillColumnCount is a direct, non-vacuous witness
+  // that the overlay rendered a DIFFERENT effect and not v1.1's solid fill of pulseColor.
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=0000ff,b=200,d=0");
+    parseContract("!P*A:i=solid,c=0000ff,at=0,am=2,m=200,ae=comet,ac=ff0000,ad=250");
+    uint32_t t0 = _mock_millis + 500;   // clear of any prior test's 340 ms strobe cool-down
+    _mock_millis = t0;
+    parseContract("!**C:bpm=60,bpb=4,beat=0");
+
+    _mock_millis = t0 + 20;                       // inside beat 0's accent window (250 ms)
+    mock_resetLatch();
+    contractPulseTick();
+    contractLoopTick();
+    if (!g_pulseActive || g_pulseFx != CE_COMET) {
+      printf("FAIL: ae=comet did not arm a comet overlay (active=%d fx=%d)\n",
+             (int)g_pulseActive, (int)g_pulseFx);
+      return 1;
+    }
+    if (mock_fillColumnCount != COLUMNS) {
+      printf("FAIL: the accent overlay staged %d columns, expected %d — it rendered a solid "
+             "fill instead of the ae= effect\n", mock_fillColumnCount, COLUMNS);
+      return 1;
+    }
+    bool sawAccentColor = false;                  // ac=ff0000 red, never the blue base
+    for (int i = 0; i < COLUMNS; i++)
+      if (mock_column[i].r > 0 && mock_column[i].b == 0) sawAccentColor = true;
+    if (!sawAccentColor) {
+      printf("FAIL: the accent overlay did not render the accent colour (ac=ff0000)\n");
+      return 1;
+    }
+    if (mock_lastShowBright != 200) {
+      printf("FAIL: the accent overlay latched at %u, expected the un-pumped ceiling 200 "
+             "(the accent must not dip with the envelope)\n", (unsigned)mock_lastShowBright);
+      return 1;
+    }
+
+    _mock_millis = t0 + 400;                      // past the 250 ms accent: the base look is back
+    mock_resetLatch();
+    contractPulseTick();
+    contractLoopTick();
+    if (g_pulseActive || mock_fillColumnCount != 0) {
+      printf("FAIL: the accent overlay did not expire back to the base look "
+             "(active=%d columns=%d)\n", (int)g_pulseActive, mock_fillColumnCount);
+      return 1;
+    }
+    if (mock_lastShowBright >= 200) {
+      printf("FAIL: the base look is not beat-pumped after the accent (%u)\n",
+             (unsigned)mock_lastShowBright);
+      return 1;
+    }
+  }
+
+  // A5: a clock RE-SEED must not inherit a stale beat edge. Studio re-anchors on every
+  // Play/seek, so a seek back to the top replays beat 0 — with the guard still holding the
+  // beat 0 it consumed before the seek, the new show's very first accent is swallowed.
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=0000ff,b=200,d=0");
+    parseContract("!P*A:i=solid,c=0000ff,at=0,am=2,ae=flash,ad=200");
+    uint32_t t0 = _mock_millis + 500;   // clear of any prior test's 340 ms strobe cool-down
+    _mock_millis = t0;
+    parseContract("!**C:bpm=60,bpb=4,beat=0");
+    _mock_millis = t0 + 10;
+    contractPulseTick();
+    contractLoopTick();
+    if (!g_pulseActive) { printf("FAIL: A5 setup — beat 0 did not accent\n"); return 1; }
+    uint32_t firstStamp = g_pulseStartMs;
+
+    uint32_t t1 = t0 + 5000;                      // a seek: re-anchor beat 0 to a new millis
+    _mock_millis = t1;
+    parseContract("!**C:bpm=60,bpb=4,beat=0");
+    _mock_millis = t1 + 10;
+    contractPulseTick();
+    contractLoopTick();
+    if (!g_pulseActive || g_pulseStartMs == firstStamp) {
+      printf("FAIL: after a clock re-seed, beat 0 did not accent again — a stale beat edge "
+             "survived the re-anchor\n");
+      return 1;
+    }
+  }
+
+  // A5b: loading a scored section must also drop the beat edge. Same trap, other door: a
+  // show pushed while the clock is already running would otherwise inherit the guard from
+  // whatever beat the last show consumed. (The X / M:v=show / M:v=idle resets are the same
+  // invariant, but they are not independently observable — an accent needs a RUNNING clock,
+  // and a running clock needs a C, which resets the edge on its own. They stay in the code
+  // as belt-and-braces; this guard and A5 pin the two doors that can actually be walked.)
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=0000ff,b=200,d=0");
+    parseContract("!P*A:i=solid,c=0000ff,at=0,am=2,ae=flash");
+    uint32_t t0 = _mock_millis + 500;
+    _mock_millis = t0;
+    parseContract("!**C:bpm=60,bpb=4,beat=0");
+    AccentLog log;
+    runShow(t0, 1000, 4, 25, 4, log);                    // beats 0..3, edge now sits on beat 3
+    if (log.count != 4) { printf("FAIL: A5b setup — %d accents, expected 4\n", log.count); return 1; }
+    uint32_t lastStamp = g_pulseStartMs;
+
+    _mock_millis = t0 + 3400;                            // still inside beat 3, past the cool-down
+    parseContract("!P*A:i=solid,c=00ff00,at=8,am=2,ae=flash");   // a new section arrives
+    _mock_millis = t0 + 3450;
+    contractPulseTick();
+    contractLoopTick();
+    if (!g_pulseActive || g_pulseStartMs == lastStamp) {
+      printf("FAIL: a score load did not drop the beat edge — the beat the PREVIOUS show "
+             "consumed still gates the new one\n");
+      return 1;
+    }
+  }
+
+  // A6: CE_FLASH must ride the beat envelope, like every other sustained look (on this
+  // board the flash latches through brightness(), i.e. the volatile 3P value contractLoopTick
+  // sets to envBright()). Sample the LIT frames of one beat: early (phase 0..0.2) must be
+  // brighter than late (phase 0.7..0.95). The strobe cap makes a lit state 170 ms long, so
+  // each 200+ ms window is guaranteed to contain at least one lit frame.
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=flash,c=00ff00,b=200,d=0");
+    parseContract("!P*A:i=flash,c=00ff00,at=0,am=2,m=200");     // no ae=: base look only
+    uint32_t t0 = _mock_millis + 500;   // clear of any prior test's 340 ms strobe cool-down
+    _mock_millis = t0;
+    parseContract("!**C:bpm=60,bpb=4,beat=0");                  // 1000 ms/beat
+
+    uint8_t earlyMax = 0, lateMax = 0;
+    for (uint32_t off = 0; off < 1000; off += 5) {              // one full beat (beat 2)
+      _mock_millis = t0 + 2000 + off;
+      mock_resetLatch();
+      contractPulseTick();
+      contractLoopTick();
+      if (mock_showCount == 0 || mock_lastShowBright == 0) continue;   // an unlit flash frame
+      if (off <= 200 && mock_lastShowBright > earlyMax) earlyMax = mock_lastShowBright;
+      if (off >= 700 && off <= 950 && mock_lastShowBright > lateMax) lateMax = mock_lastShowBright;
+    }
+    if (earlyMax == 0 || lateMax == 0) {
+      printf("FAIL: A6 setup — no lit CE_FLASH frame sampled (early=%u late=%u)\n",
+             (unsigned)earlyMax, (unsigned)lateMax);
+      return 1;
+    }
+    if (earlyMax <= lateMax) {
+      printf("FAIL: CE_FLASH does not beat-pump (early=%u late=%u) — it is latching at a "
+             "fixed brightness while every other look rides the envelope\n",
+             (unsigned)earlyMax, (unsigned)lateMax);
+      return 1;
+    }
+    parseContract("!**X");
+  }
+
   // _scaleC math guard. NOTE: this canNOT reproduce the AVR bug it accompanies — the
   // uncast `uint8_t * uint8_t` overflow only exists where int is 16-bit, and host int is
   // 32-bit, so the old code computes the right answer here. It pins the scaling contract
@@ -206,6 +499,7 @@ int main() {
                                                                 (unsigned)half.r, (unsigned)half.g, (unsigned)half.b); return 1; }
   }
 
-  printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp/scale guards OK\n");
+  printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp/scale "
+         "+ v1.2 accent-overlay guards (A1-A6) OK\n");
   return 0;
 }

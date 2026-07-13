@@ -29,7 +29,10 @@
 //     tempGlobalBrightnessValue, main.cpp:2562-2585 / brightness() main.cpp:2595) —
 //     NEVER the 2P EEPROM path (main.cpp:2557) — so B/L/envelope never wear EEPROM.
 //   * Verb P is a dedicated millis overlay that ALWAYS retriggers, bypassing the
-//     runPattern no-op guard (main.cpp:2121-2129).
+//     runPattern no-op guard (main.cpp:2121-2129). v1.2: that overlay is now the ONE
+//     accent primitive — it renders an EFFECT (not just a solid fill), and it is armed
+//     from two triggers: verb P (live/Phase-1) and the board's own per-beat score edge
+//     (autonomous/Phase-2, from a scored A's ae=/ac=/ad=). Same code path, same look.
 //   * Verb L feeds level[10] (main.cpp:327) honoring the VU inversion
 //     (main.cpp:1714: level[c] > i => pixel OFF, so high energy => LOW level).
 //   * Addressing = JUMP_FRONT_REAR jumper (config.h:101-105, main.cpp:358):
@@ -54,11 +57,20 @@ static uint32_t       g_animDeadline  = 0;          // 0 == hold; else millis() 
 static uint32_t       g_effectStartMs = 0;
 static bool           g_contractArmed = false;      // gates runContractAnim() vs runPattern()
 
-// verb P (pulse) overlay — own deadline, always resets
-static bool     g_pulseActive   = false;
-static CRGB     g_pulseColor     = CRGB(255, 255, 255);
-static uint32_t g_pulseDeadline = 0;
-static uint32_t g_pulseStartMs  = 0;
+// The accent overlay — own deadline, always retriggers. Armed by verb P (live) and by
+// the board's own beat edge (scored, v1.2). g_pulseFx is the EFFECT it renders:
+// CE_NONE == the v1.1 behaviour (a solid fill of g_pulseColor), any other effect is an
+// effect-SWAP accent drawn by the same _renderLook() the base look uses.
+static bool           g_pulseActive   = false;
+static ContractEffect g_pulseFx       = CE_NONE;   // CE_NONE => solid fill (exactly v1.1)
+static CRGB           g_pulseColor    = CRGB(255, 255, 255);
+static uint32_t       g_pulseDeadline = 0;
+static uint32_t       g_pulseStartMs  = 0;
+
+// v1.2 beat-edge guard for the board's autonomous accent. BEAT_NONE == "no beat accented
+// yet"; every show boundary (X / M:v=idle / M:v=show / clock re-seed / score load) resets
+// it, or a stale edge from the last show swallows the next show's first accent.
+static int32_t        g_lastAccentBeat = BEAT_NONE;
 
 // beat-clock + score (shared core)
 static BeatClock  g_clock;
@@ -120,41 +132,47 @@ static inline void _renderRainbow(uint16_t delayMs) {
 // frame must be pushed here or the panel freezes on the last shown frame. Every other
 // primitive (allON/allOFF/scanCol/DiscoBall/VUMeter) shows internally; these must not
 // forget to. Enforced by the latch guard in test/host/compile_contract.cpp.
-inline void _renderComet() {
-  uint32_t elapsed = millis() - g_effectStartMs;
+// v1.2: every time-driven look takes its COLOR and its TIME ORIGIN as parameters rather
+// than reading g_contractColor/g_effectStartMs directly, so _renderLook() can draw either
+// the base look (g_contractColor, g_effectStartMs) or the accent overlay (g_pulseColor,
+// g_pulseStartMs) through the SAME switch. The overlay owns its own timeline (t0), so a
+// 180 ms ae=comet accent starts its head at position 0 instead of joining the base look's
+// phase mid-flight — and the base look's own timeline is never disturbed by the accent.
+inline void _renderComet(const CRGB& col, uint32_t t0) {
+  uint32_t elapsed = millis() - t0;
   int head = fxHead(elapsed, g_speed, COLUMNS);
   for (int p = 0; p < COLUMNS; p++) {
     uint8_t cb = fxCometBright(p, head, COLUMNS);
-    fill_column((uint8_t)p, _scaleC(g_contractColor, cb), 0);
+    fill_column((uint8_t)p, _scaleC(col, cb), 0);
   }
   FastLED.show(brightness());
 }
 
 // ---- chase (fx spatial helper; brightness rides the global 3P path only) ----
-inline void _renderChase() {
-  uint32_t elapsed = millis() - g_effectStartMs;
+inline void _renderChase(const CRGB& col, uint32_t t0) {
+  uint32_t elapsed = millis() - t0;
   CRGB off(0, 0, 0);
   for (int p = 0; p < COLUMNS; p++) {
     bool lit = fxChaseLit(p, elapsed, g_speed);
-    fill_column((uint8_t)p, lit ? g_contractColor : off, 0);
+    fill_column((uint8_t)p, lit ? col : off, 0);
   }
   FastLED.show(brightness());
 }
 
 // ---- wipe (fx spatial helper; brightness rides the global 3P path only) -----
-inline void _renderWipe() {
-  uint32_t elapsed = millis() - g_effectStartMs;
+inline void _renderWipe(const CRGB& col, uint32_t t0) {
+  uint32_t elapsed = millis() - t0;
   CRGB off(0, 0, 0);
   for (int p = 0; p < COLUMNS; p++) {
     bool lit = fxWipeLit(p, elapsed, g_speed, COLUMNS);
-    fill_column((uint8_t)p, lit ? g_contractColor : off, 0);
+    fill_column((uint8_t)p, lit ? col : off, 0);
   }
   FastLED.show(brightness());
 }
 
 // ---- gradient (fx hue helper; brightness rides the global 3P path only) -----
-inline void _renderGradient() {
-  uint32_t elapsed = millis() - g_effectStartMs;
+inline void _renderGradient(uint32_t t0) {
+  uint32_t elapsed = millis() - t0;
   for (int p = 0; p < COLUMNS; p++) {
     RGB c = fxHsv2rgb(fxGradientHue(p, COLUMNS, 0, elapsed, g_speed), 255, 255);
     fill_column((uint8_t)p, CRGB(c.r, c.g, c.b), 0);
@@ -163,60 +181,91 @@ inline void _renderGradient() {
 }
 
 // ---- colorcycle (fx hue helper; brightness rides the global 3P path only) ---
-inline void _renderColorcycle() {
-  uint32_t elapsed = millis() - g_effectStartMs;
+inline void _renderColorcycle(uint32_t t0) {
+  uint32_t elapsed = millis() - t0;
   RGB c = fxHsv2rgb(fxCycleHue(0, elapsed, g_speed), 255, 255);
   allON(CRGB(c.r, c.g, c.b), true, 0);
 }
 
 // ---- twinkle (fx per-LED helper; brightness rides the global 3P path only) --
-inline void _renderTwinkle() {
+inline void _renderTwinkle(const CRGB& col) {
   uint32_t now = millis();
   for (int i = 0; i < NUM_LEDS; i++) {
     uint8_t tb = fxTwinkleBright(i, now, g_speed);
-    leds[i] = _scaleC(g_contractColor, tb);
+    leds[i] = _scaleC(col, tb);
   }
   FastLED.show(brightness());
 }
 
 // ---- strobe-capped flash toggle (reuses allON/allOFF; enforces < ~3 Hz) -----
-static inline void _renderFlash(const CRGB& c, uint16_t delayMs) {
+static inline void _renderFlash(const CRGB& c, uint16_t delayMs, uint32_t t0) {
   uint32_t half = STROBE_MIN_STATE_MS;
   if (delayMs > half) half = delayMs;                  // never faster than the cap
-  bool on = ((millis() - g_effectStartMs) % (2 * half)) < half;
+  bool on = ((millis() - t0) % (2 * half)) < half;
   if (on) allON(c, true, 0); else allOFF(true, 0);
 }
 
-// ---- the parallel dispatcher: render g_effect each 25 ms tick ----------------
+// ---- the ONE look renderer: draw `eff` in `col` on a timeline that starts at t0 -------
+// Called twice (base look / accent overlay) — the switch body itself is emitted once, so
+// the effect-swap accent costs ZERO flash for the effect vocabulary.
+// Brightness is NOT a parameter: on this board every primitive latches through
+// brightness() (the volatile 3P path), which contractLoopTick() sets to the beat-pumped
+// envelope for the base look and to the un-pumped ceiling while the overlay is up.
+inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
+  uint16_t d = _speedToDelay(g_speed);
+  switch (eff) {
+    case CE_OFF:     allOFF(true, 0);                               break;
+    case CE_SOLID:   allON(col, true, 0);                           break;
+    case CE_FLASH:   _renderFlash(col, d, t0);                      break;
+    case CE_PULSE:   allON(col, true, 0);                           break;  // envelope pumps brightness
+    case CE_RAINBOW: _renderRainbow(d);                             break;
+    case CE_SCAN:    scanCol(d, 0, col, true);                      break;
+    case CE_COMET:   _renderComet(col, t0);                         break;
+    case CE_CHASE:   _renderChase(col, t0);                         break;
+    case CE_WIPE:    _renderWipe(col, t0);                          break;
+    case CE_GRADIENT:_renderGradient(t0);                           break;
+    case CE_COLORCYCLE: _renderColorcycle(t0);                      break;
+    case CE_TWINKLE: _renderTwinkle(col);                           break;
+    case CE_SPARKLE: DiscoBall(d, 0, 3, col, 0);                    break;
+    case CE_METER:   VUMeter(d, 0, 0);                              break;  // level[] fed by verb L
+    case CE_NATIVE:  runPattern(g_nativeCode);                      break;
+    default:         allON(col, true, 0);                           break;
+  }
+}
+
+// ---- the parallel dispatcher: render each 25 ms tick -------------------------
 inline void runContractAnim() {
+  // The accent overlay wins while it is up. g_pulseFx == CE_NONE reproduces v1.1 exactly
+  // (a solid fill of g_pulseColor); a v1.2 accent swaps in a real effect for ~180 ms.
+  // The base look's g_effectStartMs / g_lastEffect bookkeeping is deliberately SKIPPED
+  // here, so the base look re-inits when it actually resumes, not mid-accent.
+  if (g_pulseActive) {
+    _renderLook(g_pulseFx == CE_NONE ? CE_SOLID : g_pulseFx, g_pulseColor, g_pulseStartMs);
+    return;
+  }
   if (g_effect != g_lastEffect) {                      // effect switch => re-init native state machines
     firstTime = true;
     g_lastEffect = g_effect;
     g_effectStartMs = millis();
   }
-  uint16_t d = _speedToDelay(g_speed);
+  _renderLook(g_effect, g_contractColor, g_effectStartMs);
+}
 
-  // verb-P overlay wins while active (drawn as a solid flash-look)
-  if (g_pulseActive) { allON(g_pulseColor, true, 0); return; }
-
-  switch (g_effect) {
-    case CE_OFF:     allOFF(true, 0);                                   break;
-    case CE_SOLID:   allON(g_contractColor, true, 0);                  break;
-    case CE_FLASH:   _renderFlash(g_contractColor, d);              break;
-    case CE_PULSE:   allON(g_contractColor, true, 0);                  break;  // envelope pumps brightness
-    case CE_RAINBOW: _renderRainbow(d);                             break;
-    case CE_SCAN:    scanCol(d, 0, g_contractColor, true);          break;
-    case CE_COMET:   _renderComet();                                break;
-    case CE_CHASE:   _renderChase();                                break;
-    case CE_WIPE:    _renderWipe();                                 break;
-    case CE_GRADIENT:_renderGradient();                             break;
-    case CE_COLORCYCLE: _renderColorcycle();                        break;
-    case CE_TWINKLE: _renderTwinkle();                              break;
-    case CE_SPARKLE: DiscoBall(d, 0, 3, g_contractColor, 0);        break;
-    case CE_METER:   VUMeter(d, 0, 0);                              break;  // level[] fed by verb L
-    case CE_NATIVE:  runPattern(g_nativeCode);                      break;
-    default:         allON(g_contractColor, true, 0);                  break;
-  }
+// ---- the ONE accent path: verb P (live) and the board's beat edge (scored) both land here.
+// Returns false when the strobe cool-down coalesces this accent away.
+// Photosensitivity: an accent may not START more often than every 2 * STROBE_MIN_STATE_MS
+// (340 ms => <= 2.94 flashes/sec), and may not be SHORTER than one min-state.
+static inline bool _fireAccent(ContractEffect fx, const CRGB& c, uint32_t durMs, uint32_t now) {
+  if (!g_pulseActive && g_pulseStartMs != 0 && (now - g_pulseStartMs) < 2 * STROBE_MIN_STATE_MS) return false;
+  if (durMs < STROBE_MIN_STATE_MS) durMs = STROBE_MIN_STATE_MS;
+  if (durMs > 2550u) durMs = 2550u;
+  g_pulseFx       = fx;
+  g_pulseColor    = c;
+  g_pulseStartMs  = now;
+  g_pulseDeadline = now + durMs;
+  g_pulseActive   = true;
+  g_contractArmed = true;
+  return true;
 }
 
 // ---- verb dispatch ----------------------------------------------------------
@@ -231,7 +280,16 @@ inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
     e.beatMod    = pr.hasBeatMod ? pr.beatMod : g_beatMod;
     e.accentMode = pr.hasAm ? pr.accentMode : 0;
     e.nativeCode = pr.hasEffect ? pr.nativeCode : -1;  // thread native code into the score (parity w/ RSeries)
+    // v1.2 accent overlay. No ae= => accentFx stays CE_NONE => the entry NEVER arms the
+    // overlay => byte-for-byte v1.1 behaviour. ac= is RESOLVED here (else the entry's own
+    // colour) so the score carries no "has-colour" flag; ad= is stored in 10 ms units.
+    if (pr.hasAccentFx) {
+      e.accentFx    = pr.accentFx;
+      e.accentColor = pr.hasAccentColor ? pr.accentColor : e.color;
+      e.accentDur10 = pr.hasAccentDur ? (uint8_t)(pr.accentDurMs / 10u) : 18;   // 18 => 180 ms
+    }
     g_scoreCount = scoreInsert(g_score, g_scoreCount, 8, e);
+    g_lastAccentBeat = BEAT_NONE;                      // a score load starts a NEW show: no stale edge
     return;
   }
   if (pr.hasColor)   g_contractColor = _scaled(pr.color);
@@ -260,21 +318,27 @@ inline void applyContract(const ParsedContract& p) {
       break;
 
     case CV_PULSE: {                                   // one-shot accent, ALWAYS retriggers
-      // strobe cool-down: coalesce pulses arriving faster than the cap
-      if (!g_pulseActive && g_pulseStartMs != 0 && (now - g_pulseStartMs) < 2 * STROBE_MIN_STATE_MS) break;
-      g_pulseColor    = pr.hasColor ? _scaled(pr.color) : g_contractColor;
-      uint32_t len    = pr.hasDur ? pr.durMs : 120;
-      if (len < STROBE_MIN_STATE_MS) len = STROBE_MIN_STATE_MS;   // clamp min off/on window
-      if (pr.hasBright) g_bright = _clampBright(pr.bright);
-      g_pulseStartMs  = now;
-      g_pulseDeadline = now + len;
-      g_pulseActive   = true;
-      g_contractArmed = true;
+      // v1.2: verb P now honours i= — the live (Phase-1) accent is the SAME effect-swap
+      // overlay the scored (Phase-2) accent fires, so a mirrored show and a delivered one
+      // look identical. No i= (everything Studio emits today) => CE_SOLID => exactly the
+      // v1.1 solid fill. A stateful/native i= is refused by accentEffectAllowed (it would
+      // corrupt the base look's state machine or latch the board), and falls back to solid.
+      ContractEffect fx = (pr.hasEffect && accentEffectAllowed(pr.effect)) ? pr.effect : CE_SOLID;
+      // && ordering matters: b= must apply only on an accent that actually FIRED, exactly
+      // as it did in v1.1 (a cool-down-coalesced P changed nothing at all).
+      if (_fireAccent(fx, pr.hasColor ? _scaled(pr.color) : g_contractColor,
+                      pr.hasDur ? pr.durMs : 120, now) && pr.hasBright) {
+        g_bright = _clampBright(pr.bright);
+      }
       break;
     }
 
     case CV_CLOCK:                                     // seed/adjust the beat-clock (§9)
       beatClockSeed(g_clock, pr, now);
+      // Studio re-anchors on every Play/seek: the beat ORIGIN moves, so a beat index from
+      // the old timeline must not gate the new one (a seek back to beat 0 would otherwise
+      // find lastAccentBeat == 0 already consumed and silently swallow the first accent).
+      g_lastAccentBeat = BEAT_NONE;
       break;
 
     case CV_BRIGHT: {                                  // VOLATILE ride only (never 2P/EEPROM)
@@ -299,6 +363,7 @@ inline void applyContract(const ParsedContract& p) {
       g_pulseActive = false;
       g_clock.running = false;
       scoreClear(g_scoreCount, g_scoreIndex);          // a show's sections must NOT leak into the next
+      g_lastAccentBeat = BEAT_NONE;                    // ...nor a beat edge (see BEAT_NONE)
       useTempInternalBrightness = false;               // release volatile brightness back to native
       allOFF(true, 0);
       break;
@@ -308,9 +373,11 @@ inline void applyContract(const ParsedContract& p) {
         g_contractArmed = true;
         g_lastEffect = CE_NONE;
         g_effectStartMs = now;
+        g_lastAccentBeat = BEAT_NONE;                  // M:v=show is the first line of a load burst
       } else if (pr.mode == 'i') {                     // idle: hand back to native autonomy
         g_contractArmed = false;
         scoreClear(g_scoreCount, g_scoreIndex);        // parity with X and with the Logics fork
+        g_lastAccentBeat = BEAT_NONE;
         useTempInternalBrightness = false;
       }
       break;
@@ -318,7 +385,7 @@ inline void applyContract(const ParsedContract& p) {
     case CV_QUERY:                                     // optional ack (targeted only)
       if (p.unit == 'F' || p.unit == 'R') {
         char buf[56];
-        snprintf(buf, sizeof(buf), "!P%cq:ver=1.1,phase=2,i=%d,c=%02x%02x%02x,bpm=%u\r",
+        snprintf(buf, sizeof(buf), "!P%cq:ver=1.2,phase=2,i=%d,c=%02x%02x%02x,bpm=%u\r",
                  p.unit, (int)g_effect, g_contractColor.r, g_contractColor.g, g_contractColor.b,
                  (unsigned)g_clock.bpm);
         serialPort->print(buf);
@@ -335,7 +402,12 @@ inline void applyContract(const ParsedContract& p) {
 inline void contractPulseTick() {
   if (g_pulseActive && millis() >= g_pulseDeadline) {
     g_pulseActive = false;
-    g_lastEffect = CE_NONE;                            // force the base look to re-init on restore
+    firstTime = true;                                  // re-init the native state machines the base look uses
+    // Do NOT touch g_lastEffect / g_effectStartMs here. Clearing g_lastEffect made
+    // runContractAnim() re-stamp g_effectStartMs = millis() on the very next frame, i.e.
+    // it RESTARTED the base look's timeline after every accent. Tolerable at one accent
+    // per bar; with a v1.2 am=2 accent a comet/wipe/gradient base would be reset to frame
+    // zero on EVERY BEAT. The base look's timeline must survive the accent.
   }
 }
 
@@ -372,6 +444,26 @@ inline bool contractLoopTick() {
       g_activeAccentMode = e.accentMode;
       g_lastEffect = CE_NONE;
     }
+
+    // v1.2 AUTONOMOUS ACCENT (the Phase-2 half of the effect-swap accent). Once per NEW
+    // beat, fire the same overlay verb P fires live — so a delivered blueprint and a
+    // live-mirrored show look the same. Order matters:
+    //   1. consume the edge UNCONDITIONALLY (beatEdge advances the guard even when we do
+    //      not fire) — otherwise a non-firing beat is re-tested on every 25 ms frame and,
+    //      once its bar position happens to qualify, re-fires forever;
+    //   2. then gate on the SHARED beatAccentFires() predicate — the same one
+    //      beatAccentAmount() gates the brightness pump on, so the pump and the effect
+    //      accent can never disagree about which beats carry an accent;
+    //   3. accentFx == CE_NONE (any v1.1 entry, or a rejected ae=) => never arms.
+    // Deliberately NOT gated on m=/beatMod: the pump depth and the accent effect are
+    // independent knobs (an m=0 section can still punch an effect accent).
+    if (beatEdge(g_lastAccentBeat, bp.beatIndex) && g_scoreIndex >= 0) {
+      const ScoreEntry& e = g_score[g_scoreIndex];
+      if (e.accentFx != CE_NONE && beatAccentFires(e.accentMode, bp.barPos)) {
+        _fireAccent(e.accentFx, _scaled(e.accentColor),
+                    e.accentDur10 ? (uint32_t)e.accentDur10 * 10u : 180u, now);
+      }
+    }
   }
 
   // beat accent envelope -> volatile brightness pump (never EEPROM).
@@ -380,8 +472,11 @@ inline bool contractLoopTick() {
   // a board-local floor here: it desyncs the PSIs from the Logics/HPs on every cue.
   // am=0 (an explicit "calm" section) means NO pump — without that guard the accent
   // is always 0 and the board would sit parked at the dip floor (parity w/ RSeries/Flthy).
+  // v1.2: while the accent overlay is up it renders at the unit's CEILING, un-pumped —
+  // an accent that dipped with the envelope would be backwards (the PSI was the only
+  // board that did this), and a scored accent must land at the same level on all three.
   uint8_t effBright = g_bright;
-  if (g_clock.running && g_beatMod && g_activeAccentMode) {
+  if (!g_pulseActive && g_clock.running && g_beatMod && g_activeAccentMode) {
     BeatPos bp = beatPosAt(g_clock, now);
     // am=3 ("build") scales the accent by progress THROUGH THE SECTION. Passing a
     // constant 0 here made every build section return an accent of exactly 0 — i.e. the
