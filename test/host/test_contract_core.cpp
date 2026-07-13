@@ -476,19 +476,42 @@ static void test_fx_helpers() {
   CHECK(fxStepMs(0) == 157);
   CHECK(fxStepMs(128) == 93);
 
-  // fxHsv2rgb: standard 6-sextant HSV->RGB, integer math. Exact bytes captured
-  // by running the real implementation (integer division makes the greenish
-  // sextant land at (3,255,0), not the ideal (0,255,0)).
+  // fxHsv2rgb: 6-sextant HSV->RGB, integer math. Exact bytes captured by running the real
+  // implementation. Integer division still makes the greenish sextant land just off the
+  // ideal (0,255,0) — that is expected and pinned.
   { ContractRGB c = fxHsv2rgb(0, 255, 255);   CHECK(c.r == 255 && c.g == 0 && c.b == 0); }      // red
   { ContractRGB c = fxHsv2rgb(85, 255, 255);  CHECK(c.g == 255); CHECK(c.r <= 8 && c.b <= 8);
-                                       CHECK(c.r == 3 && c.b == 0); }                    // ~green, pinned exact
+                                       CHECK(c.r == 1 && c.b == 0); }                    // ~green, pinned exact
   { ContractRGB c = fxHsv2rgb(0, 0, 120);     CHECK(c.r == 120 && c.g == 120 && c.b == 120); }   // greyscale
 
-  // fxHash16: distinct inputs -> distinct outputs (xorshift hash). Exact
-  // outputs captured by running the real implementation.
+  // THE HUE WHEEL IS CYCLIC. This is the property the old form silently lacked, and it is
+  // what a vector-only test missed: 6 sextants x 43 = 258 > 256 truncated the last sextant,
+  // so hue 255 landed at (255,0,15) while hue 0 is (255,0,0) — a 15-unit snap where every
+  // other hue step moves ~6. colorcycle hitched once per rotation, on every board.
+  // Pin the PROPERTY, not just the bytes: the 255 -> 0 wrap must be no bigger a jump than a
+  // typical adjacent step, or the wheel is not a wheel.
+  {
+    ContractRGB w = fxHsv2rgb(255, 255, 255);   // last hue
+    ContractRGB z = fxHsv2rgb(0, 255, 255);     // wraps to the first
+    ContractRGB n = fxHsv2rgb(254, 255, 255);   // its neighbour on the other side
+    int wrapJump = abs((int)w.r - z.r) + abs((int)w.g - z.g) + abs((int)w.b - z.b);
+    int stepJump = abs((int)n.r - w.r) + abs((int)n.g - w.g) + abs((int)n.b - w.b);
+    CHECK(w.r == 255 && w.g == 0 && w.b == 5);  // exact, from the real implementation
+    CHECK(wrapJump <= stepJump + 1);            // the wrap is just another step (5 vs 6)
+    CHECK(wrapJump < 10);                       // the old form scored 15 here
+  }
+
+  // fxHash16: distinct inputs -> distinct outputs (xorshift hash). Exact outputs captured by
+  // running the real implementation.
   CHECK(fxHash16(1) != fxHash16(2));
-  CHECK(fxHash16(1) == 8225);
-  CHECK(fxHash16(2) == 16450);
+  CHECK(fxHash16(1) == 9850);
+  CHECK(fxHash16(2) == 1627);
+  // ZERO IS NOT A FIXED POINT. A bare xorshift maps 0 -> 0 (0 ^ 0 == 0 at every step), and
+  // every consumer seeds from the strand index — so index 0 hashed to zero and, in twinkle,
+  // got the minimum period AND zero phase offset: pixel 0 was visibly out of step with the
+  // whole strand, on every board, forever. The `x += <odd constant>` prevents it.
+  CHECK(fxHash16(0) != 0);
+  CHECK(fxHash16(0) == 17945);
 }
 
 static void test_fx_spatial_helpers() {
@@ -521,15 +544,43 @@ static void test_fx_spatial_helpers() {
   CHECK(fxChaseLit(3, 0, 255) == true);   // 3 % 3 == 0 -> lit
   CHECK(fxChaseLit(0, 30, 255) == false); // one step elapsed -> phase 1
 
-  // fxWipeLit: ping-pong fill/drain over 2N steps. Fill half: p<=front.
-  // Drain half (ph>=N): p>(ph-N). Exact vectors captured by running the
-  // real implementation.
+  // fxWipeLit: a PING-PONG. Fill 0 -> N-1, then drain BACK from the far end.
+  // Exact vectors captured by running the real implementation.
   CHECK(fxWipeLit(0, 0, 255, 10) == true);    // front at 0, p<=front
   CHECK(fxWipeLit(9, 0, 255, 10) == false);
   CHECK(fxWipeLit(1, 0, 255, 10) == false);
-  CHECK(fxWipeLit(0, 300, 255, 10) == false); // ph==N: drain phase begins, p=0 not lit
-  CHECK(fxWipeLit(9, 300, 255, 10) == true);  // ph==N: drain phase, far end still lit
+  CHECK(fxWipeLit(0, 300, 255, 10) == true);  // ph==N: drain begins at the FAR end, so 0 stays lit
+  CHECK(fxWipeLit(9, 300, 255, 10) == false); // ph==N: the far end is the first to go dark
   CHECK(fxWipeLit(5, 300, 255, 10) == true);
+
+  // IT MUST ACTUALLY PING-PONG. The drain used to read `p > (ph - N)`, which empties from
+  // position 0 upward — the erase head running the SAME direction as the fill head. The
+  // effect was two forward sweeps, not a ping-pong, contradicting the spec and its own
+  // comment. Point vectors did not catch that (each individual sample looked plausible), so
+  // pin the SHAPE instead: walk the whole cycle and assert the lit set only ever grows during
+  // the fill and only ever shrinks from the top during the drain.
+  {
+    const int N = 10;
+    const uint32_t STEP = 30;   // fxStepMs(255)
+    int prevCount = -1;
+    for (uint32_t ph = 0; ph < (uint32_t)N; ph++) {           // FILL: 0..N-1 light up in order
+      int count = 0, highest = -1;
+      for (int p = 0; p < N; p++) if (fxWipeLit(p, ph * STEP, 255, N)) { count++; highest = p; }
+      CHECK(count == (int)ph + 1);          // exactly ph+1 lit
+      CHECK(highest == (int)ph);            // and they are the CONTIGUOUS run 0..ph
+      CHECK(count > prevCount);             // strictly growing
+      prevCount = count;
+    }
+    for (uint32_t ph = (uint32_t)N; ph < (uint32_t)(2 * N); ph++) {   // DRAIN: from the top down
+      int count = 0, highest = -1;
+      for (int p = 0; p < N; p++) if (fxWipeLit(p, ph * STEP, 255, N)) { count++; highest = p; }
+      CHECK(count == 2 * N - (int)ph - 1);  // shrinking by one per step
+      CHECK(highest == count - 1);          // still a contiguous run anchored at 0...
+      CHECK(count < prevCount);             // ...that is strictly SHRINKING from the far end
+      prevCount = count;
+    }
+    CHECK(prevCount == 0);                  // fully drained at the end of the cycle
+  }
 }
 
 static void test_fx_hue_twinkle_helpers() {
@@ -604,18 +655,34 @@ static void test_fx_hue_twinkle_helpers() {
   // hashed period + phase offset. Exact vectors captured by running the real
   // implementation (clang++ host build) — not hand-computed.
   CHECK(fxTwinkleBright(0, 0, 255) != fxTwinkleBright(1, 0, 255)); // per-LED differs
-  CHECK(fxTwinkleBright(0, 0, 255) == 0);
-  CHECK(fxTwinkleBright(1, 0, 255) == 133);
+  CHECK(fxTwinkleBright(0, 0, 255) == 108);
+  CHECK(fxTwinkleBright(1, 0, 255) == 106);
 
-  // Boundary regression: odd-period midpoint (phase == half) can raw-compute
-  // (period-half)*255/half > 255, wrapping a uint8_t cast to a wrong low
-  // value right at what should be peak brightness. idx=2, now=327, speed=255
-  // -> period=403 (odd), half=201, phase=201 -> raw triangle 256, previously
-  // wrapped to 0. Must be clamped to 255 (the intended peak).
-  // (A `<= 255` companion check used to sit here reading like the guard, but the return
-  // type is uint8_t and the overflow WRAPS DOWN (256 -> 0), so it could never fail. Only
-  // the `== 255` below actually gates the clamp.)
-  CHECK(fxTwinkleBright(2, 327, 255) == 255);
+  // PIXEL 0 IS ALIVE. This is the whole point of killing fxHash16's zero fixed point. The
+  // twinkle seed is fxHash16(idx * 2654435761), so idx 0 hashed to 0, which gave pixel 0 the
+  // minimum period AND a zero phase offset — it was locked out of step with the rest of the
+  // strand on every board, permanently, and its brightness at t=0 was flatly 0. Assert it now
+  // both lights up and moves.
+  {
+    bool sawLit = false, sawDark = false;
+    for (uint32_t t = 0; t < 2000; t += 7) {
+      uint8_t b = fxTwinkleBright(0, t, 255);
+      if (b > 200) sawLit = true;
+      if (b < 40)  sawDark = true;
+    }
+    CHECK(sawLit == true);    // it reaches near-peak...
+    CHECK(sawDark == true);   // ...and it actually twinkles, rather than sitting at one level
+  }
+
+  // Boundary regression: an odd period's midpoint (phase == half) can raw-compute
+  // (period-half)*255/half > 255, which would wrap the uint8_t cast DOWN to a wrong low value
+  // right at what should be peak brightness. Must be clamped to 255 (the intended peak).
+  // The case moved when the hash changed (it was idx=2/now=327); re-captured from the real
+  // implementation, not hand-computed.
+  // (A `<= 255` companion check used to sit here reading like the guard, but the return type
+  // is uint8_t and the overflow WRAPS DOWN (256 -> 0), so it could never fail. Only the
+  // `== 255` below actually gates the clamp.)
+  CHECK(fxTwinkleBright(0, 302, 255) == 255);
 }
 
 // The photosensitivity cool-down gate. The case that matters is the one that used to be

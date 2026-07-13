@@ -429,11 +429,30 @@ inline int scoreInsert(ScoreEntry* entries, int n, int cap, const ScoreEntry& e)
 // speed knob. fxHash16: cheap xorshift PRNG hash for sparkle/twinkle seeding.
 // fxHsv2rgb: standard 6-sextant HSV->RGB (integer division, matches the JS parity port).
 inline uint32_t fxStepMs(uint8_t speed) { return 30u + (uint32_t)(255 - speed) / 2u; }
-inline uint16_t fxHash16(uint32_t x) { x ^= x << 13; x ^= x >> 17; x ^= x << 5; return (uint16_t)(x & 0xFFFFu); }
+// The `x +=` is load-bearing: a bare xorshift has 0 as a FIXED POINT (0^0 == 0 at every
+// step), so fxHash16(0) returned 0. Every consumer seeds from the strand index, so index 0
+// hashed to zero — in twinkle that gave pixel 0 the minimum period AND zero phase offset,
+// i.e. a pixel visibly out of step with the rest of the strand, on every board, forever.
+// Adding an odd constant (the golden-ratio word, the usual choice) before the mixing means
+// no input maps to zero, and the avalanche behaviour is otherwise unchanged.
+inline uint16_t fxHash16(uint32_t x) {
+  x += 0x9E3779B9u;
+  x ^= x << 13; x ^= x >> 17; x ^= x << 5; return (uint16_t)(x & 0xFFFFu);
+}
 inline ContractRGB fxHsv2rgb(uint8_t h, uint8_t s, uint8_t v) {
   if (s == 0) return ContractRGB{ v, v, v };
-  uint8_t region = h / 43;
-  uint8_t rem = (uint8_t)(((uint16_t)(h - region * 43) * 6));
+  // The hue wheel must be CYCLIC: hue 255 has to sit exactly one step before hue 0, or the
+  // colour jumps once per rotation. The old form (region = h/43, rem = (h - region*43) * 6)
+  // was not: 6 sextants x 43 = 258 > 256, so the last sextant was truncated and hue 255
+  // landed at rem 240 instead of ~255. At full saturation that put hue 255 at (255,0,15)
+  // while hue 0 is (255,0,0) — a 15-unit snap where every other step moves 6. colorcycle
+  // visibly hitched once per rotation.
+  // Scaling by 6 into 16 bits and splitting on the byte boundary is exactly cyclic: 6 * 256
+  // == 1536 == 6 whole sextants of 256, so every adjacent hue pair — including 255 -> 0 —
+  // is the same 6 units apart.
+  uint16_t hh = (uint16_t)h * 6u;              // 0..1530
+  uint8_t region = (uint8_t)(hh >> 8);         // 0..5, never 6 (max 1530 >> 8 == 5)
+  uint8_t rem = (uint8_t)(hh & 0xFFu);         // 0..255 within the sextant
   uint8_t p = (uint8_t)(((uint16_t)v * (255 - s)) / 255);
   uint8_t q = (uint8_t)(((uint16_t)v * (255 - (((uint16_t)s * rem) / 255))) / 255);
   uint8_t t = (uint8_t)(((uint16_t)v * (255 - (((uint16_t)s * (255 - rem)) / 255))) / 255);
@@ -477,11 +496,17 @@ inline bool fxChaseLit(int p, uint32_t elapsed, uint8_t speed) {
   uint32_t s = fxStepMs(speed); if (!s) s = 1;
   return (((uint32_t)p + elapsed / s) % 3u) == 0u;
 }
+// A ping-pong wipe: fill 0 -> N-1, then DRAIN BACK from the far end. The drain half used to
+// read `p > (ph - N)`, which empties from position 0 upward — i.e. the erase head travelled
+// the SAME direction as the fill head, so the effect was really two forward sweeps and never
+// ping-ponged at all. That contradicted the spec, this function's own comment, and the JS
+// visualizer's preview. The mirrored form below empties from N-1 downward, which is what a
+// ping-pong is, and keeps the identical cadence (one position per step, N steps per half).
 inline bool fxWipeLit(int p, uint32_t elapsed, uint8_t speed, int N) {
   if (N <= 0) return false; uint32_t s = fxStepMs(speed); if (!s) s = 1;
   uint32_t ph = (elapsed / s) % ((uint32_t)N * 2u);   // 2*N wraps a 16-bit int for N > 16383
-  if (ph < (uint32_t)N) return p <= (int)ph;
-  return p > (int)(ph - (uint32_t)N);
+  if (ph < (uint32_t)N) return p <= (int)ph;          // fill: light 0..ph
+  return p < (int)((uint32_t)N * 2u - 1u - ph);       // drain: dark from N-1 back down
 }
 // ===== END FX SPATIAL HELPERS =====
 // ===== FX HUE/TWINKLE HELPERS (Task 4; gradient/colorcycle/twinkle renderers build atop these) =====
