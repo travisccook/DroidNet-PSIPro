@@ -194,7 +194,7 @@ credit him for it; not part of the contract layer either, so it is **not** MIT-l
 - `include/config.h` — the commented-out `CONTRACT_SLIM` flag.
 - `include/functions.h` — five prototypes for primitives the contract layer calls.
 
-That is the whole diff. `git diff 67bec26..HEAD -- src include` will show you exactly this.
+That is the whole diff. `git diff 11d69a3..HEAD -- src include` will show you exactly this.
 
 ---
 

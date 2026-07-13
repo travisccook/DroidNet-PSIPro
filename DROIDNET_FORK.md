@@ -18,7 +18,7 @@ working exactly as they did.
 - **Seeded from:** the private C2B5 droid working collection @ `2fbd4023` (subdir `PSIPro`),
   2026-07-12, git-tracked files only. That collection is where the PlatformIO restructuring of Neil's
   flat Arduino sketch and the `visualizer/` came from.
-- **GitHub remote:** TBD (set on publication).
+- **GitHub remote:** <https://github.com/travisccook/DroidNet-PSIPro> (public).
 
 ## Status
 
@@ -33,8 +33,8 @@ working exactly as they did.
 - Pre-existing upstream `buildCommand()` out-of-bounds write — fixed in `src/main.cpp` (bounds-check
   before the write, terminator clamped). Offered back to Neil.
 
-Fork head at the time of writing: `1092607` (`chore: untrack build artifacts and a dead local-path
-script`), with the documentation and license commits on top of it.
+Fork head: `main` in this repository. The baseline import is commit `11d69a3`; every commit after it
+is the DroidNet layer (`git log --oneline 11d69a3..HEAD`).
 
 ## Verification
 
