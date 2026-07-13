@@ -8,3 +8,5 @@ build/
 *.hex
 *.o
 .DS_Store
+node_modules/
+dist/
