@@ -315,6 +315,27 @@ inline bool beatEdge(int32_t& lastBeat, int32_t beatIndex) {
   return true;
 }
 
+// Photosensitivity cool-down: may an accent START now, given that the last one started at
+// lastFireMs? THE single definition of the gate; all three boards call this, so they cannot
+// drift apart on a SAFETY limit.
+//
+// Note what is deliberately NOT here: a `lastFireMs != 0` "has it ever fired?" escape. All
+// three boards used to carry one, and it was a hole straight through the cap. millis()
+// genuinely does return 0 — once at boot, and again every ~49.7 days when it wraps — so an
+// accent that fires on that exact tick stamps lastFireMs = 0, which the `!= 0` idiom then
+// reads back as "never fired" and waves the NEXT accent through with no gap at all,
+// back-to-back. Rare, but this is a photosensitivity limit: the failure mode is a seizure
+// risk, not a cosmetic glitch, and it should not be reachable at all.
+//
+// Dropping the clause costs nothing, because unsigned arithmetic already does the right
+// thing: (now - 0) == now, so before the board has ever fired, the gate simply opens once
+// millis() >= minGapMs. The entire price is that an accent arriving in the first ~340 ms of
+// power-on is coalesced away — and nothing has delivered a show by then. A suppressed accent
+// is the fail-safe direction for a strobe cap; a free one is not.
+inline bool strobeCoolDownExpired(uint32_t lastFireMs, uint32_t nowMs, uint32_t minGapMs) {
+  return (uint32_t)(nowMs - lastFireMs) >= minGapMs;
+}
+
 // Accent envelope amount 0..255 for the current beat, per accent mode + depth.
 // am: 0 none, 1 downbeat, 2 every-beat, 3 build (uses sectionProgress 0..1), 4 drop (->downbeat).
 inline uint8_t beatAccentAmount(uint8_t am, const BeatPos& bp, uint8_t beatMod, float sectionProgress) {

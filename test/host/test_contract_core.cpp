@@ -618,6 +618,34 @@ static void test_fx_hue_twinkle_helpers() {
   CHECK(fxTwinkleBright(2, 327, 255) == 255);
 }
 
+// The photosensitivity cool-down gate. The case that matters is the one that used to be
+// broken: a fire landing exactly on millis() == 0.
+static void test_strobe_cool_down() {
+  const uint32_t GAP = 340;   // 2 * STROBE_MIN_STATE_MS on the PSI/Logics
+
+  // ordinary gating
+  CHECK(strobeCoolDownExpired(1000, 1000 + GAP, GAP) == true);    // exactly the gap -> allowed
+  CHECK(strobeCoolDownExpired(1000, 1000 + GAP - 1, GAP) == false);
+  CHECK(strobeCoolDownExpired(1000, 1000 + 5000, GAP) == true);
+  CHECK(strobeCoolDownExpired(1000, 1001, GAP) == false);         // back-to-back -> blocked
+
+  // THE BUG. An accent that fires at millis() == 0 stamps lastFireMs = 0. The old guard read
+  // `lastFireMs != 0 && ...`, so this stamp looked like "never fired" and the NEXT accent —
+  // 1 ms later — went straight through the cap. It must be blocked like any other.
+  CHECK(strobeCoolDownExpired(0, 1, GAP) == false);
+  CHECK(strobeCoolDownExpired(0, GAP - 1, GAP) == false);
+  CHECK(strobeCoolDownExpired(0, GAP, GAP) == true);              // and it opens on schedule
+
+  // millis() wraps to 0 every ~49.7 days; unsigned arithmetic must carry the gate across it.
+  const uint32_t NEAR_WRAP = 0xFFFFFF00u;                         // 256 ms before the wrap
+  CHECK(strobeCoolDownExpired(NEAR_WRAP, NEAR_WRAP + 100u, GAP) == false);   // now has wrapped
+  CHECK(strobeCoolDownExpired(NEAR_WRAP, NEAR_WRAP + GAP, GAP) == true);     // wrapped, gap met
+
+  // Never-fired at power-on: the gate is CLOSED until the board has been up for one gap. That
+  // is the deliberate price of dropping the `!= 0` escape, and it is the fail-safe direction.
+  CHECK(strobeCoolDownExpired(0, 0, GAP) == false);
+}
+
 int main() {
   test_scope_and_verb();
   test_verbs_and_units();
@@ -631,6 +659,7 @@ int main() {
   test_env_bright();
   test_score();
   test_score_accent_fields();
+  test_strobe_cool_down();
   test_fx_helpers();
   test_fx_spatial_helpers();
   test_fx_hue_twinkle_helpers();

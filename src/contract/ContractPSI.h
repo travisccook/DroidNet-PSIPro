@@ -344,7 +344,7 @@ inline void runContractAnim() {
 // overlay every few ms and strobe the panel far past ~3 Hz. Re-arming early is exactly
 // the case the cap exists for, so it must be gated, not exempted.
 static inline bool _fireAccent(ContractEffect fx, const CRGB& c, uint32_t durMs, uint32_t now) {
-  if (g_pulseStartMs != 0 && (now - g_pulseStartMs) < 2 * STROBE_MIN_STATE_MS) return false;
+  if (!strobeCoolDownExpired(g_pulseStartMs, now, 2 * STROBE_MIN_STATE_MS)) return false;
   if (durMs < STROBE_MIN_STATE_MS) durMs = STROBE_MIN_STATE_MS;
   if (durMs > 2550u) durMs = 2550u;
   g_pulseFx       = fx;
