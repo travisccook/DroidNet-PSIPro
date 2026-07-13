@@ -280,7 +280,7 @@ inline void applyContract(const ParsedContract& p) {
       g_contractArmed = false;
       g_pulseActive = false;
       g_clock.running = false;
-      g_scoreIndex = -1;
+      scoreClear(g_scoreCount, g_scoreIndex);          // a show's sections must NOT leak into the next
       useTempInternalBrightness = false;               // release volatile brightness back to native
       allOFF(true, 0);
       break;
@@ -292,6 +292,7 @@ inline void applyContract(const ParsedContract& p) {
         g_effectStartMs = now;
       } else if (pr.mode == 'i') {                     // idle: hand back to native autonomy
         g_contractArmed = false;
+        scoreClear(g_scoreCount, g_scoreIndex);        // parity with X and with the Logics fork
         useTempInternalBrightness = false;
       }
       break;

@@ -122,6 +122,33 @@ int main() {
     }
   }
 
-  printf("ContractPSI.h type-check + score-native/latch guards OK\n");
+  // behavioral guard (I2): X (stop) and M:v=idle must CLEAR the Phase-2 score.
+  // scoreInsert() drops silently at cap (8), so a score left populated means a second
+  // show's sections are discarded and the board replays the first show's.
+  {
+    parseContract("!**X");
+    if (g_scoreCount != 0 || g_scoreIndex != -1) {
+      printf("FAIL: X did not clear the score (count=%d index=%d)\n", g_scoreCount, g_scoreIndex);
+      return 1;
+    }
+    for (int i = 0; i < 8; i++) {                      // fill show #1 to cap
+      char c[40]; snprintf(c, sizeof(c), "!P*A:i=solid,c=0000ff,at=%d", i * 4);
+      parseContract(c);
+    }
+    if (g_scoreCount != 8) { printf("FAIL: score did not fill to cap\n"); return 1; }
+    parseContract("!PFM:v=idle");
+    if (g_scoreCount != 0 || g_scoreIndex != -1) {
+      printf("FAIL: M:v=idle did not clear the score (count=%d index=%d)\n", g_scoreCount, g_scoreIndex);
+      return 1;
+    }
+    parseContract("!P*A:i=flash,c=00ff00,at=900");     // show #2 must not be dropped at cap
+    if (g_scoreCount != 1 || g_score[0].effect != CE_FLASH) {
+      printf("FAIL: second show's section was dropped (count=%d)\n", g_scoreCount);
+      return 1;
+    }
+    parseContract("!**X");
+  }
+
+  printf("ContractPSI.h type-check + score-native/latch/score-clear guards OK\n");
   return 0;
 }

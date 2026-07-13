@@ -174,6 +174,29 @@ static void test_score() {
   CHECK(scoreActiveIndex(s, n, 0) == 0);
   CHECK(scoreActiveIndex(s, n, 20) == 1);
   CHECK(scoreActiveIndex(s, n, 999) == 2);
+
+  // ---- scoreClear: a show must not leak its sections into the next one ----
+  int active = scoreActiveIndex(s, n, 20);
+  scoreClear(n, active);
+  CHECK(n == 0);
+  CHECK(active == -1);                                 // "no section yet", not section 0
+  CHECK(scoreActiveIndex(s, n, 999) == -1);            // empty table: nothing is active
+
+  // The bug scoreClear exists to prevent: scoreInsert() drops silently at cap, so a
+  // table that is never cleared between shows keeps the FIRST show's sections and
+  // discards the second's. Fill to cap, then "stop" and load a new show.
+  ScoreEntry old;
+  for (int i = 0; i < cap; i++) { old.atBeat = i * 4; old.effect = CE_SOLID; n = scoreInsert(s, n, cap, old); }
+  CHECK(n == cap);
+  ScoreEntry dropped; dropped.atBeat = 900; dropped.effect = CE_FLASH;
+  CHECK(scoreInsert(s, n, cap, dropped) == cap);       // at cap => silently dropped
+  CHECK(scoreActiveIndex(s, n, 900) == cap - 1);       // ...so beat 900 replays the old tail
+
+  scoreClear(n, active);                               // what verb X / M:v=idle must do
+  ScoreEntry fresh; fresh.atBeat = 900; fresh.effect = CE_FLASH;
+  n = scoreInsert(s, n, cap, fresh);
+  CHECK(n == 1);
+  CHECK(scoreActiveIndex(s, n, 900) == 0 && s[0].effect == CE_FLASH);   // new show plays
 }
 
 static void test_fx_helpers() {
