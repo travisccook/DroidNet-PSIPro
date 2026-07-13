@@ -48,10 +48,15 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 // honest numbers are:
 //
 //   stock upstream PSI Pro, no contract ....... 25,106 B of 28,672 B (87.6%)
-//   + contract layer, this hatch OFF .......... 38,790 B  (135.3% — WILL NOT LINK)
-//   + contract layer, this hatch ON ........... 32,394 B  (113.0% — WILL NOT LINK)
-//   + hatch ON, + the codegen work in
-//     platformio.ini and ContractPSI.h ........ fits, with room to spare
+//
+//   as this fork was ORIGINALLY published (before any of the flash work):
+//     this hatch OFF .......................... 38,790 B  (135.3% — WILL NOT LINK)
+//     this hatch ON ........................... 32,394 B  (113.0% — WILL NOT LINK)
+//
+//   the code as it stands TODAY:
+//     shipped (hatch ON + the codegen work) ... 26,946 B  (94.0%) — fits, 1,726 B spare
+//     the same code with this hatch OFF ....... 33,782 B  (117.8% — WILL NOT LINK)
+//     the same code, codegen flags removed .... 28,896 B  (100.8% — WILL NOT LINK)
 //
 // Upstream already used 87.6% of this chip. Only ~3.5 KB was ever free and the contract
 // layer needs ~13.7 KB, so the hatch alone cannot save the build — it reclaims 6,400 B

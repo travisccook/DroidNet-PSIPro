@@ -78,21 +78,49 @@ ourselves, and says so explicitly.
 
 **Nothing in this fork has ever been flashed to a real PSI Pro. Not once.**
 
-Verification here is host-side only:
+Be precise about what is and is not verified, because the two are easy to blur:
 
-- `bash test/host/run.sh` — 154 checks on the contract parser and effect math, plus a type-check of
-  the PSI render layer against a *mock* of the board API. It passes. It proves the code compiles and
-  the math is what we think it is. It proves nothing about a real panel.
-- It has **never been compiled for AVR**. The PSI is the tightest board of the three for flash
-  (roughly 28 KB usable on the ATmega32U4) and the contract layer adds an estimated 3-4 KB. There is a
-  real chance the linker overflows. A `CONTRACT_SLIM` build flag exists in `include/config.h` as an
-  escape hatch (it drops the heaviest novelty native modes to reclaim space), but that is a theory
-  too — nobody has watched it link.
-- No timing, no brightness, no power draw, no serial behaviour has been observed on a physical board.
+**What IS verified.** It cross-compiles for the real microcontroller. `pio run` builds a complete
+firmware image with the real avr-gcc for the real ATmega32U4, and the real linker signs off on it.
+That is a genuine step up from where this fork started — it used to be checked only by a type-check
+against a hand-written mock, and that mock lied twice (see below). The host suite is 341 checks on
+the contract parser, the beat clock and the effect math, plus render-layer guards, and
+`bash test/host/run.sh` now finishes by doing the cross-compile itself.
 
-If you are thinking of putting this near a droid: **bench-compile it, bench-test it on a bare board,
-and check the current draw before you trust it.** Neil's warning about the brightness pot and USB
-power still applies, and applies harder to code nobody has run.
+**What is NOT verified.** Everything that only a physical board can tell you. **A successful link is
+not a bench test.** No timing, no brightness, no power draw, no serial behaviour, no I2C behaviour
+has ever been observed on real hardware. The code has never executed a single instruction outside a
+host test.
+
+**It fits — but only just, and not by default.** This is the tightest board of the three, and the
+numbers are worth knowing before you build:
+
+| Build | Flash | of 28,672 B |
+| --- | --- | --- |
+| Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
+| **This fork, as shipped** | **26,946 B** | **94.0%** |
+| …with `CONTRACT_SLIM` disabled | 33,782 B | 117.8% — **will not link** |
+| …with the codegen flags removed | 28,896 B | 100.8% — **will not link** |
+
+Neil's firmware already used 87.6% of this chip. Only ~3.5 KB was ever free, and the contract layer
+costs ~13.7 KB. It fits only because of three things working *together* — `CONTRACT_SLIM` in
+`include/config.h`, the AVR codegen flags in `platformio.ini`, and the `PSI_NOINLINE` outlining in
+`src/contract/ContractPSI.h`. The last two rows above are what happens when you remove one of them:
+**disable any single leg and the image overflows again.** (For scale: as originally published, before
+this work, this fork linked at 38,790 B — 135.3%.)
+
+SRAM sits at 1,484 B of 2,560 B (58.0%), leaving ~1.0 KB for stack. That is comfortable in a host
+test and **unmeasured under a real FastLED render on a real board** — and a stack overflow at runtime
+is far nastier than a link error. Treat it as an open question, not a cleared one.
+
+`CONTRACT_SLIM` is **not free**. It drops five native novelty modes: 7 (i_heart_u), 9 (red_heart,
+front half), 11 (Imperial March), 19 (lightsaberBattle) and 20 (StarWarsIntro). If you want those
+modes, do not build this fork — flash Neil's upstream PSI Pro. There is no configuration of this
+fork that keeps them and fits.
+
+If you are thinking of putting this near a droid: **bench-test it on a bare board and check the
+current draw before you trust it.** Neil's warning about the brightness pot and USB power still
+applies, and applies harder to code nobody has run.
 
 ---
 
@@ -198,18 +226,35 @@ That is the whole diff. `git diff 11d69a3..HEAD -- src include` will show you ex
 
 ## Building
 
-Heads up: there is no `platformio.ini` in this tree. The PlatformIO layout (`src/` + `include/`) came
-from the droid-side working collection this was seeded from, not from Neil — upstream is a flat
-Arduino sketch (`PSIPro.ino` + `config.h` + `matrices.h`). To build you will need to supply your own
-PlatformIO project file (board `sparkfun_promicro16`, framework `arduino`, deps FastLED) or copy the
-sources back into an Arduino sketch folder. Either way, **watch the flash number** — see the warning
-above.
-
-Host tests need only a C++17 compiler:
-
 ```bash
-bash test/host/run.sh
+pio run                 # build the firmware (ATmega32U4)
+pio run -t upload       # flash it (add --upload-port /dev/cu.usbmodemXXXX)
+bash test/host/run.sh   # host checks + the same cross-compile
 ```
+
+`platformio.ini` is in the tree and builds out of the box. (It did not used to be: the PlatformIO
+layout — `src/` + `include/` — came from the droid-side working collection this was seeded from, not
+from Neil, whose upstream is a flat Arduino sketch. The project file stayed behind in that collection
+when this board was vendored out. It has now been written and used.)
+
+Dependencies are derived from what `src/main.cpp` actually includes: FastLED, plus EEPROM and Wire,
+which ship with the Arduino AVR core.
+
+**The build flags in `platformio.ini` are load-bearing, not decoration.** `-mcall-prologues`,
+`-mrelax`, `-fno-inline-small-functions`, `-fno-move-loop-invariants` and
+`--param=max-inline-insns-auto=2` are worth ~1.5 KB together, and the `PSI_NOINLINE` outlining in
+`src/contract/ContractPSI.h` is worth another ~1.4 KB. None of them change behaviour — they only
+change where GCC emits code — but without them this firmware does not fit. If you rebuild these
+sources in the Arduino IDE, or in your own project file, **you will not get those flags and the image
+will overflow.** Use this project file.
+
+Both the flags and the `PSI_NOINLINE` block carry comments explaining what was measured, and what was
+tried and rejected (e.g. `-funsigned-char` saves 32 B and is a trap: `char` is signed on this target,
+so it would change the meaning of every character comparison in the parser and desync the AVR build
+from the host tests). Read those before "simplifying" anything there.
+
+Host tests need only a C++17 compiler. If PlatformIO is not installed, `run.sh` skips the
+cross-compile stage cleanly and tells you what you did not check.
 
 ---
 

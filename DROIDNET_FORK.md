@@ -13,8 +13,9 @@ working exactly as they did.
 
 - **Role:** the PSI board of the three-board Cantina dome light-show family (RSeries Logics, PSI Pro,
   Flthy HPs). This is the tightest of the three and the pacing item.
-- **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), FastLED. No `platformio.ini` is checked in;
-  supply your own (see README, "Building").
+- **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), FastLED. `platformio.ini` is checked in and
+  builds out of the box (`pio run`). It links at 26,946 B of 28,672 B (94.0%) — and only fits
+  because of CONTRACT_SLIM + the codegen flags + PSI_NOINLINE together. See README, "Building".
 - **Seeded from:** the private C2B5 droid working collection @ `2fbd4023` (subdir `PSIPro`),
   2026-07-12, git-tracked files only. That collection is where the PlatformIO restructuring of Neil's
   flat Arduino sketch and the `visualizer/` came from.
@@ -42,7 +43,7 @@ is the DroidNet layer (`git log --oneline 11d69a3..HEAD`).
 bash test/host/run.sh
 ```
 
-1. `contract_core.h` parser + effect-math unit tests — **154/154 checks**.
+1. `contract_core.h` parser + effect-math unit tests — **341/341 checks**.
 2. `ContractPSI.h` firmware-layer type-check against `test/host/mock_psi.h`, a mock of the MaxPSI
    board API (plus the score-native / frame-latch / score-clear / build-ramp / scale guards).
 
