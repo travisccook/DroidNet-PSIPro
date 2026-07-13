@@ -12,17 +12,33 @@ This license applies to these paths, and to nothing else in this repository:
 Those files are the "DroidNet Driveable-Animation Contract" layer. They were written by
 Travis Cook and are the only files here that he is in a position to license.
 
-EVERYTHING ELSE IN THIS TREE IS NOT COVERED BY THIS LICENSE.
+EVERYTHING ELSE IN THIS TREE IS NOT COVERED BY THIS LICENSE. There are two distinct
+kinds of "everything else", and they are not the same thing:
 
-The PSI Pro firmware that this layer attaches to -- including but not limited to
-src/main.cpp, include/config.h, include/matrices.h, include/functions.h,
-include/preamble.h, README_UPSTREAM.md, and visualizer/ -- is the work of
-Neil Hutchison and his contributors (Krijn Schaap, Malcolm "Maxstang" MacKenzie,
-and Skelmir). The upstream project (https://github.com/nhutchison/PSIPro) carries no
-license file and no permission statement, which means ALL RIGHTS ARE RESERVED by its
-authors. Travis Cook claims no rights over it and grants no rights in it. Nothing in
-this file should be read as licensing, sublicensing, or relicensing any part of their
-work. See the NOTICE section of README.md.
+(1) THE UPSTREAM PSI PRO FIRMWARE -- src/main.cpp, include/config.h, and
+include/matrices.h, plus README_UPSTREAM.md -- is the work of Neil Hutchison and his
+contributors (Krijn Schaap, Malcolm "Maxstang" MacKenzie, and Skelmir). The upstream
+project (https://github.com/nhutchison/PSIPro) carries no license file and no
+permission statement, which means ALL RIGHTS ARE RESERVED by its authors. Travis Cook
+claims no rights over it and grants no rights in it. Nothing in this file should be
+read as licensing, sublicensing, or relicensing any part of their work. See the NOTICE
+section of README.md.
+
+(2) EARLIER DOWNSTREAM WORK BY TRAVIS COOK, made for one specific droid (C2B5) before
+this contract layer existed and inherited by this fork when it was seeded from that
+collection. It is NOT Neil's work and must not be attributed to him:
+
+    visualizer/                                (a browser preview of the PSI panel)
+    include/functions.h, include/preamble.h    (the PlatformIO restructuring: upstream
+                                                is a flat Arduino sketch, so these two
+                                                headers do not exist upstream)
+
+That work is copyright (c) Travis Cook, but it is not part of the DroidNet contract
+layer and IT IS NOT LICENSED BY THIS FILE. It is also not independent of Neil's
+firmware: the visualizer reimplements his animations for preview, and the two headers
+are prototypes mechanically extracted from his sketch. Both are therefore derivative of
+an all-rights-reserved work, and Travis Cook is not in a position to hand out rights in
+them either. Treat them as all rights reserved, and see the NOTICE section of README.md.
 
 src/contract/contract_core.h is shared byte-identically with the DroidNet RSeries and
 Flthy forks. Its author dual-licenses that one file: LGPL-2.1-only when it is

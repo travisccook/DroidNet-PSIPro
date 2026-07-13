@@ -157,7 +157,7 @@ why we read it closely enough to find this.
 ## What is theirs, and what is ours
 
 Be clear-eyed about the split. Their code is around 3,200 lines of carefully-tuned firmware. Ours is
-about 760 lines of new code plus a handful of hooks.
+about 775 lines of new code plus a handful of hooks.
 
 **Theirs** (Neil Hutchison and contributors — do not attribute any of this to us):
 
@@ -166,19 +166,26 @@ about 760 lines of new code plus a handful of hooks.
 | `src/main.cpp` | The firmware. Every sequence, the command parser, the pot/EEPROM/I2C handling. |
 | `include/config.h` | Board configuration, colors, timings. |
 | `include/matrices.h` | The LED matrix bitmaps. |
-| `include/functions.h`, `include/preamble.h` | Prototypes. |
 | `README_UPSTREAM.md` | Neil's own README, preserved verbatim. |
-| `visualizer/` | A browser preview of the PSI animations (added downstream of Neil, see Provenance). |
+
+**Earlier droid work by the owner of this repo** (made for one specific droid, C2B5, before
+the contract layer existed; it came in with the seed — see Provenance). Not Neil's, so don't
+credit him for it; not part of the contract layer either, so it is **not** MIT-licensed:
+
+| Path | What it is |
+| --- | --- |
+| `visualizer/` | A browser preview of the PSI animations. It reimplements Neil's modes in JavaScript, so it is downstream of his firmware, but he did not write it and his README never mentions it. |
+| `include/functions.h`, `include/preamble.h` | Prototypes — artifacts of the PlatformIO restructuring. Upstream is a flat Arduino sketch, so these two files do not exist there; their contents are prototypes of Neil's functions. |
 
 **Ours** (the DroidNet contract layer — this is the entire extent of it):
 
 | Path | Lines | What it is |
 | --- | --- | --- |
-| `src/contract/contract_core.h` | 354 | Pure, dependency-free C++: the wire parser, the beat clock, the effect math, the score table. Byte-identical across all three DroidNet forks. |
-| `src/contract/ContractPSI.h` | 406 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`DiscoBall`/`VUMeter` primitives. Adds no new render primitives of its own. |
-| `test/host/` | ~695 | The host test harness (parser tests + a mock of the board API). |
+| `src/contract/contract_core.h` | 362 | Pure, dependency-free C++: the wire parser, the beat clock, the effect math, the score table. Byte-identical across all three DroidNet forks. |
+| `src/contract/ContractPSI.h` | 412 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`DiscoBall`/`VUMeter` primitives. Adds no new render primitives of its own. |
+| `test/host/` | 724 | The host test harness (parser tests + a mock of the board API). |
 
-**Ours, inside their files** (small hooks, all of them additive):
+**Ours, inside the files above** (small hooks, all of them additive):
 
 - `src/main.cpp` — one `#include`, one `if (!contractLoopTick())` guard in `loop()`, one
   `contractPulseTick()` call, an `if (cmdString[0]=='!')` branch in `serialEvent()` and
@@ -221,7 +228,8 @@ The chain, honestly:
    chain and it would be dishonest not to say so.
 3. **This repository** — the same code, plus the additive DroidNet contract layer described above.
 
-If any of this looks like it came from us and it isn't in the "Ours" table, it didn't.
+If any of this looks like it came from the contract layer and it isn't in the "Ours" table, it
+didn't. And if it looks like it came from Neil and it's in the "Earlier droid work" table, it didn't.
 
 ---
 
@@ -241,10 +249,14 @@ If any of this looks like it came from us and it isn't in the "Ours" table, it d
 
 Read this together with the NOTICE at the top.
 
-- **The original firmware** (`src/main.cpp`, `include/*`, `README_UPSTREAM.md`, and everything not
-  listed as ours) is copyright Neil Hutchison and contributors. It carries **no license** — all
-  rights reserved. We are redistributing it here without a grant, in good faith, pending Neil's
+- **The original firmware** (`src/main.cpp`, `include/config.h`, `include/matrices.h`,
+  `README_UPSTREAM.md`) is copyright Neil Hutchison and contributors. It carries **no license** —
+  all rights reserved. We are redistributing it here without a grant, in good faith, pending Neil's
   word, and we will remove it on request.
+- **The earlier droid work** (`visualizer/`, `include/functions.h`, `include/preamble.h`) is
+  copyright Travis Cook, but it is derivative of Neil's firmware — the visualizer reimplements his
+  animations, the two headers prototype his functions. It is **not** part of the contract layer and
+  is **not** MIT-licensed. Treat it as all rights reserved too.
 - **The contract layer only** (`src/contract/*` and `test/host/*`) is copyright 2026 Travis Cook and
   is offered under the **MIT license** — see [LICENSE-DroidNet-Contract](LICENSE-DroidNet-Contract).
   That file applies to those paths and to nothing else in this tree.

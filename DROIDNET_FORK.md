@@ -57,7 +57,8 @@ headroom on the 32U4 (~28 KB usable; the contract layer is estimated at 3-4 KB) 
 | `src/contract/contract_core.h` | DroidNet. Byte-identical across the RSeries/PSI/Flthy forks — **do not diverge**. Change it in one fork, copy it to the other two. |
 | `src/contract/ContractPSI.h` | DroidNet. PSI render layer; calls only pre-existing render primitives. |
 | `test/host/` | DroidNet. Host harness. |
-| `src/main.cpp`, `include/*` | Neil Hutchison and contributors, plus the small additive hooks listed in the README. |
+| `src/main.cpp`, `include/config.h`, `include/matrices.h` | Neil Hutchison and contributors, plus the small additive hooks listed in the README. |
+| `include/functions.h`, `include/preamble.h` | Downstream (C2B5 collection, not from Neil) — artifacts of the PlatformIO restructuring; upstream is a flat Arduino sketch. Contents are prototypes of Neil's functions. |
 | `visualizer/` | Downstream browser preview tool (from the C2B5 collection, not from Neil). |
 
 ## Next steps

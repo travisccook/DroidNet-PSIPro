@@ -1,3 +1,10 @@
+// Part of the DroidNet Driveable-Animation Contract test harness — an additive layer
+// bolted onto Neil Hutchison's PSI Pro firmware. Copyright (c) 2026 Travis Cook.
+// MIT-licensed (see LICENSE-DroidNet-Contract). The PSI Pro firmware this layer
+// attaches to is the work of Neil Hutchison and contributors, is NOT covered by that
+// license, and carries no license of its own; see the NOTICE in README.md.
+// SPDX-License-Identifier: MIT
+//
 // Host mock of the MaxPSI board API surface that ContractPSI.h uses. Primarily a
 // TYPE-CHECK of the firmware layer, PLUS a thin LATCH MODEL: the mock records every
 // FastLED.show() so a test can assert that a renderer actually pushes its frame to
