@@ -184,6 +184,21 @@ int main() {
     parseContract("!**X");
   }
 
-  printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp guards OK\n");
+  // _scaleC math guard. NOTE: this canNOT reproduce the AVR bug it accompanies — the
+  // uncast `uint8_t * uint8_t` overflow only exists where int is 16-bit, and host int is
+  // 32-bit, so the old code computes the right answer here. It pins the scaling contract
+  // (full factor => unchanged, zero => black, half => ~half) so a future refactor of the
+  // one place the widening cast now lives cannot silently change the math.
+  {
+    CRGB full = _scaleC(CRGB(255, 128, 0), 255);
+    CRGB zero = _scaleC(CRGB(255, 128, 0), 0);
+    CRGB half = _scaleC(CRGB(255, 128, 0), 128);
+    if (full.r != 255 || full.g != 128 || full.b != 0) { printf("FAIL: _scaleC(v=255) is not identity\n"); return 1; }
+    if (zero.r != 0 || zero.g != 0 || zero.b != 0)     { printf("FAIL: _scaleC(v=0) is not black\n"); return 1; }
+    if (half.r != 128 || half.g != 64 || half.b != 0)  { printf("FAIL: _scaleC(v=128) mid-scale wrong (%u,%u,%u)\n",
+                                                                (unsigned)half.r, (unsigned)half.g, (unsigned)half.b); return 1; }
+  }
+
+  printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp/scale guards OK\n");
   return 0;
 }

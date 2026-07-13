@@ -77,6 +77,15 @@ static inline uint16_t _speedToDelay(uint8_t s) {
   return (uint16_t)(400 - ((uint32_t)s * (400 - 20)) / 255);
 }
 static inline CRGB _scaled(const RGB& c) { return CRGB(c.r, c.g, c.b); }
+// Scale a color by a 0..255 factor. The uint16_t widening is REQUIRED, not cosmetic:
+// `uint8_t * uint8_t` promotes to `int`, which is 16-bit on AVR, so a full-bright
+// channel (255 * 255 = 65025) overflows a signed 16-bit int — undefined behavior on
+// this board, and in practice a wrapped-negative channel (a bright pixel rendering
+// dark/garbage). Widen the left operand first, exactly as the Logics/HPs forks do
+// (ContractLogics.h:56-57, ContractFlthy.h:109-111).
+static inline CRGB _scaleC(const CRGB& c, uint8_t v) {
+  return CRGB((uint16_t)c.r * v / 255, (uint16_t)c.g * v / 255, (uint16_t)c.b * v / 255);
+}
 
 // ---- addressing (fork spec §4) ----------------------------------------------
 // class 'P'/'*' AND jumper: HIGH=front(!P F), LOW=rear(!P R). Fail-silent otherwise.
@@ -110,8 +119,7 @@ inline void _renderComet() {
   int head = fxHead(elapsed, g_speed, COLUMNS);
   for (int p = 0; p < COLUMNS; p++) {
     uint8_t cb = fxCometBright(p, head, COLUMNS);
-    CRGB c(( g_contractColor.r * cb) / 255, (g_contractColor.g * cb) / 255, (g_contractColor.b * cb) / 255);
-    fill_column((uint8_t)p, c, 0);
+    fill_column((uint8_t)p, _scaleC(g_contractColor, cb), 0);
   }
   FastLED.show(brightness());
 }
@@ -160,7 +168,7 @@ inline void _renderTwinkle() {
   uint32_t now = millis();
   for (int i = 0; i < NUM_LEDS; i++) {
     uint8_t tb = fxTwinkleBright(i, now, g_speed);
-    leds[i] = CRGB((g_contractColor.r * tb) / 255, (g_contractColor.g * tb) / 255, (g_contractColor.b * tb) / 255);
+    leds[i] = _scaleC(g_contractColor, tb);
   }
   FastLED.show(brightness());
 }
