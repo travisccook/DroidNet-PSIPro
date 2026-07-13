@@ -96,6 +96,11 @@ static inline void _renderRainbow(uint16_t delayMs) {
 }
 
 // ---- comet (fx spatial helpers; brightness rides the global 3P path only) ---
+// NOTE (all four column-built looks below): fill_column() only STAGES into leds[]
+// (main.cpp:517-524) — it does not latch. loop() has no global FastLED.show(), so the
+// frame must be pushed here or the panel freezes on the last shown frame. Every other
+// primitive (allON/allOFF/scanCol/DiscoBall/VUMeter) shows internally; these must not
+// forget to. Enforced by the latch guard in test/host/compile_contract.cpp.
 inline void _renderComet() {
   uint32_t elapsed = millis() - g_effectStartMs;
   int head = fxHead(elapsed, g_speed, COLUMNS);
@@ -104,6 +109,7 @@ inline void _renderComet() {
     CRGB c(( g_contractColor.r * cb) / 255, (g_contractColor.g * cb) / 255, (g_contractColor.b * cb) / 255);
     fill_column((uint8_t)p, c, 0);
   }
+  FastLED.show(brightness());
 }
 
 // ---- chase (fx spatial helper; brightness rides the global 3P path only) ----
@@ -114,6 +120,7 @@ inline void _renderChase() {
     bool lit = fxChaseLit(p, elapsed, g_speed);
     fill_column((uint8_t)p, lit ? g_contractColor : off, 0);
   }
+  FastLED.show(brightness());
 }
 
 // ---- wipe (fx spatial helper; brightness rides the global 3P path only) -----
@@ -124,6 +131,7 @@ inline void _renderWipe() {
     bool lit = fxWipeLit(p, elapsed, g_speed, COLUMNS);
     fill_column((uint8_t)p, lit ? g_contractColor : off, 0);
   }
+  FastLED.show(brightness());
 }
 
 // ---- gradient (fx hue helper; brightness rides the global 3P path only) -----
@@ -133,6 +141,7 @@ inline void _renderGradient() {
     RGB c = fxHsv2rgb(fxGradientHue(p, COLUMNS, 0, elapsed, g_speed), 255, 255);
     fill_column((uint8_t)p, CRGB(c.r, c.g, c.b), 0);
   }
+  FastLED.show(brightness());
 }
 
 // ---- colorcycle (fx hue helper; brightness rides the global 3P path only) ---

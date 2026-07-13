@@ -68,6 +68,60 @@ int main() {
     }
   }
 
-  printf("ContractPSI.h type-check + score-native guard OK\n");
+  // behavioral guard (C1): EVERY contract effect must LATCH its frame.
+  // leds[] is a staging buffer and there is no global FastLED.show() in loop(), so a
+  // renderer built from fill_column() alone (comet/chase/wipe/gradient once did exactly
+  // this) never pushes a pixel — the panel freezes on the last shown frame for the whole
+  // section. mock_psi.h models which primitives latch; assert every effect reaches one.
+  {
+    struct Case { const char* cmd; const char* name; };
+    const Case cases[] = {
+      { "!P*A:i=off",                        "off" },
+      { "!P*A:i=solid,c=0080ff",             "solid" },
+      { "!P*A:i=flash,c=ff0000,s=200",       "flash" },
+      { "!P*A:i=pulse,c=ff00ff",             "pulse" },
+      { "!P*A:i=rainbow",                    "rainbow" },
+      { "!P*A:i=scan,c=00aaff,s=180",        "scan" },
+      { "!P*A:i=comet,c=3B82F6,s=200",       "comet" },
+      { "!P*A:i=chase,c=3B82F6,s=200",       "chase" },
+      { "!P*A:i=wipe,c=22C55E,s=150",        "wipe" },
+      { "!P*A:i=gradient,s=120",             "gradient" },
+      { "!P*A:i=colorcycle,s=90",            "colorcycle" },
+      { "!P*A:i=twinkle,c=FFFFFF,s=100",     "twinkle" },
+      { "!P*A:i=sparkle,c=ffffff",           "sparkle" },
+      { "!P*A:i=meter",                      "meter" },
+      { "!P*A:i=native:15,c=ff0000",         "native" },
+    };
+    for (const Case& tc : cases) {
+      parseContract("!**X");                 // clear any pulse overlay / prior look
+      parseContract(tc.cmd);
+      for (int t = 0; t < 3; t++) {          // 3 ticks: enough for any time-gated look
+        _mock_millis += 25;
+        mock_resetLatch();
+        runContractAnim();
+        if (mock_showCount == 0) {
+          printf("FAIL: effect '%s' rendered a frame but never latched it "
+                 "(no FastLED.show) — the panel would freeze\n", tc.name);
+          return 1;
+        }
+      }
+    }
+    // ...and the four column-built looks must ALSO stage a full frame first.
+    const char* colLooks[] = { "!P*A:i=comet,c=3B82F6,s=200", "!P*A:i=chase,c=3B82F6,s=200",
+                               "!P*A:i=wipe,c=22C55E,s=150",  "!P*A:i=gradient,s=120" };
+    for (const char* cmd : colLooks) {
+      parseContract("!**X");
+      parseContract(cmd);
+      _mock_millis += 25;
+      mock_resetLatch();
+      runContractAnim();
+      if (mock_fillColumnCount != COLUMNS) {
+        printf("FAIL: '%s' staged %d columns, expected %d\n", cmd, mock_fillColumnCount, COLUMNS);
+        return 1;
+      }
+    }
+  }
+
+  printf("ContractPSI.h type-check + score-native/latch guards OK\n");
   return 0;
 }
