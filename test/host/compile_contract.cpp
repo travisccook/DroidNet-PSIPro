@@ -484,6 +484,92 @@ int main() {
     parseContract("!**X");
   }
 
+  // A7: CE_FLASH must actually STROBE — alternate a LIT and a DARK frame. A6 above pins only
+  // that the flash BEAT-PUMPS, and on this board a plain allON() pumps too (every primitive
+  // latches through brightness()), so swapping the toggle for a solid fill left A6 green and
+  // the strobe itself untested. Sample the LATCHED FRAME (leds[] — allON fills it, allOFF
+  // clears it) across three strobe periods: both states must occur, and every complete run of
+  // a state must last >= STROBE_MIN_STATE_MS (the photosensitivity cap, <= ~2.9 Hz).
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=flash,c=00ff00,b=200,s=255,d=0");   // s=255 => the CAP sets the period
+    uint32_t t0 = g_effectStartMs;                            // the base look's timeline origin
+    bool     sawLit = false, sawDark = false, prevLit = false, started = false;
+    uint32_t runStart = 0, shortestRun = 0xFFFFFFFFul;
+    for (uint32_t off = 0; off <= 1020; off += 5) {           // 3 x (2 * 170 ms)
+      _mock_millis = t0 + off;
+      mock_resetLatch();
+      contractPulseTick();
+      contractLoopTick();
+      if (mock_showCount == 0) { printf("FAIL: A7 setup — CE_FLASH latched no frame\n"); return 1; }
+      bool lit = (leds[0].r || leds[0].g || leds[0].b);
+      if (lit) sawLit = true; else sawDark = true;
+      if (!started) { started = true; prevLit = lit; runStart = off; }
+      else if (lit != prevLit) {                              // a complete run just ended
+        uint32_t len = off - runStart;
+        if (len < shortestRun) shortestRun = len;
+        prevLit = lit; runStart = off;
+      }
+    }
+    if (!sawLit || !sawDark) {
+      printf("FAIL: CE_FLASH never alternates (saw a lit frame=%d, saw a dark frame=%d) — it "
+             "holds ONE state for the whole strobe period, i.e. it is not strobing at all\n",
+             (int)sawLit, (int)sawDark);
+      return 1;
+    }
+    if (shortestRun < STROBE_MIN_STATE_MS) {
+      printf("FAIL: CE_FLASH held a state for only %lu ms — the strobe cap requires every "
+             "state to last >= %lu ms (<= ~3 Hz, photosensitivity)\n",
+             (unsigned long)shortestRun, (unsigned long)STROBE_MIN_STATE_MS);
+      return 1;
+    }
+    parseContract("!**X");
+  }
+
+  // A8: the strobe cool-down must not be BYPASSABLE by re-arming while an overlay is still up.
+  // The gate used to read `!g_pulseActive && ...`, so a second accent arriving INSIDE the first
+  // accent's window skipped the cap entirely and restarted the overlay immediately — precisely
+  // the case the cap exists for (a fast Pi mirroring verb P, or an every-beat score above
+  // ~176 BPM, could restart the flash every few ms and strobe the panel far past ~3 Hz).
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=0000ff,b=200,d=0");
+    _mock_millis += 1000;                                     // clear of any prior cool-down
+    uint32_t t = _mock_millis;
+    parseContract("!**P:i=flash,c=ffffff,d=300");             // fire: a 300 ms overlay
+    if (!g_pulseActive || g_pulseStartMs != t) {
+      printf("FAIL: A8 setup — verb P did not arm the overlay\n");
+      return 1;
+    }
+    _mock_millis = t + 100;                                   // overlay STILL UP, 100 ms in
+    parseContract("!**P:i=flash,c=ff0000,d=300");             // a too-fast re-arm
+    if (g_pulseStartMs != t) {
+      printf("FAIL: an accent re-armed %lu ms after the last one was ACCEPTED because the "
+             "overlay was still active — the %lu ms strobe cool-down is bypassable and the "
+             "panel can strobe past the photosensitivity cap\n",
+             (unsigned long)(g_pulseStartMs - t), (unsigned long)(2 * STROBE_MIN_STATE_MS));
+      return 1;
+    }
+    if (g_pulseColor.r != 255 || g_pulseColor.g != 255 || g_pulseColor.b != 255) {
+      printf("FAIL: a cool-down-rejected accent still mutated the live overlay (colour is now "
+             "%u,%u,%u, expected the first accent's ffffff)\n", (unsigned)g_pulseColor.r,
+             (unsigned)g_pulseColor.g, (unsigned)g_pulseColor.b);
+      return 1;
+    }
+    // ...and the gate is TIME-based, not activity-based: once one cool-down has elapsed an
+    // accent fires again (this is what keeps the guard above from being satisfied by a blanket
+    // "never re-arm while active", which would silently drop every fast-section accent).
+    _mock_millis = t + 2 * STROBE_MIN_STATE_MS;
+    parseContract("!**P:i=flash,c=ff0000,d=300");
+    if (!g_pulseActive || g_pulseStartMs != _mock_millis) {
+      printf("FAIL: an accent %lu ms after the last one was REJECTED — the cool-down must only "
+             "coalesce accents closer together than %lu ms\n",
+             (unsigned long)(2 * STROBE_MIN_STATE_MS), (unsigned long)(2 * STROBE_MIN_STATE_MS));
+      return 1;
+    }
+    parseContract("!**X");
+  }
+
   // _scaleC math guard. NOTE: this canNOT reproduce the AVR bug it accompanies — the
   // uncast `uint8_t * uint8_t` overflow only exists where int is 16-bit, and host int is
   // 32-bit, so the old code computes the right answer here. It pins the scaling contract
@@ -500,6 +586,6 @@ int main() {
   }
 
   printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp/scale "
-         "+ v1.2 accent-overlay guards (A1-A6) OK\n");
+         "+ v1.2 accent-overlay guards (A1-A8: A7 flash strobes, A8 strobe cap unbypassable) OK\n");
   return 0;
 }

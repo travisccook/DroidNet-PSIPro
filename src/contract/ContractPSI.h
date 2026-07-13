@@ -255,8 +255,15 @@ inline void runContractAnim() {
 // Returns false when the strobe cool-down coalesces this accent away.
 // Photosensitivity: an accent may not START more often than every 2 * STROBE_MIN_STATE_MS
 // (340 ms => <= 2.94 flashes/sec), and may not be SHORTER than one min-state.
+// The cool-down is anchored UNCONDITIONALLY on the last fire (g_pulseStartMs is stamped
+// here and nowhere else, so it IS the last-fire time — the same role Flthy's pulseLastMs
+// plays). It used to also require !g_pulseActive, which meant a re-arm while the overlay
+// was still up SKIPPED THE CAP ENTIRELY: a burst of accents inside one accent's window
+// (a fast Pi mirroring verb P, or an every-beat score above ~176 BPM) could restart the
+// overlay every few ms and strobe the panel far past ~3 Hz. Re-arming early is exactly
+// the case the cap exists for, so it must be gated, not exempted.
 static inline bool _fireAccent(ContractEffect fx, const CRGB& c, uint32_t durMs, uint32_t now) {
-  if (!g_pulseActive && g_pulseStartMs != 0 && (now - g_pulseStartMs) < 2 * STROBE_MIN_STATE_MS) return false;
+  if (g_pulseStartMs != 0 && (now - g_pulseStartMs) < 2 * STROBE_MIN_STATE_MS) return false;
   if (durMs < STROBE_MIN_STATE_MS) durMs = STROBE_MIN_STATE_MS;
   if (durMs > 2550u) durMs = 2550u;
   g_pulseFx       = fx;
