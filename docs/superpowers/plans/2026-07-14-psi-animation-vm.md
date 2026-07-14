@@ -722,9 +722,9 @@ Start from the probe (`~/Repos/DroidNet-PSIPro-probes/vm-extended/include/psi_vm
         break;
 ```
 
-   (`OP_SHOWNOW` between `OP_SHOWRND` and `OP_CLEAR` in the enum — append new
-   ops at the END of the existing enum order so program bytes stay readable
-   in diffs.)
+   (`OP_SHOWNOW` appended AFTER `OP_LOOPSTART`, at the END of the enum — new
+   ops always append so the 15 reference opcodes keep the probe's exact byte
+   values and probe program listings stay valid seeds.)
 5. Ship the core with ONLY the two flash programs (`vmc_flash60`,
    `vmc_flash125`) and descriptors `VMP_FLASH`, `VMP_ALARM` in `vmProgs[]`.
    Programs/ops for other modes arrive with their conversion tasks. Include
