@@ -49,6 +49,16 @@
 // behind #ifndef PSI_VM_TABLES_ONLY below; everything else is not.
 #include <FastLED.h>
 
+// ---- forward declarations of render primitives defined later in main.cpp ----
+// psi_vm.h is included (src/main.cpp ~line 359) before fill_row/fill_column are
+// defined (~line 533/563), and functions.h (included well above, via preamble.h)
+// does not prototype either. Same accumulate-defaults pattern ContractPSI.h/
+// functions.h already use for allON/allOFF/scanCol: declare WITHOUT defaults
+// here; main.cpp's definitions carry their own `scale_brightness=0` default, so
+// existing call sites there (which rely on it) keep compiling unchanged.
+void fill_column(uint8_t column, CRGB color, uint8_t scale_brightness);
+void fill_row(uint8_t row, CRGB color, uint8_t scale_brightness);
+
 // ---------------------------------------------------------------------------
 // Color table. Low ids index a PROGMEM RGB table; the top three ids are ROLE
 // colors resolved at runtime through the jumper-selected front/rear palette
@@ -150,6 +160,61 @@ const uint8_t vmc_flash125[] PROGMEM = {
   OP_FILL_ALL, VC_W, V_SHOW(125), OP_CLEAR, V_SHOW(125), OP_END,
 };
 
+// Mode 6: Leia — Cylon_Row(0xcccccc, 74, type 3 = scanRow down), 57 loops, 34 s.
+// Native scanRow's per-step body is allOFF(true) (FastLED.clear() + a no-arg
+// FastLED.show(), which latches the STORED m_Scale from setup) immediately
+// followed by fill_row(row, color) and FastLED.show(brightness()) — a BLACK
+// frame and the row frame both land in the same tick, hence OP_CLEAR,
+// OP_SHOWNOW ahead of every V_FROW/V_SHOW pair below (golden-confirmed).
+const uint8_t vmc_leia[] PROGMEM = {
+  OP_CLEAR, OP_SHOWNOW, V_FROW(0, VC_GREYCC, 0), V_SHOW(74),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(1, VC_GREYCC, 0), V_SHOW(74),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(2, VC_GREYCC, 0), V_SHOW(74),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(3, VC_GREYCC, 0), V_SHOW(74),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(4, VC_GREYCC, 0), V_SHOW(74),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(5, VC_GREYCC, 0), V_SHOW(74),
+  OP_END,
+};
+
+// Mode 10: Star Wars title — Cylon_Row(0xC8AA00, 500, type 4 = scanRow up),
+// 5 loops. Same shape as vmc_leia (scanRow's blackout-then-row body), rows
+// 5 down to 0, gold.
+const uint8_t vmc_swscan[] PROGMEM = {
+  OP_CLEAR, OP_SHOWNOW, V_FROW(5, VC_GOLD, 0), V_SHOW(500),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(4, VC_GOLD, 0), V_SHOW(500),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(3, VC_GOLD, 0), V_SHOW(500),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(2, VC_GOLD, 0), V_SHOW(500),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(1, VC_GOLD, 0), V_SHOW(500),
+  OP_CLEAR, OP_SHOWNOW, V_FROW(0, VC_GOLD, 0), V_SHOW(500),
+  OP_END,
+};
+
+// Mode 15: Knight Rider — Cylon_Col(0xff0000, 250, type 1 = scanColLeftRight
+// bounce), 5 loops. scanColLeftRight's per-step body is the same
+// allOFF(true)-then-fill_column(single column) shape as scanRow, 18 states:
+// columns 0..9 then 8..1.
+const uint8_t vmc_knight[] PROGMEM = {
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(0, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(1, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(2, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(3, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(4, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(5, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(6, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(7, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(8, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(9, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(8, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(7, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(6, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(5, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(4, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(3, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(2, 1, VC_RED), V_SHOW(250),
+  OP_CLEAR, OP_SHOWNOW, V_FCOLS(1, 1, VC_RED), V_SHOW(250),
+  OP_END,
+};
+
 // ---------------------------------------------------------------------------
 // Program descriptors.
 // ---------------------------------------------------------------------------
@@ -167,12 +232,15 @@ struct VmProg {
 };
 
 enum {
-  VMP_FLASH = 0, VMP_ALARM,
+  VMP_FLASH = 0, VMP_ALARM, VMP_LEIA, VMP_SWSCAN, VMP_KNIGHT,
 };
 
 const VmProg vmProgs[] PROGMEM = {
-  { vmc_flash60,  24, 4, 0 },   // VMP_FLASH  (mode 2)  — was flash(0xffffff, 60, 24, 4)
-  { vmc_flash125, 15, 4, 0 },   // VMP_ALARM  (modes 3/5) — was flash(0xffffff, 125, 15, 4)
+  { vmc_flash60,  24, 4,  0 },  // VMP_FLASH  (mode 2)  — was flash(0xffffff, 60, 24, 4)
+  { vmc_flash125, 15, 4,  0 },  // VMP_ALARM  (modes 3/5) — was flash(0xffffff, 125, 15, 4)
+  { vmc_leia,     57, 34, 0 },  // VMP_LEIA   (mode 6)  — was Cylon_Row(0xcccccc, 74, 3, 57, 34)
+  { vmc_swscan,    5, 0,  0 },  // VMP_SWSCAN (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
+  { vmc_knight,    5, 0,  0 },  // VMP_KNIGHT (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
 };
 
 #ifndef PSI_VM_TABLES_ONLY
@@ -211,6 +279,46 @@ static void vmShowDelay(uint16_t d) {
   set_delay(d);
 }
 
+// Every native loop-scanning body (scanRow/scanRowDownUp/scanCol/
+// scanColLeftRight, and their kin in later conversion tasks) advances and
+// wraps its position state — decrementing globalPatternLoops on wrap —
+// SYNCHRONOUSLY, in the SAME checkDelay()-gated call that stages and shows
+// the pass's final frame, BEFORE that frame's own FastLED.show(brightness())
+// even runs. A bytecode program instead spends a whole extra tick getting
+// from "the final frame's SHOW" to "the OP_END byte that would do the
+// decrement" — because OP_END is a separate step, only reached once
+// checkDelay() succeeds again, i.e. one full set_delay(d) later.
+//
+// For a MID-loop wrap this extra tick is invisible: nothing reads
+// globalPatternLoops until it hits exactly zero (Task 7's OP_END
+// continue-wrap already keeps the SHOW-to-SHOW cadence itself steady across
+// the wrap). But for the LOOP-EXHAUSTING wrap it is not invisible: vmPlay()'s
+// tail calls loopsDonedoRestoreDefault() every tick regardless of
+// checkDelay(), exactly mirroring native's Cylon_Row/Cylon_Col tail — so if
+// the decrement-to-zero happens a whole delay interval late, a bytecode
+// program renders one whole extra loop pass that native NEVER shows before
+// the pattern reverts. Golden-caught: mode10_swtitle frame 60 (an unwanted
+// 6th row-sweep loop, delaying the revert-to-swipe transition by ~500 ms).
+//
+// The fix: peek one byte past every returning SHOW's new cursor. If that
+// byte is OP_END, this SHOW is the pass's final frame (true of every shipped
+// program — the decode-walk test's RETURNING-SHOW LOOP INVARIANT already
+// requires a returning show ahead of every OP_END; every program besides
+// vmc_flash60/vmc_flash125/vmc_leia/vmc_swscan/vmc_knight in the Task 6-13
+// probe listings also places that show immediately before OP_END) — so do
+// the decrement HERE, synchronously with the frame, instead of waiting for
+// OP_END's own later tick. OP_END no longer decrements at all: by the time a
+// loop-exhausting OP_END would be reached, vmPlay()'s tail has already seen
+// globalPatternLoops hit zero and (if !alwaysOn) reverted the pattern, so
+// that tick of vmStep() never runs — exactly like native, where scanRow's
+// wrap-and-decrement branch for the exhausted pass is likewise never
+// followed by another switch-case.
+static void vmMaybeCountLoop(const uint8_t* pc) {
+  if (!(g_vmFlags & VMF_ONESHOT) && g_vmDescLoops && pgm_read_byte(pc) == OP_END) {
+    globalPatternLoops--;
+  }
+}
+
 // Execute ops from the current frame start through its SHOW terminator (or END).
 static void vmStep() {
   const uint8_t* pc = g_vmPC;
@@ -229,8 +337,32 @@ static void vmStep() {
         g_vmPC = pc;
         break;
       case OP_SHOWNOW:
-        FastLED.show(brightness());
+        // No-arg show(), NOT show(brightness()) — mirrors native allOFF(true)'s
+        // bare FastLED.show() call, which latches whatever scale setup()
+        // passed to the ONE-TIME FastLED.setBrightness(brightness()) call
+        // (src/main.cpp ~line 377), taken BEFORE the EEPROM brightness cells
+        // are read. Nothing calls setBrightness() again afterward, so that
+        // boot-time scale (compiled default: globalPOTaverage=10) is frozen
+        // for the process lifetime, diverging from the LIVE brightness() used
+        // by every OP_SHOW/OP_SHOWR/OP_SHOWRND. Golden-forced (mode06_leia
+        // frame 0: scale 10 committed vs 20 from an earlier show(brightness())
+        // draft here) — do not "fix" this to show(brightness()).
+        FastLED.show();
         break;
+      case OP_FILL_ROW: {
+        uint8_t r = pgm_read_byte(pc++);
+        uint8_t c = pgm_read_byte(pc++);
+        uint8_t s = pgm_read_byte(pc++);
+        fill_row(r, vmColor(c), s);
+        break;
+      }
+      case OP_FILL_COLR: {
+        uint8_t st = pgm_read_byte(pc++);
+        uint8_t n  = pgm_read_byte(pc++);
+        CRGB col = vmColor(pgm_read_byte(pc++));
+        while (n--) fill_column(st++, col, 0);
+        break;
+      }
       case OP_SHOWR:
         rep = pgm_read_byte(pc++);
         __attribute__((fallthrough));
@@ -239,7 +371,10 @@ static void vmStep() {
         d |= (uint16_t)pgm_read_byte(pc++) << 8;
         vmShowDelay(d);
         if (g_vmRepLeft == 0) g_vmRepLeft = rep;
-        if (--g_vmRepLeft == 0) g_vmPC = pc;  // else: re-run frame from g_vmPC next time
+        if (--g_vmRepLeft == 0) {
+          g_vmPC = pc;
+          vmMaybeCountLoop(pc);  // see vmMaybeCountLoop's comment
+        }  // else: re-run frame from g_vmPC next time
         return;
       }
       case OP_SHOWRND: {
@@ -250,24 +385,33 @@ static void vmStep() {
         FastLED.show(brightness());
         set_delay(random(lo, hi));
         g_vmPC = pc;
+        vmMaybeCountLoop(pc);  // see vmMaybeCountLoop's comment
         return;
       }
-      // OP_FILL_ROW/OP_FILL_COLR (Task 8), OP_HALFCOLR (Task 9), OP_PIX/
-      // OP_FRAME (Task 10), OP_SPARKLE (Task 11), OP_SCALE_RAND/OP_MUL_RAND
-      // (Task 12): case bodies land with their conversion tasks, alongside
-      // the programs that emit them — neither vmc_flash60 nor vmc_flash125
-      // emits any of these bytes, so this fallthrough is unreachable today.
-      // It exists so an opcode byte this build doesn't yet implement can
-      // never be misread as extra operand bytes for whatever case follows
-      // it in the switch: unknown/not-yet-landed ops end the program safely
-      // (same as OP_END) instead of corrupting the frame-cursor walk.
+      // OP_HALFCOLR (Task 9), OP_PIX/OP_FRAME (Task 10), OP_SPARKLE (Task 11),
+      // OP_SCALE_RAND/OP_MUL_RAND (Task 12): case bodies land with their
+      // conversion tasks, alongside the programs that emit them — no shipped
+      // program emits any of these bytes yet, so this fallthrough is
+      // unreachable today. It exists so an opcode byte this build doesn't yet
+      // implement can never be misread as extra operand bytes for whatever
+      // case follows it in the switch: unknown/not-yet-landed ops end the
+      // program safely (same as OP_END) instead of corrupting the
+      // frame-cursor walk. (OP_FILL_ROW/OP_FILL_COLR landed Task 8 above —
+      // vmc_leia/vmc_swscan/vmc_knight exercise both.)
       case OP_END:
       default:
         if (g_vmFlags & VMF_ONESHOT) {
           g_vmDone = true;                     // hold display; lifecycle below restores
           return;
         }
-        if (g_vmDescLoops) globalPatternLoops--;
+        // NOT globalPatternLoops-- here: vmMaybeCountLoop() already did that,
+        // synchronously with whichever returning SHOW's cursor landed on this
+        // OP_END byte (see its comment, above vmStep()). By the time a
+        // loop-EXHAUSTING OP_END would otherwise be reached, vmPlay()'s tail
+        // has already seen globalPatternLoops hit zero and (if !alwaysOn)
+        // reverted the pattern — so this tick never runs at all, matching
+        // native. A MID-loop OP_END still lands here every wrap, same as
+        // before; it just no longer duplicates a decrement already made.
         // Wrap and KEEP EXECUTING this same vmStep() call (`continue`, not
         // `return`) — the loop body's first frame must show on THIS tick.
         // An indefinitely-looping program always ends with OP_END, and

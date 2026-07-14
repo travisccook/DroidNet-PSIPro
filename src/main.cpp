@@ -571,189 +571,6 @@ void fill_row(uint8_t row, CRGB color, uint8_t scale_brightness=0) {
 }
 
 // Display a solid line across each row in ascending or decending order, based on the scanDirection.
-// Scan Direction:
-//  0: Scan down from the top row
-//  1: Scan up from the bottom row.
-void scanRow(unsigned long time_delay, int start_row, CRGB color, bool scanDirection)
-{
-  if (firstTime) {
-    if (scanDirection == 0) ledPatternState = start_row;
-    // Down
-    if (scanDirection == 1) ledPatternState = (LEDS_PER_COLUMN - 1) - start_row;
-    firstTime = false;
-    patternRunning = true;
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      case 0: {
-          allOFF(true);
-          fill_row(0, color);
-          updateLed = 1;
-          break;
-        }
-      case 1: {
-          allOFF(true);
-          fill_row(1, color);
-          updateLed = 1;
-          break;
-        }
-      case 2: {
-          allOFF(true);
-          fill_row(2, color);
-          updateLed = 1;
-          break;
-        }
-      case 3: {
-          allOFF(true);
-          fill_row(3, color);
-          updateLed = 1;
-          break;
-        }
-      case 4: {
-          allOFF(true);
-          fill_row(4, color);
-          updateLed = 1;
-          break;
-        }
-      case 5: {
-          allOFF(true);
-          fill_row(5, color);
-          updateLed = 1;
-          break;
-        }
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-
-    // Increment the state.
-    if (scanDirection == 0) ledPatternState++;
-    if (scanDirection == 1) ledPatternState--;
-    if (ledPatternState < 0)
-    {
-      ledPatternState = (LEDS_PER_COLUMN - 1);
-      globalPatternLoops--;
-    }
-    else if (ledPatternState > (LEDS_PER_COLUMN - 1))
-    {
-      ledPatternState = 0;
-      globalPatternLoops--;
-    }
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-}
-
-// Scans down the rows starting at the first specified row from the bottom
-void scanRowDownUp(unsigned long time_delay, int start_row, CRGB color, bool scanDirection)
-{
-  if (firstTime) {
-    if (scanDirection == 0) ledPatternState = start_row;
-    if (scanDirection == 1) ledPatternState = (LEDS_PER_COLUMN - 1) - start_row;
-    firstTime = false;
-    patternRunning = true;
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      case 0: {
-          allOFF(true);
-          fill_row(0, color);
-          updateLed = 1;
-          break;
-        }
-      case 1: {
-          allOFF(true);
-          fill_row(1, color);
-          updateLed = 1;
-          break;
-        }
-      case 2: {
-          allOFF(true);
-          fill_row(2, color);
-          updateLed = 1;
-          break;
-        }
-      case 3: {
-          allOFF(true);
-          fill_row(3, color);
-          updateLed = 1;
-          break;
-        }
-      case 4: {
-          allOFF(true);
-          fill_row(4, color);
-          updateLed = 1;
-          break;
-        }
-      case 5: {
-          allOFF(true);
-          fill_row(5, color);
-          updateLed = 1;
-          break;
-        }
-      case 6: {
-          allOFF(true);
-          fill_row(4, color);
-          updateLed = 1;
-          break;
-        }
-      case 7: {
-          allOFF(true);
-          fill_row(3, color);
-          updateLed = 1;
-          break;
-        }
-      case 8: {
-          allOFF(true);
-          fill_row(2, color);
-          updateLed = 1;
-          break;
-        }
-      case 9: {
-          allOFF(true);
-          fill_row(1, color);
-          updateLed = 1;
-          break;
-        }
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-
-    // Increment the state.
-    if (scanDirection == 0) ledPatternState++;
-    if (scanDirection == 1) ledPatternState--;
-
-    if (ledPatternState < 0)
-    {
-      ledPatternState = 9;
-      globalPatternLoops--;
-    }
-    else if (ledPatternState > 9)
-    {
-      ledPatternState = 0;
-      globalPatternLoops--;
-    }
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-}
-
-// Display a solid line across each row in ascending or decending order, based on the scanDirection.
 // Scan Direction of 0 will scan right to left across the columns starting at the first specified row from the right.
 // Scan Direction of 1 will scan left to right across the columns starting at the first specified row from the left.
 void scanCol(unsigned long time_delay, int start_col, CRGB color, bool scanDirection)
@@ -857,158 +674,6 @@ void scanCol(unsigned long time_delay, int start_col, CRGB color, bool scanDirec
   }
 }
 
-
-// Sweeps Left/Right or Right/Left across the columns.
-// Scan Direction of 0 will scan right to left across the columns starting at the first specified row from the right.
-// Scan Direction of 1 will scan left to right across the columns starting at the first specified row from the left.
-void scanColLeftRight(unsigned long time_delay, int start_row, CRGB color, bool scanDirection)
-{
-  if (firstTime) {
-    if (scanDirection == 0) ledPatternState = start_row;
-    if (scanDirection == 1) ledPatternState = 9 - start_row;
-    firstTime = false;
-    patternRunning = true;
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      case 0: {
-          allOFF(true);
-          fill_column(0, color);
-          updateLed = 1;
-          break;
-        }
-      case 1: {
-          allOFF(true);
-          fill_column(1, color);
-          updateLed = 1;
-          break;
-        }
-      case 2: {
-          allOFF(true);
-          fill_column(2, color);
-          updateLed = 1;
-          break;
-        }
-      case 3: {
-          allOFF(true);
-          fill_column(3, color);
-          updateLed = 1;
-          break;
-        }
-      case 4: {
-          allOFF(true);
-          fill_column(4, color);
-          updateLed = 1;
-          break;
-        }
-      case 5: {
-          allOFF(true);
-          fill_column(5, color);
-          updateLed = 1;
-          break;
-        }
-      case 6: {
-          allOFF(true);
-          fill_column(6, color);
-          updateLed = 1;
-          break;
-        }
-      case 7: {
-          allOFF(true);
-          fill_column(7, color);
-          updateLed = 1;
-          break;
-        }
-      case 8: {
-          allOFF(true);
-          fill_column(8, color);
-          updateLed = 1;
-          break;
-        }
-      case 9: {
-          allOFF(true);
-          fill_column(9, color);
-          updateLed = 1;
-          break;
-        }
-      case 10: {
-          allOFF(true);
-          fill_column(8, color);
-          updateLed = 1;
-          break;
-        }
-      case 11: {
-          allOFF(true);
-          fill_column(7, color);
-          updateLed = 1;
-          break;
-        }
-      case 12: {
-          allOFF(true);
-          fill_column(6, color);
-          updateLed = 1;
-          break;
-        }
-      case 13: {
-          allOFF(true);
-          fill_column(5, color);
-          updateLed = 1;
-          break;
-        }
-      case 14: {
-          allOFF(true);
-          fill_column(4, color);
-          updateLed = 1;
-          break;
-        }
-      case 15: {
-          allOFF(true);
-          fill_column(3, color);
-          updateLed = 1;
-          break;
-        }
-      case 16: {
-          allOFF(true);
-          fill_column(2, color);
-          updateLed = 1;
-          break;
-        }
-      case 17: {
-          allOFF(true);
-          fill_column(1, color);
-          updateLed = 1;
-          break;
-        }
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-
-    // Increment the state.
-    if (scanDirection == 0) ledPatternState++;
-    if (scanDirection == 1) ledPatternState--;
-
-    if (ledPatternState < 0)
-    {
-      ledPatternState = 17;
-      globalPatternLoops--;
-    }
-    else if (ledPatternState > 17)
-    {
-      ledPatternState = 0;
-      globalPatternLoops--;
-    }
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-}
 
 // Display a matrix using the byte array.  Colours are defined so that
 // if the matrix has a 1, we use fgcolor, and 0 is bgcolor.
@@ -1141,89 +806,6 @@ void displayMatrixColor(const byte* matrix, CRGB fgcolor, CRGB bgcolor, bool dis
 //////////////////////////////
 // END LED Helper Functions //
 //////////////////////////////
-
-void Cylon_Row(CRGB color, unsigned long time_delay, int type, int loops, unsigned long runtime)
-{
-
-  if (firstTime) {
-    DEBUG_PRINT("Cylon Row");
-    globalPatternLoops = loops;
-    if ((runtime != 0) && (!timingReceived)) set_global_timeout(runtime);
-    if (timingReceived) set_global_timeout(commandTiming);
-  }
-
-  switch (type) {
-    case 1:
-      // Scan Down then Up ...
-      scanRowDownUp(time_delay, 0, color, 0);
-      break;
-    case 2 :
-      // Scan Up then down
-      scanRowDownUp(time_delay, 0, color, 1);
-      break;
-    case 3:
-      // Scan Down ...
-      //scanDown(time_delay, 0, color);
-      scanRow(time_delay, 0, color, 0);
-      break;
-    case 4:
-      // Scan Up ...
-      //scanUp(time_delay, 0, color);
-      scanRow(time_delay, 0, color, 1);
-      break;
-    default:
-      // do nothing
-      break;
-  }
-
-  if ((runtime == 0) && (!timingReceived)){
-    // Check to see if we have run the loops needed for this pattern
-    loopsDonedoRestoreDefault();
-  } else {
-    // Check for the global timeout to have expired.
-    globalTimerDonedoRestoreDefault();
-  }
-}
-
-void Cylon_Col(CRGB color, unsigned long time_delay, int type, int loops, unsigned long runtime)
-{
-  if (firstTime) {
-    DEBUG_PRINT("Cylon Col");
-    globalPatternLoops = loops;
-    if ((runtime != 0) && (!timingReceived)) set_global_timeout(runtime);
-    if (timingReceived) set_global_timeout(commandTiming);
-  }
-
-  switch (type) {
-    case 1:
-      // Scan Right then left
-      scanColLeftRight(time_delay, 0, color, 0);
-      break;
-    case 2:
-      // Scan Left then Right
-      scanColLeftRight(time_delay, 0, color, 1);
-      break;
-    case 3:
-      // Scan Right to left ...
-      scanCol(time_delay, 0, color, 0);
-      break;
-    case 4:
-      // Scan Left to right ...
-      scanCol(time_delay, 0, color, 1);
-      break;
-    default:
-      // do nothing
-      break;
-  }
-  
-  if ((runtime == 0) && (!timingReceived)){
-    // Check to see if we have run the loops needed for this pattern
-    loopsDonedoRestoreDefault();
-  } else {
-    // Check for the global timeout to have expired.
-    globalTimerDonedoRestoreDefault();
-  }
-}
 
 // Displays the message I <heart> U.
 void i_heart_u(unsigned long time_delay, int loops, unsigned long runtime) // 5 seconds command 0T7
@@ -2132,8 +1714,8 @@ void runPattern(int pattern) {
     case 5:              //  5 = Scream — same as Alarm
       vmPlay(VMP_ALARM);
       break;
-    case 6:              //  6 = Leia message (34s)
-      Cylon_Row(0xcccccc, 74, 3, 57, 34);
+    case 6:              //  6 = Leia message (34s) — was Cylon_Row(0xcccccc, 74, 3, 57, 34)
+      vmPlay(VMP_LEIA);
       break;
 #ifndef CONTRACT_SLIM
     case 7:              //  7 = I heart U
@@ -2156,8 +1738,8 @@ void runPattern(int pattern) {
         Pulse(100, 3, 0); //12x100ms per loop
       }
       break;
-    case 10:              //  10 = Star Wars Animation
-      Cylon_Row(0xC8AA00, 500, 4, 5, 0);
+    case 10:              //  10 = Star Wars Animation — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
+      vmPlay(VMP_SWSCAN);
       break;
 #ifndef CONTRACT_SLIM
     case 11:              //  11 = Imperial March (47s)
@@ -2175,8 +1757,8 @@ void runPattern(int pattern) {
       // Pass the matrix a main color and a background color
       displayMatrixColor(rebel, 0xff0000, 0x909497, true, 5);
       break;
-    case 15:        // 15 - Knight Rider
-      Cylon_Col(0xff0000, 250, 1, 5, 0);
+    case 15:        // 15 - Knight Rider — was Cylon_Col(0xff0000, 250, 1, 5, 0)
+      vmPlay(VMP_KNIGHT);
       break;
     case 16:        // All LED's On White Indefinitely
       allON(CRGB::Grey, true);

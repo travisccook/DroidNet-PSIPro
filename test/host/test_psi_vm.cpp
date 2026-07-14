@@ -28,6 +28,7 @@ struct ProgRef { const char* name; const uint8_t* code; size_t len; };
 #define P(x) {#x, x, sizeof(x)}
 static const ProgRef progs[] = {
     P(vmc_flash60), P(vmc_flash125),
+    P(vmc_leia), P(vmc_swscan), P(vmc_knight),
     // conversion tasks append their programs here
 };
 
