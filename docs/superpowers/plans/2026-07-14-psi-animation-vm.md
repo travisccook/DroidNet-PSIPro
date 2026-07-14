@@ -475,8 +475,8 @@ CRGB operator gap → add to `FastLED.h` mock with a KAT in Task 2's test.
 - [ ] **Step 3: Prove capture + determinism on mode 2 (flash)**
 
 ```bash
-/tmp/psi-host/golden_slim --cmd 0T2 --ms 8000 --eeprom 00,14,14 --out /tmp/psi-host/a.psig
-/tmp/psi-host/golden_slim --cmd 0T2 --ms 8000 --eeprom 00,14,14 --out /tmp/psi-host/b.psig
+/tmp/psi-host/golden_slim --cmd 0T2 --ms 8000 --eeprom 00,01,14 --out /tmp/psi-host/a.psig
+/tmp/psi-host/golden_slim --cmd 0T2 --ms 8000 --eeprom 00,01,14 --out /tmp/psi-host/b.psig
 cmp /tmp/psi-host/a.psig /tmp/psi-host/b.psig && echo DETERMINISTIC
 ```
 
@@ -516,7 +516,7 @@ echo "built $OUT/golden_full"
 
 ```bash
 chmod +x test/host/mk_full_config.sh && test/host/mk_full_config.sh
-/tmp/psi-host/golden_full --cmd 0T19 --ms 12000 --eeprom 00,14,14 --out /tmp/psi-host/saber.psig
+/tmp/psi-host/golden_full --cmd 0T19 --ms 12000 --eeprom 00,01,14 --out /tmp/psi-host/saber.psig
 ```
 
 Expected: a frame count consistent with the 23-step film (~25+ frames
@@ -581,36 +581,43 @@ if __name__ == '__main__':
 - [ ] **Step 2: Write `test/host/golden_matrix.txt`**
 
 Durations cover each mode's full lifecycle INCLUDING the end-of-pattern
-restore to the default swipe (EEPROM byte 0 = 00 → alwaysOn false; verify the
-byte sense against `src/main.cpp:407-429` before committing — if 00 means
-alwaysOn=true there, flip the value and note it in the commit message).
+restore to the default swipe. EEPROM cell semantics (verified against
+`src/main.cpp:407-429` during Task 3's review — trust these): cell 0
+`alwaysOnAddress`: 00→alwaysOn false, 01→true, any other byte→compiled
+default (true); cell 1 `externalPOTAddress`: STRICT gate, 00→brightness from
+the mocked POT (30-tick warm-up ramp in the scale bytes), 01→fixed internal
+brightness from cell 2, any other byte behaves like 00; cell 2: the fixed
+brightness value, inert unless cell 1 == 01. The matrix therefore uses
+`00,01,14` (alwaysOn off, FIXED brightness 0x14) as the canonical image, and
+fresh-chip `ff,ff,ff` (alwaysOn true, POT-ramp brightness — still fully
+deterministic under the constant mocked POT) for the always-on rows.
 
 ```text
-mode00_off        0T0  4000  front 00,14,14 512
-mode01_swipe_f    0T1  15000 front 00,14,14 512
-mode01_swipe_r    0T1  15000 rear  00,14,14 512
-mode02_flash      0T2  8000  front 00,14,14 512
-mode03_alarm      0T3  8000  front 00,14,14 512
-mode04_shortcirc  0T4  8000  front 00,14,14 512
-mode05_scream     0T5  8000  front 00,14,14 512
-mode06_leia       0T6  40000 front 00,14,14 512
-mode07_iheartu    0T7  12000 front 00,14,14 512
-mode08_radar      0T8  10000 front 00,14,14 512
-mode09_heart_f    0T9  10000 front 00,14,14 512
-mode09_pulse_r    0T9  10000 rear  00,14,14 512
-mode10_swtitle    0T10 20000 front 00,14,14 512
-mode11_march      0T11 52000 front 00,14,14 512
-mode12_disco4     0T12 8000  front 00,14,14 512
-mode13_discoinf   0T13 8000  front 00,14,14 512
-mode14_rebel      0T14 9000  front 00,14,14 512
-mode15_knight     0T15 12000 front 00,14,14 512
-mode16_white      0T16 4000  front 00,14,14 512
-mode17_red        0T17 4000  front 00,14,14 512
-mode18_green      0T18 4000  front 00,14,14 512
-mode19_saber      0T19 12000 front 00,14,14 512
-mode20_swintro    0T20 25000 front 00,14,14 512
-mode21_vu4        0T21 8000  front 00,14,14 512
-mode92_vuinf      0T92 8000  front 00,14,14 512
+mode00_off        0T0  4000  front 00,01,14 512
+mode01_swipe_f    0T1  15000 front 00,01,14 512
+mode01_swipe_r    0T1  15000 rear  00,01,14 512
+mode02_flash      0T2  8000  front 00,01,14 512
+mode03_alarm      0T3  8000  front 00,01,14 512
+mode04_shortcirc  0T4  8000  front 00,01,14 512
+mode05_scream     0T5  8000  front 00,01,14 512
+mode06_leia       0T6  40000 front 00,01,14 512
+mode07_iheartu    0T7  12000 front 00,01,14 512
+mode08_radar      0T8  10000 front 00,01,14 512
+mode09_heart_f    0T9  10000 front 00,01,14 512
+mode09_pulse_r    0T9  10000 rear  00,01,14 512
+mode10_swtitle    0T10 20000 front 00,01,14 512
+mode11_march      0T11 52000 front 00,01,14 512
+mode12_disco4     0T12 8000  front 00,01,14 512
+mode13_discoinf   0T13 8000  front 00,01,14 512
+mode14_rebel      0T14 9000  front 00,01,14 512
+mode15_knight     0T15 12000 front 00,01,14 512
+mode16_white      0T16 4000  front 00,01,14 512
+mode17_red        0T17 4000  front 00,01,14 512
+mode18_green      0T18 4000  front 00,01,14 512
+mode19_saber      0T19 12000 front 00,01,14 512
+mode20_swintro    0T20 25000 front 00,01,14 512
+mode21_vu4        0T21 8000  front 00,01,14 512
+mode92_vuinf      0T92 8000  front 00,01,14 512
 mode02_alwayson   0T2  8000  front ff,ff,ff 512
 mode19_alwayson   0T19 12000 front ff,ff,ff 512
 ```
