@@ -80,6 +80,55 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 
 
 ///////////////////////////////////////////////////
+////////////////// I2C INTAKE ////////////////////
+/////////////////////////////////////////////////
+
+// THIS FORK IS SERIAL-ONLY BY DEFAULT. That is a deliberate DIVERGENCE from Neil
+// Hutchison's upstream PSI Pro, which listens on BOTH the serial header and I2C
+// (JawaLite address 22), and it is the one place this fork is less capable than the
+// firmware it forked. Uncomment the line below to get the upstream behaviour back.
+//
+//     #define PSI_ENABLE_I2C     <-- uncomment for an I2C + serial board
+//
+// WHY. The Wire onReceive callback (receiveEvent, main.cpp) runs in TWI INTERRUPT
+// CONTEXT, and it parses a command and renders LEDs from in there. FastLED's show()
+// ends with an unconditional `sei` — it disables interrupts to bit-bang the WS2812
+// data, then re-enables them — and Arduino's twi.c re-arms the I2C slave BEFORE
+// invoking the callback. So a render inside that ISR turns interrupts back on with the
+// slave live, and more I2C traffic during the render window RE-ENTERS the same ISR on
+// top of the frame already on the stack. An AVR stack overflow does not trap: it walks
+// down into .bss and silently corrupts globals. That is a genuinely nasty bug to chase
+// on a bench, and it is worse on this board than on its siblings because the ATmega32U4
+// has only ~1 KB of stack to give.
+//
+// The contract layer's own path is already deferred out of that ISR (see the I2C
+// DEFERRAL note in src/contract/ContractPSI.h), so this switch is NOT about our code —
+// it is about upstream's native path (receiveEvent -> parseCommand -> runPattern ->
+// allOFF -> FastLED.show), which we will not rewrite in a fork that carries Neil's name.
+// Compiling I2C out removes the TWI vector from the image entirely, and with it the last
+// interrupt that can reach a render at all.
+//
+// WHAT IT BUYS (measured, not estimated):
+//                                serial-only      + I2C
+//     flash                  25,754 B (89.8%)   27,238 B (95.0%)
+//     SRAM                    1,300 B (50.8%)    1,581 B (61.8%)
+//     stack budget                    1,260 B            979 B
+//     worst-case stack           396 B (31%)       478 B (49%)
+//     can an ISR reach a render?          NO      yes (native path)
+//
+// WHAT IT DOES NOT BUY: the five native modes CONTRACT_SLIM drops do not come back.
+// Serial-only with CONTRACT_SLIM off is still 32,624 B (113.8%) and will not link.
+//
+// WHEN YOU NEED TO TURN IT BACK ON: if anything on your droid addresses this board over
+// I2C (a MarcDuino, a Teeces/STEALTH setup, any JawaLite master on the bus at address
+// 22), you want PSI_ENABLE_I2C. With it off, the board simply will not hear them — it
+// does not fail loudly, it just never answers. Both configurations are built and
+// type-checked by test/host/run.sh, so neither can rot.
+
+//#define PSI_ENABLE_I2C
+
+
+///////////////////////////////////////////////////
 ////////////// SWIPE MODE SETTINGS ///////////////
 /////////////////////////////////////////////////
 

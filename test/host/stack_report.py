@@ -586,12 +586,29 @@ def main():
 
     elf = args.elf
     if not elf:
+        # A project can have SEVERAL envs (the PSI ships serial-only as [env:PSIPro] and keeps
+        # the I2C intake as [env:PSIPro-i2c]), so "whichever firmware.elf os.walk happened to
+        # find last" is not an answer -- it silently reports the wrong configuration's stack.
+        # Prefer the project's default env, and always PRINT which image was analysed.
+        found = {}
         for d, _, fs in os.walk(os.path.join(root_dir, ".pio", "build")):
             for f in fs:
                 if f == "firmware.elf":
-                    elf = os.path.join(d, f)
-        if not elf:
+                    found[os.path.basename(d)] = os.path.join(d, f)
+        if not found:
             sys.exit("no firmware.elf -- run `pio run` first, or pass --elf")
+        default_env = None
+        ini = os.path.join(root_dir, "platformio.ini")
+        if os.path.exists(ini):
+            for line in open(ini):
+                if line.strip().startswith("default_envs"):
+                    default_env = line.split("=", 1)[1].strip().split()[0]
+                    break
+        env = default_env if default_env in found else sorted(found)[0]
+        elf = found[env]
+        if len(found) > 1:
+            others = ", ".join(sorted(k for k in found if k != env))
+            print("  [analysing env '%s'; also built: %s -- pass --elf to pick another]\n" % (env, others))
 
     # Sniff the architecture from the ELF machine type and dispatch.
     xt_od = os.path.expanduser(

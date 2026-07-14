@@ -74,6 +74,59 @@ ourselves, and says so explicitly.
 
 ---
 
+## This fork is SERIAL-ONLY by default
+
+**Upstream listens on serial *and* I2C. This fork, out of the box, listens on serial only.** That is
+the one place it is *less* capable than the firmware it forked, and it is a deliberate choice rather
+than an oversight, so it belongs up here rather than in a footnote.
+
+If anything on your droid talks to the PSI over I2C — a MarcDuino, a Teeces or STEALTH setup, any
+JawaLite master on the bus at address 22 — **you want the I2C build**. It is one line:
+
+```c
+// include/config.h
+#define PSI_ENABLE_I2C        // uncomment this
+```
+
+```bash
+pio run                  # serial-only (default)   25,754 B  89.8% flash
+pio run -e PSIPro-i2c    # + I2C intake            27,238 B  95.0% flash
+```
+
+Be aware of the failure mode if you get this wrong: with I2C compiled out, the board does not
+complain, it simply **never answers** an I2C master. No error, no blink — it just sits there.
+
+**Why serial-only is the default.** Upstream's I2C callback (`receiveEvent`) runs in **interrupt
+context**, and it parses a command and renders LEDs from in there. FastLED's `show()` ends with an
+unconditional `sei` — it disables interrupts to bit-bang the WS2812 data, then re-enables them — and
+Arduino's `twi.c` re-arms the I2C slave *before* invoking the callback. So a render inside that
+interrupt turns interrupts back on with the slave live, and further I2C traffic during the render
+window **re-enters the same interrupt** on top of the frame already on the stack. An AVR stack
+overflow does not trap: it walks down into `.bss` and silently corrupts globals. This board has only
+~1 KB of stack to give.
+
+Our own contract path is already deferred out of that interrupt (see below). This switch is about
+*upstream's* native path — `receiveEvent → parseCommand → runPattern → allOFF → FastLED.show` — which
+we are not going to rewrite in a fork that carries Neil's name. Compiling I2C out removes the TWI
+vector from the image entirely, and with it the last interrupt that can reach a render at all.
+
+What it buys, measured:
+
+| | serial-only (default) | with I2C |
+| --- | --- | --- |
+| flash | 25,754 B (89.8%) | 27,238 B (95.0%) |
+| SRAM | 1,300 B (50.8%) | 1,581 B (61.8%) |
+| worst-case stack | 396 B of 1,260 B (31%) | 478 B of 979 B (49%) |
+| can an interrupt reach a render? | **no** | yes (upstream's native path) |
+
+It does **not** give the five `CONTRACT_SLIM` modes back — serial-only with `CONTRACT_SLIM` off is
+still 32,624 B (113.8%) and will not link.
+
+Both configurations are built and type-checked by `test/host/run.sh` on every run, so neither can
+quietly rot.
+
+---
+
 ## STOP: this has never run on hardware
 
 **Nothing in this fork has ever been flashed to a real PSI Pro. Not once.**
@@ -98,8 +151,9 @@ numbers are worth knowing before you build:
 | Build | Flash | of 28,672 B |
 | --- | --- | --- |
 | Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
-| **This fork, as shipped** | **27,238 B** | **95.0%** |
-| …with `CONTRACT_SLIM` disabled | 33,782 B | 117.8% — **will not link** |
+| **This fork, as shipped (serial-only)** | **25,754 B** | **89.8%** |
+| This fork with the I2C intake (`-e PSIPro-i2c`) | 27,238 B | 95.0% |
+| …with `CONTRACT_SLIM` disabled | 32,624 B | 113.8% — **will not link** |
 | …with the codegen flags removed | 28,896 B | 100.8% — **will not link** |
 
 Neil's firmware already used 87.6% of this chip. Only ~3.5 KB was ever free, and the contract layer
@@ -111,11 +165,20 @@ this work, this fork linked at 38,790 B — 135.3%.)
 
 ### SRAM and the stack
 
-SRAM sits at 1,581 B of 2,560 B (61.8%), leaving **979 B for the stack**. That used to be an open
-question here. It has now been analysed statically (`test/host/stack_report.py` regenerates the
-numbers from `-fstack-usage` plus the real disassembly), and the answer is *mostly* good:
+SRAM sits at 1,300 B of 2,560 B (50.8%), leaving **1,260 B for the stack** in the default
+serial-only build. That used to be an open question here. It has now been analysed statically
+(`test/host/stack_report.py` regenerates the numbers from `-fstack-usage` plus the real
+disassembly), and in the shipped configuration the answer is good:
 
-- **Worst-case stack: 478 B of 979 B (49%).** Deepest path is
+- **Worst-case stack: 396 B of 1,260 B (31%), and the bound is SOUND** — with the TWI vector gone,
+  **no interrupt in the image can reach a render at all**, so there is no nesting to worry about.
+  (`stack_report.py` still prints a nesting warning against the USB interrupt; that is its
+  conservative model of indirect calls charging a FastLED vtable entry to PluggableUSB's dispatch
+  loop, which never executes because no PluggableUSB module is ever registered. Verified in the
+  disassembly.)
+
+- **In the I2C build (`-e PSIPro-i2c`) the picture is the one described below**, and the bound there
+  is *not* sound. Worst case 478 B of 979 B (49%). Deepest path is
   `main → serialEventRun → parseContract (138 B — the largest frame in the image) → allOFF →
   FastLED::show → showPixels`, plus the worst single interrupt. No recursion anywhere, no
   `alloca`/VLA (every frame is a compile-time constant), and **no heap at all** — nothing links

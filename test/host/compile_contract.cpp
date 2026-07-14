@@ -725,6 +725,7 @@ int main() {
     parseContract("!**X");
   }
 
+#ifdef PSI_ENABLE_I2C
   // ---- A11: the I2C deferral — the ISR must QUEUE, never PARSE, never RENDER ---------------
   // receiveEvent() runs in TWI interrupt context, and FastLED's show() re-enables interrupts
   // mid-render while the I2C slave is re-armed — so parsing/rendering there lets the ISR
@@ -774,10 +775,16 @@ int main() {
     }
     parseContract("!**X");
   }
+#endif  // PSI_ENABLE_I2C
 
-  printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp/scale "
+  printf("ContractPSI.h type-check [%s] + score-native/latch/score-clear/build-ramp/scale "
          "+ v1.2 accent-overlay guards (A1-A9: A7 flash strobes, A8 strobe cap unbypassable, "
-         "A9 a resend replaces the show) + A10 verb-Q ack bytes + A11 the I2C ISR only "
-         "queues (never parses, never renders) OK\n");
+         "A9 a resend replaces the show) + A10 verb-Q ack bytes%s OK\n",
+#ifdef PSI_ENABLE_I2C
+         "I2C build", " + A11 the I2C ISR only queues (never parses, never renders)"
+#else
+         "serial-only build (the default)", " (A11 not applicable: no I2C ISR in this build)"
+#endif
+         );
   return 0;
 }

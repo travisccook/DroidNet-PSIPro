@@ -5,10 +5,15 @@
 // covered by that license; see the NOTICE in README.md.
 //
 // src/contract/ContractPSI.h — PSI Pro (MaxPSI) firmware layer for the
-// Driveable-Animation Contract. ADDITIVE: the native JawaLite T/A/D/P grammar and
-// the I2C intake are untouched; this header only adds the '!'-prefixed contract
-// family. ZERO edits to the render primitives — every effect reuses an existing
-// CRGB-parametric primitive with a live g_contractColor.
+// Driveable-Animation Contract. ADDITIVE: the native JawaLite T/A/D/P grammar is
+// untouched; this header only adds the '!'-prefixed contract family. ZERO edits to the
+// render primitives — every effect reuses an existing CRGB-parametric primitive with a
+// live g_contractColor.
+//
+// ONE EXCEPTION, and it is not additive: this fork is SERIAL-ONLY BY DEFAULT. Upstream
+// also listens on I2C, and that intake is compiled out unless PSI_ENABLE_I2C is defined
+// (see the I2C INTAKE block in include/config.h for the full reasoning and the numbers).
+// It is the single place this fork is less capable than the firmware it forked.
 //
 // INCLUDE ORDER (see main.cpp ~line 351): this header is included AFTER config.h /
 // matrices.h / FastLED and AFTER the global state block (leds[], level[],
@@ -668,6 +673,10 @@ inline void parseContract(const char* cmd) {
 //
 // `volatile` on the flag is required (loop() must re-read it, not cache it), and a bool is one
 // byte on AVR, so the store is atomic and no cli/sei guard is needed around it.
+// Only compiled when there IS an I2C ISR to defer out of. In the default serial-only build
+// there is no TWI vector, commands arrive via serialEvent() in main context, and this queue
+// would be 96 B of SRAM guarding a hazard that cannot occur.
+#ifdef PSI_ENABLE_I2C
 static volatile bool g_i2cPending = false;
 static char          g_i2cLine[CMD_MAX_LENGTH];
 
@@ -688,6 +697,12 @@ inline void contractServicePending() {
   parseContract(g_i2cLine);                       // safe with interrupts on: the ISR will not
   g_i2cPending = false;                           // write g_i2cLine while the flag is set
 }
+#else
+// Serial-only build: no I2C ISR exists, so there is nothing to defer and no queue to pay for.
+// loop() still calls contractServicePending() unconditionally; it compiles away to nothing.
+inline void contractQueueFromISR(const char*) { }
+inline void contractServicePending() { }
+#endif  // PSI_ENABLE_I2C
 
 // Phase-1 boot hook (nothing yet; symmetry with the RSeries fork).
 inline void contractSetup() { }

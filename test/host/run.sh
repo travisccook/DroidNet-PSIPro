@@ -17,8 +17,14 @@ echo "[1/5] contract_core parser unit tests"
 clang++ -std=c++17 -Wall -Wextra -O0 test_contract_core.cpp -o /tmp/psi_contract_test
 /tmp/psi_contract_test
 echo "[2/5] ContractPSI.h firmware type-check"
+# BOTH configurations. This fork is serial-only by default (include/config.h, I2C INTAKE),
+# and I2C is an opt-in -D. An option nobody compiles is an option that rots, so check both:
+# the serial-only build is what ships, and the I2C build is what anyone with a MarcDuino on
+# the bus will flash. Guard A11 (the ISR deferral) only exists in the I2C config.
 clang++ -std=c++17 -Wall -Wextra compile_contract.cpp -o /tmp/psi_fw_syntax
 /tmp/psi_fw_syntax
+clang++ -std=c++17 -Wall -Wextra -D PSI_ENABLE_I2C compile_contract.cpp -o /tmp/psi_fw_syntax_i2c
+/tmp/psi_fw_syntax_i2c
 
 echo "[3/5] command-buffer width guard"
 # buildCommand() (src/main.cpp) DROPS every byte past CMD_MAX_LENGTH-1 and terminates
@@ -105,8 +111,9 @@ if [ -z "$PIO" ] || [ ! -x "$PIO" ]; then
   exit 0
 fi
 echo "using $PIO"
-( cd ../.. && "$PIO" run -e PSIPro )
+( cd ../.. && "$PIO" run -e PSIPro -e PSIPro-i2c )
 echo "cross-compiles for the real MCU (ATmega32U4 (SparkFun Pro Micro)) OK"
+echo "    BOTH configs built: PSIPro (serial-only, 25,754 B) and PSIPro-i2c (27,238 B)."
 echo "    (a successful LINK is not a bench test: this firmware has never been flashed.)"
 echo
 echo "    NOTE: this board's flash budget is the tight one — 28,672 B usable, and the"

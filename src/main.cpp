@@ -289,7 +289,11 @@
 #include "matrices.h"
 #include "config.h"
 #if USE_I2C
+// SERIAL-ONLY BY DEFAULT — see the I2C INTAKE block in include/config.h. Uncommenting
+// PSI_ENABLE_I2C there restores upstream's I2C/JawaLite intake (and its ISR nesting hazard).
+#ifdef PSI_ENABLE_I2C
 #include "Wire.h"
+#endif
 #endif
 
 // Setup the LED Matrix
@@ -369,8 +373,10 @@ void setup() {
 
 #if USE_I2C
   //  Setup I2C
+#ifdef PSI_ENABLE_I2C
   Wire.begin(I2CAdress);                   // Start I2C Bus as Master I2C Address
   Wire.onReceive(receiveEvent);            // register event so when we receive something we jump to receiveEvent();
+#endif
 #endif
 
   // Setup the Serial for debug and command input
@@ -2260,6 +2266,9 @@ void runPattern(int pattern) {
 #if USE_I2C
 // function that executes whenever data is received from an I2C master
 // this function is registered as an event, see setup()
+// TWI INTERRUPT CONTEXT. Compiled out entirely unless PSI_ENABLE_I2C is defined, which is
+// what removes the TWI vector — and with it the last interrupt that can reach a render.
+#ifdef PSI_ENABLE_I2C
 void receiveEvent(int eventCode) {
 
   while (Wire.available()) {
@@ -2284,6 +2293,7 @@ void receiveEvent(int eventCode) {
     }
   }
 }
+#endif  // PSI_ENABLE_I2C
 #endif
 
 /*
