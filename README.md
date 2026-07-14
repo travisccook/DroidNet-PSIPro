@@ -98,7 +98,7 @@ numbers are worth knowing before you build:
 | Build | Flash | of 28,672 B |
 | --- | --- | --- |
 | Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
-| **This fork, as shipped** | **26,946 B** | **94.0%** |
+| **This fork, as shipped** | **27,134 B** | **94.6%** |
 | …with `CONTRACT_SLIM` disabled | 33,782 B | 117.8% — **will not link** |
 | …with the codegen flags removed | 28,896 B | 100.8% — **will not link** |
 
@@ -109,9 +109,37 @@ costs ~13.7 KB. It fits only because of three things working *together* — `CON
 **disable any single leg and the image overflows again.** (For scale: as originally published, before
 this work, this fork linked at 38,790 B — 135.3%.)
 
-SRAM sits at 1,484 B of 2,560 B (58.0%), leaving ~1.0 KB for stack. That is comfortable in a host
-test and **unmeasured under a real FastLED render on a real board** — and a stack overflow at runtime
-is far nastier than a link error. Treat it as an open question, not a cleared one.
+### SRAM and the stack
+
+SRAM sits at 1,484 B of 2,560 B (58.0%), leaving **1,076 B for the stack**. That used to be an open
+question here. It has now been analysed statically (`test/host/stack_report.py` regenerates the
+numbers from `-fstack-usage` plus the real disassembly), and the answer is *mostly* good:
+
+- **Worst-case straight-line stack: 596 B of 1,076 B (55%).** Deepest path is
+  `main → serialEventRun → parseContract (138 B — the largest frame in the image) → allOFF →
+  FastLED::show → showPixels`, plus the worst single interrupt. No recursion anywhere, no
+  `alloca`/VLA (every frame is a compile-time constant), and **no heap at all** — nothing links
+  `malloc`, so the whole 1,076 B really is stack and the margin is real.
+
+- **But that bound is not sound, and you should know why.** FastLED's `showPixels()` executes an
+  unconditional `sei` (it disables interrupts to bit-bang the WS2812 data, patches `timer0_millis`,
+  then re-enables them). The PSI is an **I2C slave**, and its I2C interrupt runs the whole command
+  parser and a full LED render — so interrupts get re-enabled *while still inside the I2C ISR*, with
+  the slave already re-armed. A second I2C message arriving during the ~hundreds-of-microseconds
+  render window re-enters that ISR on top of the frame already there, at ~190-230 B a level. One
+  level of nesting is 827 B (77%); two is ~1,017 B (95%); three overflows. On AVR an overflow does
+  not trap — it walks down into `.bss` and silently corrupts globals.
+
+**This hazard is inherited, not introduced.** Stock upstream reaches the same `sei` by the same
+route (`receiveEvent → parseCommand → runPattern → allOFF → FastLED.show`), so an unmodified PSI Pro
+has it too. What this fork adds is a *second* path into it and the single largest stack frame in the
+firmware (`parseContract`, 138 B) inside that ISR — which makes each level of nesting materially more
+expensive. Whether re-entry actually happens depends on I2C traffic timing, which **cannot be
+determined without hardware**. The static fact — that interrupts are re-enabled inside the ISR — is
+proven; the frequency is not.
+
+If you are bench-testing this, that is the thing to watch for: unexplained corruption of unrelated
+globals under heavy I2C traffic during a show.
 
 `CONTRACT_SLIM` is **not free**. It drops five native novelty modes: 7 (i_heart_u), 9 (red_heart,
 front half), 11 (Imperial March), 19 (lightsaberBattle) and 20 (StarWarsIntro). If you want those

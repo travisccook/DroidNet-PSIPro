@@ -101,7 +101,33 @@ inline ContractEffect _effectFromName(const char* s, size_t len, int& nativeCode
   if (eq("comet")) return CE_COMET;       if (eq("chase")) return CE_CHASE;
   if (eq("wipe")) return CE_WIPE;         if (eq("gradient")) return CE_GRADIENT;
   if (eq("colorcycle")) return CE_COLORCYCLE; if (eq("twinkle")) return CE_TWINKLE;
-  if (len > 7 && strncmp(s, "native:", 7) == 0) { nativeCode = atoi(s + 7); return CE_NATIVE; }
+  // native:<n>. The digits are parsed BOUNDED BY len, not by a NUL.
+  // This used to be `nativeCode = atoi(s + 7)`, and atoi() stops at the first NON-DIGIT — not
+  // at s+len. So a caller handing us a slice that ends in a digit (a view into a ring buffer,
+  // say) would have atoi() read straight off the end of the buffer. AddressSanitizer proves it:
+  // memcpy "native:123" into a 10-byte malloc with no NUL, call this, and you get a
+  // heap-buffer-overflow READ. It is NOT reachable from any caller in this firmware today —
+  // _parseParams always ends a value slice on ',' or '\0', both non-digits, inside the same
+  // NUL-terminated line buffer — so this closes a latent trap for a future caller, on a parser
+  // that eats bytes off a shared serial bus. Behaviour is unchanged for every reachable input.
+  if (len > 7 && strncmp(s, "native:", 7) == 0) {
+    size_t i = 7;
+    int32_t sign = 1;
+    if (i < len && (s[i] == '-' || s[i] == '+')) { sign = (s[i] == '-') ? -1 : 1; i++; }
+    int32_t n = 0;
+    while (i < len && s[i] >= '0' && s[i] <= '9') {
+      // Saturate INSIDE int16, because nativeCode is a plain `int` and that is 16 BITS on the
+      // ATmega. The exact last-safe-multiply test, not an approximate one: a loose guard here
+      // still lets the final digit push the accumulator past 32767 (a `n < 3277` bound accepts
+      // "32768" and lands on 32768, one over — which is precisely the overflow this exists to
+      // stop, and which the host fuzzer's int16 invariant caught).
+      int32_t d = s[i] - '0';
+      if (n <= (32767 - d) / 10) n = n * 10 + d;
+      i++;
+    }
+    nativeCode = (int)(sign * n);
+    return CE_NATIVE;
+  }
   return CE_NONE;
 }
 // v1.2: which effects are legal as a one-shot ACCENT overlay (ae=)?

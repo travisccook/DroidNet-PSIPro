@@ -511,7 +511,18 @@ inline void applyContract(const ParsedContract& p) {
 // ---- loop hooks -------------------------------------------------------------
 // Called every loop pass (spec §8 P): crisp pulse-deadline expiry.
 inline void contractPulseTick() {
-  if (g_pulseActive && millis() >= g_pulseDeadline) {
+  // WRAP-SAFE deadline test. `millis() >= g_pulseDeadline` compares an ABSOLUTE deadline, and
+  // g_pulseDeadline is `now + durMs` — which OVERFLOWS uint32 once every ~49.7 days, in the
+  // durMs-wide window just before millis() wraps. The deadline then lands at a tiny value, the
+  // absolute compare is instantly true, and the accent expires on its very next tick instead of
+  // running its ~180 ms. The signed-difference idiom below is correct across the wrap and is
+  // BIT-IDENTICAL everywhere else (verified exhaustively: zero disagreements outside the wrap
+  // window), so no rendered value moves.
+  // This is what the other two forks already do — Flthy (ContractFlthy.h:363) and the Logics
+  // (ContractLogics.h:177) both store start+duration and test the ELAPSED difference, and
+  // contract_core's strobeCoolDownExpired() uses the same unsigned-difference idiom for exactly
+  // this reason. The PSI was the only board of the three still comparing an absolute deadline.
+  if (g_pulseActive && (int32_t)(millis() - g_pulseDeadline) >= 0) {
     g_pulseActive = false;
     firstTime = true;                                  // re-init the native state machines the base look uses
     // Do NOT touch g_lastEffect / g_effectStartMs here. Clearing g_lastEffect made
@@ -529,8 +540,12 @@ inline bool contractLoopTick() {
   if (!g_contractArmed) return false;
   uint32_t now = millis();
 
-  // deadline: a finite-duration look reverts to idle swipe when it elapses
-  if (g_animDeadline && now >= g_animDeadline) {
+  // deadline: a finite-duration look reverts to idle swipe when it elapses.
+  // Wrap-safe for the same reason as contractPulseTick() above — `now + pr.durMs` overflows
+  // uint32 every ~49.7 days, and an absolute compare would then disarm the contract instantly
+  // and hand the panel back to native autonomy mid-show. (g_animDeadline == 0 still means
+  // "hold, no deadline", so the && guard is load-bearing and stays.)
+  if (g_animDeadline && (int32_t)(now - g_animDeadline) >= 0) {
     g_contractArmed = false;
     useTempInternalBrightness = false;
     return false;

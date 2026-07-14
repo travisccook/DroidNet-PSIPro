@@ -14,7 +14,7 @@ working exactly as they did.
 - **Role:** the PSI board of the three-board Cantina dome light-show family (RSeries Logics, PSI Pro,
   Flthy HPs). This is the tightest of the three and the pacing item.
 - **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), FastLED. `platformio.ini` is checked in and
-  builds out of the box (`pio run`). It links at 26,946 B of 28,672 B (94.0%) — and only fits
+  builds out of the box (`pio run`). It links at 27,134 B of 28,672 B (94.6%) — and only fits
   because of CONTRACT_SLIM + the codegen flags + PSI_NOINLINE together. See README, "Building".
 - **Seeded from:** the private C2B5 droid working collection @ `2fbd4023` (subdir `PSIPro`),
   2026-07-12, git-tracked files only. That collection is where the PlatformIO restructuring of Neil's
