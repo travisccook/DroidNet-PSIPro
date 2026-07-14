@@ -678,9 +678,9 @@ void scanCol(unsigned long time_delay, int start_col, CRGB color, bool scanDirec
 // Display a matrix using the byte array.  Colours are defined so that
 // if the matrix has a 1, we use fgcolor, and 0 is bgcolor.
 // Optionally colors 2,3,4,5,6,7,8 (allowing a total of nine colours to be used in a pattern.
-void displayMatrixColor(const byte* matrix, CRGB fgcolor, CRGB bgcolor, bool displayMe, unsigned long runtime, 
-                        CRGB color2=0x000000, CRGB color3=0x000000, CRGB color4=0x000000, CRGB color5=0x000000,
-                        CRGB color6=0x000000, CRGB color7=0x000000, CRGB color8=0x000000)
+void displayMatrixColor(const byte* matrix, CRGB fgcolor, CRGB bgcolor, bool displayMe, unsigned long runtime,
+                        CRGB color2, CRGB color3, CRGB color4, CRGB color5,
+                        CRGB color6, CRGB color7, CRGB color8)
 {
   // global LED ID counter ...
   int ledNum = 0;
@@ -1359,64 +1359,6 @@ void lightsaberBattle(unsigned long time_delay)
   }
 }
 
-// Delay, loops, color
-void Pulse(unsigned long time_delay, uint8_t loops, unsigned long runtime)
-{
-  // We use the VU_chart matrix to define the colors used
-  // Then we'll simply display as many or as few of the pixels as we want
-  // and use a random number to determine rise and fall.
-
-  if (firstTime) {
-    DEBUG_PRINT_LN("Pulse");
-    firstTime = false;
-    patternRunning = true;
-    globalPatternLoops = loops;
-    if ((runtime != 0) && (!timingReceived)) set_global_timeout(runtime);
-    if (timingReceived) set_global_timeout(commandTiming);
-    ledPatternState = 0;
-    // Clear the display the first time through
-    allOFF(true);
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    // read the display, but don't show it.
-    // we'll blank out some pixels in a sec
-    displayMatrixColor(pulse, 0x110000, 0x555555, false, 0);
-
-    switch (ledPatternState) {
-      // Note we set the display timeout large here so that the image stays displayed.
-      case 0:  leds[33] = 0xff0000; ledPatternState = 1; updateLed = 1; break;
-      case 1:  leds[32] = 0xff0000; ledPatternState = 2; updateLed = 1; break;
-      case 2:  leds[16] = 0xff0000; ledPatternState = 3; updateLed = 1; break;
-      case 3:  leds[30] = 0xff0000; ledPatternState = 4; updateLed = 1; break;
-      case 4:  leds[36] = 0xff0000; ledPatternState = 5; updateLed = 1; break;
-      case 5:  leds[45] = 0xff0000; ledPatternState = 6; updateLed = 1; break;
-      case 6:  leds[38] = 0xff0000; ledPatternState = 7; updateLed = 1; break;
-      case 7:  leds[28] = 0xff0000; ledPatternState = 8; updateLed = 1; break;
-      case 8:  leds[20] = 0xff0000; ledPatternState = 9; updateLed = 1; break;
-      case 9:  leds[8]  = 0xff0000; ledPatternState = 10; updateLed = 1; break;
-      case 10: leds[5]  = 0xff0000; ledPatternState = 11; updateLed = 1; break;
-      case 11: leds[6]  = 0xff0000; ledPatternState = 12; updateLed = 1; break;
-      case 12: leds[23] = 0xff0000; ledPatternState = 0; updateLed = 1; globalPatternLoops--; break;
-    }
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-  
-  if ((runtime == 0) && (!timingReceived)){
-    // Check to see if we have run the loops needed for this pattern
-    loopsDonedoRestoreDefault();
-  } else {
-    // Check for the global timeout to have expired.
-    globalTimerDonedoRestoreDefault();
-  }
-}
-
 // Scrolling text getting smaller and dimming as it rises up the screen
 void StarWarsIntro(unsigned long time_delay, uint8_t loops, CRGB color, unsigned long runtime)
 {
@@ -1641,8 +1583,8 @@ void runPattern(int pattern) {
         allON(CRGB::Red, true);  // slim build: red_heart stripped; hold red instead
 #endif
       } else {
-        // Display the Pulse on the back
-        Pulse(100, 3, 0); //12x100ms per loop
+        // Display the Pulse on the back — was Pulse(100, 3, 0)
+        vmPlay(VMP_PULSE);
       }
       break;
     case 10:              //  10 = Star Wars Animation — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
@@ -1660,9 +1602,8 @@ void runPattern(int pattern) {
       // Time Delay, loops, sparkles, colour.  If loops is 0, this is on indefinately.
       DiscoBall(150, 0, 3, CRGB::Grey, 0); //gray /30
       break;
-    case 14:          // 14 - Rebel Symbol
-      // Pass the matrix a main color and a background color
-      displayMatrixColor(rebel, 0xff0000, 0x909497, true, 5);
+    case 14:          // 14 - Rebel Symbol — was displayMatrixColor(rebel, 0xff0000, 0x909497, true, 5)
+      vmPlay(VMP_REBEL);
       break;
     case 15:        // 15 - Knight Rider — was Cylon_Col(0xff0000, 250, 1, 5, 0)
       vmPlay(VMP_KNIGHT);

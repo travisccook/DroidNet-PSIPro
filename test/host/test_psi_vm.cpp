@@ -30,6 +30,7 @@ static const ProgRef progs[] = {
     P(vmc_flash60), P(vmc_flash125),
     P(vmc_leia), P(vmc_swscan), P(vmc_knight),
     P(vmc_radar),
+    P(vmc_rebel), P(vmc_pulse),
     // conversion tasks append their programs here
 };
 

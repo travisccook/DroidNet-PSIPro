@@ -63,6 +63,20 @@ void fill_row(uint8_t row, CRGB color, uint8_t scale_brightness);
 // this forward declaration isn't "omitting a default the definition supplies
 // elsewhere"; there simply isn't one to omit.
 void fill_half_column(uint8_t column, uint8_t half, CRGB color);
+// displayMatrixColor is the opposite accumulate-defaults case from
+// fill_column/fill_row above: its color2..color8 defaults (all 0x000000)
+// used to live on the DEFINITION (main.cpp ~line 681). C++ allows a default
+// argument to be supplied on only ONE declaration seen by a given call site,
+// so once OP_FRAME's vmStep() case (below) needed to call it from THIS
+// header — included before that definition — the defaults had to move here
+// instead; main.cpp's definition now repeats none of them. Every existing
+// short-form call site (i_heart_u/red_heart's 5-arg calls, VUMeter's 8-arg
+// call, lightsaberBattle's 6/7/8-arg calls) still resolves its omitted
+// trailing colors against THIS declaration, since it precedes all of them.
+void displayMatrixColor(const byte* matrix, CRGB fgcolor, CRGB bgcolor, bool displayMe, unsigned long runtime,
+                        CRGB color2 = 0x000000, CRGB color3 = 0x000000, CRGB color4 = 0x000000,
+                        CRGB color5 = 0x000000, CRGB color6 = 0x000000, CRGB color7 = 0x000000,
+                        CRGB color8 = 0x000000);
 
 // ---------------------------------------------------------------------------
 // Color table. Low ids index a PROGMEM RGB table; the top three ids are ROLE
@@ -104,6 +118,34 @@ const uint8_t vmPalette[VC__COUNT][3] PROGMEM = {
   { 0x90, 0x94, 0x97 },
   { 0x11, 0x00, 0x00 },
   { 0x55, 0x55, 0x55 },
+};
+
+// ---------------------------------------------------------------------------
+// Bitmap ids + blit palettes for OP_FRAME. Task 10 introduces only what modes
+// 14 (rebel) and 9-rear (Pulse) need — BM_REBEL/BM_PULSE and the FP_HEART/
+// FP_PULSE palettes below. The lightsaber (22 frames) and I/Heart/U letter
+// bitmaps arrive with the tasks that convert those modes (Task 13); pulling
+// them in now would revive +1,056 B of PROGMEM the slim build currently
+// keeps stripped, for no shipped program, and squeeze the I2C env's already
+// tight headroom. These two enums are plain integer constants baked into
+// vmc_rebel/vmc_pulse's PROGMEM bytes via V_FRAME() (they cost nothing to
+// declare), so they live out here with the other tables; the vmBitmaps
+// POINTER table itself — which must reference the real `rebel`/`pulse`
+// PROGMEM byte arrays declared in matrices.h — lives inside the
+// PSI_VM_TABLES_ONLY fence below, next to vmColor(). See that table's own
+// comment for why: unlike a mere declaration, an initialized global pointer
+// table is real data that needs `rebel`/`pulse` to actually be DEFINED in
+// the same translation unit, which is true in the firmware build (matrices.h
+// precedes this header, main.cpp ~line 289 vs ~line 359) but not in the
+// decode-walk test (PSI_VM_TABLES_ONLY, no matrices.h).
+enum { BM_REBEL = 0, BM_PULSE };
+
+// Bitmap blit palettes: {fg, bg, color2, color3, color4} color ids, indexed
+// by OP_FRAME's palId operand.
+enum { FP_HEART = 0, FP_PULSE };
+const uint8_t vmFramePals[][5] PROGMEM = {
+  { VC_RED,     VC_GREYBG,  VC_K, VC_K, VC_K },  // rebel (mode 14); also I/Heart/U's fg/bg (Task 13)
+  { VC_PULSEFG, VC_PULSEBG, VC_K, VC_K, VC_K },  // pulse trace (mode 9 rear)
 };
 
 // ---------------------------------------------------------------------------
@@ -288,6 +330,76 @@ const uint8_t vmc_radar[] PROGMEM = {
   OP_END,
 };
 
+// Mode 14: Rebel symbol — was displayMatrixColor(rebel, 0xff0000, 0x909497,
+// true, 5). Unlike every program above, native mode 14's own body (case 14's
+// dispatch calls displayMatrixColor directly — there is no dedicated
+// rebel-symbol function) carries NO checkDelay()/set_delay() gate at all:
+// every single call re-blits the bitmap and, because displayMe=true,
+// unconditionally calls FastLED.show(brightness()) — live brightness, not
+// the frozen boot-scale bare show() OP_SHOWNOW mirrors (displayMatrixColor's
+// own tail is `if (displayMe) FastLED.show(brightness());`). Since runPattern
+// (and so this call) fires every ~26 ms loop() interval tick for as long as
+// patternRunning stays true, the golden (mode14_rebel.psig) shows 194
+// identical-content frames at that steady ~26 ms cadence — t=1 through
+// t=5018 — before reverting: displayMatrixColor's tail also unconditionally
+// calls globalTimerDonedoRestoreDefault() every tick since runtime=5 != 0, so
+// the revert fires the instant millis() >= the 5 s deadline armed at t=1
+// (globalTimeout = 5001), which lands on the first tick >= that point
+// (t=5018 given the ~26 ms grid) — same tick as that tick's own (unchanged)
+// content show, exactly like every other displayMatrixColor caller's
+// per-call tail. golden's frame 194 (t=5044) is the FIRST FRAME OF THE NEXT
+// PATTERN (default swipe) after the revert, not a rebel frame.
+//
+// A bytecode program only gets ticked when checkDelay() succeeds
+// (vmPlay()'s `if (!g_vmDone && checkDelay()) vmStep();`), so reproducing
+// "every single loop() tick" needs a SHOW delay short enough that
+// checkDelay() is already satisfied again well before the next ~26 ms outer
+// tick arrives — 1 ms does that (any value well under the ~25 ms interval
+// throttle would); the exact value is otherwise invisible; the outer
+// interval gate, not this delay, is what sets the observed ~26 ms cadence.
+// OP_END then wraps (no OP_LOOPSTART — the whole 3-byte program is the wrap
+// body) and re-runs the same FRAME+SHOW next tick. Loops is 0 (indefinite):
+// native never manages globalPatternLoops for this mode at all (nothing in
+// displayMatrixColor touches it) and the runtime!=0 path in vmPlay()'s tail
+// never reads it either, so there is no loop count to encode. No VMF_CLEAR:
+// native's first frame is the full rebel bitmap immediately (golden frame 0,
+// t=1) — there is no separate blackout tick preceding it, unlike Pulse below.
+const uint8_t vmc_rebel[] PROGMEM = {
+  V_FRAME(BM_REBEL, FP_HEART), V_SHOW(1), OP_END,
+};
+
+// Mode 9 (rear): Pulse(100, 3, 0) — heartbeat trace, one extra red pixel a
+// frame over the pulse bitmap, 13 states/loop x 3 loops = 39 shows. Pixel
+// order verified against native Pulse()'s own switch (src/main.cpp, deleted
+// by this task): 33,32,16,30,36,45,38,28,20,8,5,6,23. Entry: Pulse()'s
+// firstTime block calls allOFF(true) (FastLED.clear()+bare FastLED.show(),
+// frozen boot scale) BEFORE its first checkDelay()-gated state — same tick
+// (golden frame 0: t=1, scale=10, all-black; frame 1: t=1, scale=20, full
+// content) — exactly the VMF_CLEAR shape vmc_radar/vmc_iheartu already use.
+// Each state re-reads (stages, displayMe=false) the pulse bitmap via
+// OP_FRAME THEN knocks out one pixel red via OP_PIX, mirroring native's
+// `displayMatrixColor(pulse, ..., false, 0)` immediately followed by that
+// state's `leds[i] = 0xff0000` — the pixel write must land AFTER the frame
+// blit, same order as native, or the FRAME stage would clobber it. Native
+// passes runtime=0, so reversion is loop-driven (globalPatternLoops, seeded
+// from loops=3 here) via loopsDonedoRestoreDefault(), not timer-driven.
+const uint8_t vmc_pulse[] PROGMEM = {
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(33, VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(32, VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(16, VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(30, VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(36, VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(45, VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(38, VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(28, VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(20, VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(8,  VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(5,  VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(6,  VC_RED), V_SHOW(100),
+  V_FRAME(BM_PULSE, FP_PULSE), V_PIX(23, VC_RED), V_SHOW(100),
+  OP_END,
+};
+
 // ---------------------------------------------------------------------------
 // Program descriptors.
 // ---------------------------------------------------------------------------
@@ -306,6 +418,7 @@ struct VmProg {
 
 enum {
   VMP_FLASH = 0, VMP_ALARM, VMP_LEIA, VMP_SWSCAN, VMP_KNIGHT, VMP_RADAR,
+  VMP_REBEL, VMP_PULSE,
 };
 
 const VmProg vmProgs[] PROGMEM = {
@@ -315,6 +428,8 @@ const VmProg vmProgs[] PROGMEM = {
   { vmc_swscan,    5, 0,  0 },          // VMP_SWSCAN (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
   { vmc_knight,    5, 0,  0 },          // VMP_KNIGHT (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
   { vmc_radar,     6, 0,  VMF_CLEAR },  // VMP_RADAR  (mode 8)  — was radar(0xff0000, 250, 6, 0)
+  { vmc_rebel,     0, 5,  0 },          // VMP_REBEL  (mode 14) — was displayMatrixColor(rebel, ..., true, 5)
+  { vmc_pulse,     3, 0,  VMF_CLEAR },  // VMP_PULSE  (mode 9 rear) — was Pulse(100, 3, 0)
 };
 
 #ifndef PSI_VM_TABLES_ONLY
@@ -336,6 +451,19 @@ static CRGB vmColor(uint8_t id) {
     }
   }
 }
+
+// OP_FRAME's bitmap pointer table — indexed by BM_REBEL/BM_PULSE (declared
+// with the rest of the bitmap/palette tables, above). Lives inside this
+// fence, unlike vmFramePals/BM_*/FP_*, because it is a POINTER table: each
+// entry is the real address of `rebel`/`pulse`, the PROGMEM byte arrays
+// matrices.h declares — real data, not just a declaration, so linking it
+// requires those two symbols to actually be defined in this translation
+// unit. The firmware build satisfies that (matrices.h precedes this header's
+// include point, main.cpp ~line 289 vs ~line 359); the decode-walk test
+// (PSI_VM_TABLES_ONLY) does not include matrices.h at all, which is exactly
+// why this table — like vmColor() above, for the same "needs firmware-only
+// symbols" reason — sits behind the fence instead of with the other tables.
+const byte* const vmBitmaps[] PROGMEM = { rebel, pulse };
 
 // ---------------------------------------------------------------------------
 // Interpreter state (SRAM).
@@ -489,16 +617,37 @@ static void vmStep() {
         g_vmPC = pc;
         vmMaybeCountLoop(pc);  // see vmMaybeCountLoop's comment
         return;
-      // OP_PIX/OP_FRAME (Task 10), OP_SPARKLE (Task 11), OP_SCALE_RAND/
-      // OP_MUL_RAND (Task 12): case bodies land with their conversion tasks,
-      // alongside the programs that emit them — no shipped program emits any
-      // of these bytes yet, so this fallthrough is unreachable today. It
-      // exists so an opcode byte this build doesn't yet implement can never
-      // be misread as extra operand bytes for whatever case follows it in
-      // the switch: unknown/not-yet-landed ops end the program safely (same
-      // as OP_END) instead of corrupting the frame-cursor walk.
+      case OP_PIX: {
+        uint8_t idx = pgm_read_byte(pc++);
+        leds[idx] = vmColor(pgm_read_byte(pc++));
+        break;
+      }
+      case OP_FRAME: {
+        // Stage only (displayMe=false, runtime=0) — never shows itself, same
+        // as every other staging op above; a program's own OP_SHOW/OP_SHOWR/
+        // OP_SHOWRND pushes the frame. pgm_read_ptr, not pgm_read_word: see
+        // vmPlay()'s pd->code read, below, for why the distinction matters.
+        uint8_t b = pgm_read_byte(pc++);
+        const uint8_t* pal = vmFramePals[pgm_read_byte(pc++)];
+        const byte* bmp = (const byte*)pgm_read_ptr(&vmBitmaps[b]);
+        displayMatrixColor(bmp,
+                           vmColor(pgm_read_byte(&pal[0])), vmColor(pgm_read_byte(&pal[1])),
+                           false, 0,
+                           vmColor(pgm_read_byte(&pal[2])), vmColor(pgm_read_byte(&pal[3])),
+                           vmColor(pgm_read_byte(&pal[4])));
+        break;
+      }
+      // OP_SPARKLE (Task 11), OP_SCALE_RAND/OP_MUL_RAND (Task 12): case
+      // bodies land with their conversion tasks, alongside the programs that
+      // emit them — no shipped program emits either of these bytes yet, so
+      // this fallthrough is unreachable today. It exists so an opcode byte
+      // this build doesn't yet implement can never be misread as extra
+      // operand bytes for whatever case follows it in the switch:
+      // unknown/not-yet-landed ops end the program safely (same as OP_END)
+      // instead of corrupting the frame-cursor walk.
       // (OP_FILL_ROW/OP_FILL_COLR landed Task 8 above — vmc_leia/vmc_swscan/
-      // vmc_knight exercise both. OP_HALFCOLR landed Task 9 — vmc_radar.)
+      // vmc_knight exercise both. OP_HALFCOLR landed Task 9 — vmc_radar.
+      // OP_PIX/OP_FRAME landed Task 10 above — vmc_rebel/vmc_pulse.)
       case OP_END:
       default:
         if (g_vmFlags & VMF_ONESHOT) {
