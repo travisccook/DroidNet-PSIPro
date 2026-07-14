@@ -353,6 +353,11 @@ unsigned long swipeDelay = 0;
 unsigned long lastLedUpdate = 0;
 CRGB overlayColors[COLUMNS];
 
+// Animation VM: PROGMEM bytecode + the one interpreter that replaces the
+// hand-written mode bodies. Included after the global state block (needs
+// firstTime/patternRunning/leds/ledMatrix/...) and before ContractPSI.h.
+#include "psi_vm.h"
+
 // Driveable-Animation Contract fork layer. Included HERE (after the global state
 // block above, and after functions.h prototyped the render primitives) so its
 // inline dispatchers see leds[]/level[]/tempGlobalBrightnessValue/firstTime/

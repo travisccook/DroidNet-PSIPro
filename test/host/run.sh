@@ -3,19 +3,28 @@
 # bolted onto Neil Hutchison's PSI Pro firmware. Copyright (c) 2026 Travis Cook.
 # SPDX-License-Identifier: MIT
 #
-# Host checks for the PSI Pro contract fork (stages 1-5 need no hardware and no toolchain; stage 6 is the real cross-compile):
+# Host checks for the PSI Pro contract fork (stages 1-6 need no hardware and no toolchain; stage 7 is the real cross-compile):
 #   1. contract_core.h parser unit tests
-#   2. ContractPSI.h firmware-layer type-check against a mock of the MaxPSI board API
-#   3. command-buffer width guard (the v1.2 accent keys push a scored line past 63 chars)
-#   4. parser fuzz + differential (ASan/UBSan)
-#   5. golden-frame parity against the committed captures (test/host/golden/)
-#   6. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
+#   2. psi_vm.h decode-walk test (every VM program: known ops, in-bounds arities, reaches OP_END)
+#   3. ContractPSI.h firmware-layer type-check against a mock of the MaxPSI board API
+#   4. command-buffer width guard (the v1.2 accent keys push a scored line past 63 chars)
+#   5. parser fuzz + differential (ASan/UBSan)
+#   6. golden-frame parity against the committed captures (test/host/golden/)
+#   7. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
 set -e
 cd "$(dirname "$0")"
-echo "[1/6] contract_core parser unit tests"
+echo "[1/7] contract_core parser unit tests"
 clang++ -std=c++17 -Wall -Wextra -O0 test_contract_core.cpp -o /tmp/psi_contract_test
 /tmp/psi_contract_test
-echo "[2/6] ContractPSI.h firmware type-check"
+echo "[2/7] psi_vm.h decode-walk test"
+# Structural check of every VM program (test/host/test_psi_vm.cpp): ops are known,
+# arities consume in-bounds bytes, every program reaches OP_END within its array. Built
+# in PSI_VM_TABLES_ONLY mode (defined by the test file itself) — no firmware globals, no
+# dispatch, so this passes independent of whether vmPlay() is wired into runPattern() yet.
+clang++ -std=c++17 -O1 -fsigned-char -fsanitize=address,undefined \
+        -I . -I native_mocks test_psi_vm.cpp -o /tmp/psi_vm_decode
+/tmp/psi_vm_decode
+echo "[3/7] ContractPSI.h firmware type-check"
 # BOTH configurations. This fork is serial-only by default (include/config.h, I2C INTAKE),
 # and I2C is an opt-in -D. An option nobody compiles is an option that rots, so check both:
 # the serial-only build is what ships, and the I2C build is what anyone with a MarcDuino on
@@ -25,7 +34,7 @@ clang++ -std=c++17 -Wall -Wextra compile_contract.cpp -o /tmp/psi_fw_syntax
 clang++ -std=c++17 -Wall -Wextra -D PSI_ENABLE_I2C compile_contract.cpp -o /tmp/psi_fw_syntax_i2c
 /tmp/psi_fw_syntax_i2c
 
-echo "[3/6] command-buffer width guard"
+echo "[4/7] command-buffer width guard"
 # buildCommand() (src/main.cpp) DROPS every byte past CMD_MAX_LENGTH-1 and terminates
 # there — an over-long line is SILENTLY TRUNCATED and then parsed as if complete. The
 # longest scored line the Studio emitter can produce must therefore fit, with its NUL.
@@ -72,7 +81,7 @@ if ! grep -q 'contractServicePending()' ../../src/main.cpp; then
 fi
 echo "I2C deferral: the ISR queues, loop() services (no parse/render in interrupt context) OK"
 
-echo "[4/6] parser fuzz + differential (ASan/UBSan, deterministic)"
+echo "[5/7] parser fuzz + differential (ASan/UBSan, deterministic)"
 # The parsers are the one place this project eats bytes off a shared, noisy serial bus, and to
 # save 1,008 B of flash on the PSI they were hand-rolled instead of using strtol/strtoul. This
 # stage is the differential that keeps them honest: ~1.55M checks against an INDEPENDENT model
@@ -84,7 +93,7 @@ clang++ -std=c++17 -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
         fuzz_parsers.cpp -o /tmp/psipro_fuzz
 /tmp/psipro_fuzz
 
-echo "[5/6] golden-frame parity: mocks + Neil's animation code must reproduce"
+echo "[6/7] golden-frame parity: mocks + Neil's animation code must reproduce"
 echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # The FULL-variant binary (CONTRACT_SLIM stripped via a shadowed config.h) is the
 # ground truth for all 22 native modes. golden_matrix.txt drives the same capture
@@ -110,9 +119,9 @@ while read -r name cmd ms jumper ee pot at; do
 done < golden_matrix.txt
 echo "      $(wc -l < golden_matrix.txt | tr -d ' ') captures identical."
 
-echo "[6/6] REAL cross-compile (ATmega32U4 (SparkFun Pro Micro)) -- optional"
+echo "[7/7] REAL cross-compile (ATmega32U4 (SparkFun Pro Micro)) -- optional"
 # THIS is the stage that makes "it compiles" a claim about the FIRMWARE rather than a claim
-# about our mock. Stages 1-5 are host checks: they prove the contract logic, fuzz the
+# about our mock. Stages 1-6 are host checks: they prove the contract logic, fuzz the
 # parsers, gate the golden frames, and pin the board API against a HAND-WRITTEN MOCK -- and
 # a mock is only ever as honest as its author.
 # This one was not honest. The first real avr-gcc/xtensa build caught two things stages 1-3
@@ -126,12 +135,12 @@ echo "[6/6] REAL cross-compile (ATmega32U4 (SparkFun Pro Micro)) -- optional"
 # (Both are fixed. The lesson is why this stage exists.)
 #
 # OPTIONAL because it needs PlatformIO and a ~200 MB toolchain. Skipped cleanly without it:
-# stages 1-5 still run and still mean something -- just strictly less than they appear to.
+# stages 1-6 still run and still mean something -- just strictly less than they appear to.
 PIO="${PIO:-$HOME/.platformio/penv/bin/pio}"
 [ -x "$PIO" ] || PIO="$(command -v pio 2>/dev/null || true)"
 if [ -z "$PIO" ] || [ ! -x "$PIO" ]; then
   echo "SKIP: PlatformIO not found, so NOTHING here was compiled for the real MCU."
-  echo "      Stages 1-5 passed, but they only run against our host mocks."
+  echo "      Stages 1-6 passed, but they only run against our host mocks."
   echo "      Install it and re-run for the real check:  pip install platformio"
   echo "      Or point this at an existing install:      PIO=/path/to/pio $0"
   exit 0
