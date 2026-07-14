@@ -265,11 +265,22 @@ static void vmStep() {
       default:
         if (g_vmFlags & VMF_ONESHOT) {
           g_vmDone = true;                     // hold display; lifecycle below restores
-        } else {
-          if (g_vmDescLoops) globalPatternLoops--;
-          g_vmPC = g_vmLoopPtr;                // wrap; next tick runs the loop body
+          return;
         }
-        return;
+        if (g_vmDescLoops) globalPatternLoops--;
+        // Wrap and KEEP EXECUTING this same vmStep() call (`continue`, not
+        // `return`) — the loop body's first frame must show on THIS tick.
+        // An indefinitely-looping program always ends with OP_END, and
+        // vmPlay() only calls vmStep() once per checkDelay()-gated poll (25
+        // ms in src/main.cpp's loop(), which quantizes to ~26 ms ticks in
+        // the golden harness). If OP_END instead returned after wrapping
+        // g_vmPC, the wrapped body wouldn't run until the FOLLOWING poll,
+        // silently stealing one extra ~26 ms tick every lap — proven by
+        // golden_compare.py on mode03_alarm: native's period is a steady
+        // 130 ms, but with `return` here vmc_flash125 alternated 130/156 ms
+        // (one poll-gate's worth of drift on every wrap-crossing toggle).
+        pc = g_vmLoopPtr;
+        continue;
     }
   }
 }

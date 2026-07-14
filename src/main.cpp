@@ -1142,59 +1142,6 @@ void displayMatrixColor(const byte* matrix, CRGB fgcolor, CRGB bgcolor, bool dis
 // END LED Helper Functions //
 //////////////////////////////
 
-// Flashes all LED's to the given color.  The time_delay is the delay that the LED is on then Off
-void flash(CRGB color, unsigned long time_delay, int loops, unsigned long runtime) //4 seconds same as alarm Command 0T2
-{
-  if (firstTime) {
-    DEBUG_PRINT_LN("Flash");
-    firstTime = false;
-    patternRunning = true;
-    ledPatternState = 0;
-    // We set loops to double here, because we decrement for each on and each off cycle
-    globalPatternLoops = loops * 2;
-    if ((runtime != 0) && (!timingReceived)) set_global_timeout(runtime);
-    if (timingReceived) set_global_timeout(commandTiming);
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      case 0: {
-          allON(color, false);
-          updateLed = 1;
-          break;
-        }
-      case 1: {
-          allOFF(false);
-          updateLed = 1;
-          break;
-        }
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-
-    // Toggle the state.
-    ledPatternState = ledPatternState ^ 1;
-    globalPatternLoops--;
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-
-  if ((runtime == 0) && (!timingReceived)){
-    // Check to see if we have run the loops needed for this pattern
-    loopsDonedoRestoreDefault();
-  } else {
-    // Check for the global timeout to have expired.
-    globalTimerDonedoRestoreDefault();
-  }
-}
-
 void Cylon_Row(CRGB color, unsigned long time_delay, int type, int loops, unsigned long runtime)
 {
 
@@ -2173,20 +2120,17 @@ void runPattern(int pattern) {
     case 1:              //  1 = Default Swipe Pattern
       swipe();
       break;
-    case 2:             // Flash Panel (4s)
-      // color, delay, loops, runtime
-      flash(0xffffff, 60, 24, 4);
+    case 2:              //  2 = Flash Panel (4s) — was flash(0xffffff, 60, 24, 4)
+      vmPlay(VMP_FLASH);
       break;
-    case 3:             //  3 = Alarm (4s)
-      // color, delay, loops, runtime
-      flash(0xffffff, 125, 15, 4);
+    case 3:              //  3 = Alarm (4s) — was flash(0xffffff, 125, 15, 4)
+      vmPlay(VMP_ALARM);
       break;
     case 4:              //  4 = Short circuit
       FadeOut(257, 3);
       break;
-    case 5:              //  5 = Scream - Note this is the same as Alarm currently! (4s)
-      // color, delay, loops, runtime
-      flash(0xffffff, 125, 15, 4);
+    case 5:              //  5 = Scream — same as Alarm
+      vmPlay(VMP_ALARM);
       break;
     case 6:              //  6 = Leia message (34s)
       Cylon_Row(0xcccccc, 74, 3, 57, 34);
