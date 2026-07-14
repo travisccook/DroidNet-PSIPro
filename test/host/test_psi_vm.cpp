@@ -45,6 +45,27 @@ static int arity(uint8_t op) {
   }
 }
 
+// Offset (0-based, from the first operand byte) of an op's color-id operand,
+// or -1 for ops that carry none. Every color id a program bakes into PROGMEM
+// eventually reaches vmColor(), whose default branch indexes vmPalette[id]
+// UNCHECKED (a deliberate runtime-cost tradeoff flagged since Task 6) — so
+// the bounds check lives HERE, at authoring time, where it costs nothing.
+static int colorOperandIndex(uint8_t op) {
+  switch (op) {
+    case OP_FILL_ALL: return 0;                             // color
+    case OP_PIX:      return 1;                             // idx, color
+    case OP_FILL_ROW: return 1;                             // row, color, scale
+    case OP_SPARKLE:  return 1;                             // count, color
+    case OP_FILL_COLR: return 2;                            // start, count, color
+    case OP_HALFCOLR:  return 3;                            // start, count, half, color
+    default: return -1;
+  }
+}
+
+static bool validColorId(uint8_t c) {
+  return c < VC__COUNT || c == VC_PRIMARY || c == VC_SECONDARY || c == VC_SECOFF;
+}
+
 static bool returningShow(uint8_t op) {
   // OP_SHOWNOW deliberately excluded: it neither arms a delay nor returns
   // from vmStep(), so it cannot terminate the OP_END continue-wrap.
@@ -68,6 +89,35 @@ int main() {
       uint8_t op = pr.code[i++];
       int a = arity(op);
       if (a < 0) { printf("%s: unknown op %u at %zu\n", pr.name, op, i - 1); return 1; }
+      if (i + (size_t)a > pr.len) break;  // truncated operands: the ended/in-bounds assert below fires
+      // Table-indexing operands: OP_FRAME's vmStep case indexes vmBitmaps[]
+      // and vmFramePals[] with these bytes UNCHECKED (like vmColor, a
+      // deliberate zero-runtime-cost tradeoff), so bound them here instead.
+      if (op == OP_FRAME) {
+        uint8_t bmp = pr.code[i], pal = pr.code[i + 1];
+        if (bmp >= BM__COUNT) {
+          printf("%s: OP_FRAME at %zu names bitmap id %u, but vmBitmaps has only "
+                 "BM__COUNT=%d entries — vmStep would blit from a garbage pointer\n",
+                 pr.name, i - 1, bmp, (int)BM__COUNT);
+          return 1;
+        }
+        if (pal >= FP__COUNT) {
+          printf("%s: OP_FRAME at %zu names palette id %u, but vmFramePals has only "
+                 "FP__COUNT=%d rows — vmStep would read colors out of bounds\n",
+                 pr.name, i - 1, pal, (int)FP__COUNT);
+          return 1;
+        }
+      }
+      int ci = colorOperandIndex(op);
+      if (ci >= 0) {
+        uint8_t c = pr.code[i + (size_t)ci];
+        if (!validColorId(c)) {
+          printf("%s: op %u at %zu names color id %u — not < VC__COUNT (%d) and not a "
+                 "role id (0xFD/0xFE/0xFF); vmColor would read past vmPalette\n",
+                 pr.name, op, i - 1, c, (int)VC__COUNT);
+          return 1;
+        }
+      }
       i += (size_t)a;
       if (op == OP_LOOPSTART) {
         loopStarts++;

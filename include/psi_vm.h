@@ -138,15 +138,23 @@ const uint8_t vmPalette[VC__COUNT][3] PROGMEM = {
 // the same translation unit, which is true in the firmware build (matrices.h
 // precedes this header, main.cpp ~line 289 vs ~line 359) but not in the
 // decode-walk test (PSI_VM_TABLES_ONLY, no matrices.h).
-enum { BM_REBEL = 0, BM_PULSE };
+// BM__COUNT / FP__COUNT are zero-cost sentinels (compile-time constants only,
+// never stored): the decode-walk test bounds-checks every OP_FRAME operand
+// against them, and the static_asserts below pin each table's row count to
+// its enum — so when Task 13 grows both (lightsaber/letter bitmaps, saber
+// palettes), adding an enumerator without its table row (or vice versa)
+// fails the BUILD, not a later golden run.
+enum { BM_REBEL = 0, BM_PULSE, BM__COUNT };
 
 // Bitmap blit palettes: {fg, bg, color2, color3, color4} color ids, indexed
 // by OP_FRAME's palId operand.
-enum { FP_HEART = 0, FP_PULSE };
+enum { FP_HEART = 0, FP_PULSE, FP__COUNT };
 const uint8_t vmFramePals[][5] PROGMEM = {
   { VC_RED,     VC_GREYBG,  VC_K, VC_K, VC_K },  // rebel (mode 14); also I/Heart/U's fg/bg (Task 13)
   { VC_PULSEFG, VC_PULSEBG, VC_K, VC_K, VC_K },  // pulse trace (mode 9 rear)
 };
+static_assert(sizeof(vmFramePals) / sizeof(vmFramePals[0]) == FP__COUNT,
+              "vmFramePals must have exactly one row per FP_* id (FP__COUNT)");
 
 // ---------------------------------------------------------------------------
 // Opcodes. A program is a flat PROGMEM byte string: zero or more staging ops
@@ -464,6 +472,8 @@ static CRGB vmColor(uint8_t id) {
 // why this table — like vmColor() above, for the same "needs firmware-only
 // symbols" reason — sits behind the fence instead of with the other tables.
 const byte* const vmBitmaps[] PROGMEM = { rebel, pulse };
+static_assert(sizeof(vmBitmaps) / sizeof(vmBitmaps[0]) == BM__COUNT,
+              "vmBitmaps must have exactly one entry per BM_* id (BM__COUNT)");
 
 // ---------------------------------------------------------------------------
 // Interpreter state (SRAM).
