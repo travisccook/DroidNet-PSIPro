@@ -29,12 +29,13 @@ struct ProgRef { const char* name; const uint8_t* code; size_t len; };
 static const ProgRef progs[] = {
     P(vmc_flash60), P(vmc_flash125),
     P(vmc_leia), P(vmc_swscan), P(vmc_knight),
+    P(vmc_radar),
     // conversion tasks append their programs here
 };
 
 static int arity(uint8_t op) {
   switch (op) {
-    case OP_END: case OP_CLEAR: case OP_LOOPSTART: case OP_SHOWNOW: return 0;
+    case OP_END: case OP_CLEAR: case OP_LOOPSTART: case OP_SHOWNOW: case OP_CLEARWAIT: return 0;
     case OP_FILL_ALL: case OP_MUL_RAND: return 1;
     case OP_SHOW: case OP_PIX: case OP_FRAME: case OP_SPARKLE: case OP_SCALE_RAND: return 2;
     case OP_SHOWR: case OP_FILL_ROW: case OP_FILL_COLR: return 3;
@@ -46,6 +47,12 @@ static int arity(uint8_t op) {
 static bool returningShow(uint8_t op) {
   // OP_SHOWNOW deliberately excluded: it neither arms a delay nor returns
   // from vmStep(), so it cannot terminate the OP_END continue-wrap.
+  // OP_CLEARWAIT also excluded: it DOES return (so it cannot spin the wrap
+  // loop forever either), but it never calls show(), so a wrap body relying
+  // on it alone would render no visible frame — every shipped program's wrap
+  // body (vmc_radar included) also carries a real OP_SHOW/OP_SHOWR/
+  // OP_SHOWRND, so this exclusion is conservative, not a gap being papered
+  // over.
   return op == OP_SHOW || op == OP_SHOWR || op == OP_SHOWRND;
 }
 

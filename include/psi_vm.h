@@ -58,6 +58,11 @@
 // existing call sites there (which rely on it) keep compiling unchanged.
 void fill_column(uint8_t column, CRGB color, uint8_t scale_brightness);
 void fill_row(uint8_t row, CRGB color, uint8_t scale_brightness);
+// fill_half_column's real definition (main.cpp ~line 544) carries no default
+// arguments at all, unlike fill_column/fill_row above — so, unlike those two,
+// this forward declaration isn't "omitting a default the definition supplies
+// elsewhere"; there simply isn't one to omit.
+void fill_half_column(uint8_t column, uint8_t half, CRGB color);
 
 // ---------------------------------------------------------------------------
 // Color table. Low ids index a PROGMEM RGB table; the top three ids are ROLE
@@ -133,6 +138,20 @@ enum {
   OP_MUL_RAND,     // max                   per-LED *= random(0,max)             (FadeOut p2)
   OP_LOOPSTART,    //                       loop wraps here instead of program start
   OP_SHOWNOW,      //                       show now, KEEP RUNNING (no set_delay, no return)
+  // OP_CLEARWAIT is NOT part of the Task 6 plan's "decided IN FULL" opcode
+  // set (this header's top STATUS comment) — it is a genuine, unplanned 17th
+  // op, added here in Task 9 because no combination of the existing ones can
+  // represent what radar() (mode 8) needs. See vmc_radar's comment, below,
+  // for the full derivation; short version: native radar() spends a whole
+  // extra checkDelay()-gated tick, PER quadrant transition, on an invisible
+  // FastLED.clear() that never calls show() or arms a new delay (allOFF(false)
+  // with no caller-side set_delay) — a real "do nothing visible, but still
+  // consume exactly one tick" step every other converted program's structure
+  // never needed (their native bodies clear-and-show a visible black frame
+  // and the next content frame within ONE call, hence OP_CLEAR + OP_SHOWNOW
+  // being enough). Nothing about vmStep()'s existing ops, loop mechanics, or
+  // any shipped program changes; this is additive only.
+  OP_CLEARWAIT,    //                       stage all-black, KEEP delay/loop state, RETURN (no show)
 };
 
 // Encoding helpers.
@@ -215,6 +234,60 @@ const uint8_t vmc_knight[] PROGMEM = {
   OP_END,
 };
 
+// Mode 8: Radar sweep — radar(0xff0000, 250, 6, 0). Four quadrants (cols 0-4
+// top, cols 5-9 top, cols 5-9 bottom, cols 0-4 bottom half-columns), each lit
+// then blanked, 6 loops.
+//
+// Entry blackout: unlike scanRow/scanColLeftRight (vmc_leia/vmc_swscan/
+// vmc_knight above), native radar()'s allOFF(true) clear+show fires ONCE, in
+// radar()'s OWN firstTime block, entirely separate from its 8-state
+// ledPatternState loop — so VMF_CLEAR's entry clear+show (bare FastLED.show(),
+// same frozen-scale mechanics as OP_SHOWNOW — see vmc_leia's comment) covers
+// it exactly; no per-step OP_SHOWNOW is needed or wanted here.
+//
+// Inter-quadrant blanking IS a genuinely separate tick, and needs a genuinely
+// new op (OP_CLEARWAIT — see the opcode enum, above): native's per-quadrant
+// body is split across TWO checkDelay()-gated states, always, every quadrant
+// — one that stages allOFF(false) (FastLED.clear(), no show, and no
+// set_delay() call at all — doNext is left exactly where the last SHOW put
+// it) and, one interval-gate poll later (~26 ms, src/main.cpp loop()'s
+// `interval = 25` throttle — already satisfied doNext trivially clears
+// again), one that fills the next quadrant's half-columns and shows. A first
+// attempt collapsed each quadrant into one OP_CLEAR+OP_HALFCOLR+OP_SHOW step
+// (matching vmc_leia/vmc_swscan/vmc_knight's shape) and compensated the
+// delay operand (276 instead of native's 250) to land the SHOW on the right
+// tick — which DOES reproduce all 24 quadrant frames' timestamps bit-for-bit
+// (any delay in (260, 285] works), but silently breaks the LOOP-EXHAUSTION
+// tick: vmMaybeCountLoop's peek-ahead decrement fires synchronously with a
+// step's own SHOW, so with the compensated one-step shape it decremented
+// synchronously with the 24th (last) quadrant's OWN show instead of, like
+// native, one whole interval-compensated step later — 260 ms early (golden-
+// caught: mode08_radar frame 25, the FIRST FRAME OF THE NEXT PATTERN
+// (swipe) after radar hands back control, landed 4 ms early — a real, if
+// small, downstream timing regression, not a frame-25-of-radar problem, since
+// radar itself only ever renders 25 frames (1 entry blackout + 24 quadrants)
+// either way). Every other converted program's native body clears-and-shows
+// a visible black frame and the next content frame within ONE call (hence
+// OP_CLEAR + OP_SHOWNOW being enough there), so this "invisible, no-show,
+// still-costs-a-tick, still-participates-in-loop-counting" step never came up
+// before Task 9. OP_CLEARWAIT is that step: it reuses vmMaybeCountLoop's
+// existing returning-op peek (it returns, just without calling show()), so
+// the decrement for a mid-loop wrap lands on the exact tick native's
+// allOFF(false) state does, and for the LOOP-EXHAUSTING wrap, vmPlay()'s tail
+// (called immediately after, same tick — see vmPlay()) sees the just-
+// zeroed loop count and reverts the pattern BEFORE OP_END is ever reached,
+// so no 25th quadrant (a phantom "start of pass 7") ever renders — exactly
+// mirroring why native's own state0 never re-fires past the last pass.
+// Encoded delay is native's literal 250 throughout; no compensation needed
+// once the tick OP_CLEARWAIT was missing is actually represented.
+const uint8_t vmc_radar[] PROGMEM = {
+  V_HCOLS(0, 5, 0, VC_RED), V_SHOW(250), OP_CLEARWAIT,
+  V_HCOLS(5, 5, 0, VC_RED), V_SHOW(250), OP_CLEARWAIT,
+  V_HCOLS(5, 5, 1, VC_RED), V_SHOW(250), OP_CLEARWAIT,
+  V_HCOLS(0, 5, 1, VC_RED), V_SHOW(250), OP_CLEARWAIT,
+  OP_END,
+};
+
 // ---------------------------------------------------------------------------
 // Program descriptors.
 // ---------------------------------------------------------------------------
@@ -232,15 +305,16 @@ struct VmProg {
 };
 
 enum {
-  VMP_FLASH = 0, VMP_ALARM, VMP_LEIA, VMP_SWSCAN, VMP_KNIGHT,
+  VMP_FLASH = 0, VMP_ALARM, VMP_LEIA, VMP_SWSCAN, VMP_KNIGHT, VMP_RADAR,
 };
 
 const VmProg vmProgs[] PROGMEM = {
-  { vmc_flash60,  24, 4,  0 },  // VMP_FLASH  (mode 2)  — was flash(0xffffff, 60, 24, 4)
-  { vmc_flash125, 15, 4,  0 },  // VMP_ALARM  (modes 3/5) — was flash(0xffffff, 125, 15, 4)
-  { vmc_leia,     57, 34, 0 },  // VMP_LEIA   (mode 6)  — was Cylon_Row(0xcccccc, 74, 3, 57, 34)
-  { vmc_swscan,    5, 0,  0 },  // VMP_SWSCAN (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
-  { vmc_knight,    5, 0,  0 },  // VMP_KNIGHT (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
+  { vmc_flash60,  24, 4,  0 },          // VMP_FLASH  (mode 2)  — was flash(0xffffff, 60, 24, 4)
+  { vmc_flash125, 15, 4,  0 },          // VMP_ALARM  (modes 3/5) — was flash(0xffffff, 125, 15, 4)
+  { vmc_leia,     57, 34, 0 },          // VMP_LEIA   (mode 6)  — was Cylon_Row(0xcccccc, 74, 3, 57, 34)
+  { vmc_swscan,    5, 0,  0 },          // VMP_SWSCAN (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
+  { vmc_knight,    5, 0,  0 },          // VMP_KNIGHT (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
+  { vmc_radar,     6, 0,  VMF_CLEAR },  // VMP_RADAR  (mode 8)  — was radar(0xff0000, 250, 6, 0)
 };
 
 #ifndef PSI_VM_TABLES_ONLY
@@ -363,6 +437,14 @@ static void vmStep() {
         while (n--) fill_column(st++, col, 0);
         break;
       }
+      case OP_HALFCOLR: {
+        uint8_t st   = pgm_read_byte(pc++);
+        uint8_t n    = pgm_read_byte(pc++);
+        uint8_t half = pgm_read_byte(pc++);
+        CRGB col = vmColor(pgm_read_byte(pc++));
+        while (n--) fill_half_column(st++, half, col);
+        break;
+      }
       case OP_SHOWR:
         rep = pgm_read_byte(pc++);
         __attribute__((fallthrough));
@@ -388,16 +470,35 @@ static void vmStep() {
         vmMaybeCountLoop(pc);  // see vmMaybeCountLoop's comment
         return;
       }
-      // OP_HALFCOLR (Task 9), OP_PIX/OP_FRAME (Task 10), OP_SPARKLE (Task 11),
-      // OP_SCALE_RAND/OP_MUL_RAND (Task 12): case bodies land with their
-      // conversion tasks, alongside the programs that emit them — no shipped
-      // program emits any of these bytes yet, so this fallthrough is
-      // unreachable today. It exists so an opcode byte this build doesn't yet
-      // implement can never be misread as extra operand bytes for whatever
-      // case follows it in the switch: unknown/not-yet-landed ops end the
-      // program safely (same as OP_END) instead of corrupting the
-      // frame-cursor walk. (OP_FILL_ROW/OP_FILL_COLR landed Task 8 above —
-      // vmc_leia/vmc_swscan/vmc_knight exercise both.)
+      case OP_CLEARWAIT:
+        // Mirrors native allOFF(false): FastLED.clear(), no show, no
+        // set_delay() call at all — doNext is left exactly as the PRIOR
+        // returning op set it. That prior op already made checkDelay()
+        // succeed (that is why vmStep() is running this tick), so the very
+        // next tick (one interval-gate poll later, ~26 ms) satisfies it
+        // again trivially, giving this step exactly one silent tick before
+        // whatever follows — the same shape as vmc_radar's own steps, so
+        // reusing vmMaybeCountLoop's returning-op peek here (this op DOES
+        // return, just without showing) puts the loop decrement on the same
+        // tick native's allOFF(false)-then-wrap state does, not one tick
+        // early (synchronous with the prior visible SHOW) or a whole
+        // set_delay(d) late (OP_END's own tick — see vmMaybeCountLoop's
+        // comment for why that specific lateness is the one case that
+        // renders a whole extra, unwanted pass).
+        FastLED.clear();
+        g_vmPC = pc;
+        vmMaybeCountLoop(pc);  // see vmMaybeCountLoop's comment
+        return;
+      // OP_PIX/OP_FRAME (Task 10), OP_SPARKLE (Task 11), OP_SCALE_RAND/
+      // OP_MUL_RAND (Task 12): case bodies land with their conversion tasks,
+      // alongside the programs that emit them — no shipped program emits any
+      // of these bytes yet, so this fallthrough is unreachable today. It
+      // exists so an opcode byte this build doesn't yet implement can never
+      // be misread as extra operand bytes for whatever case follows it in
+      // the switch: unknown/not-yet-landed ops end the program safely (same
+      // as OP_END) instead of corrupting the frame-cursor walk.
+      // (OP_FILL_ROW/OP_FILL_COLR landed Task 8 above — vmc_leia/vmc_swscan/
+      // vmc_knight exercise both. OP_HALFCOLR landed Task 9 — vmc_radar.)
       case OP_END:
       default:
         if (g_vmFlags & VMF_ONESHOT) {

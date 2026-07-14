@@ -983,99 +983,6 @@ void march(CRGB color, unsigned long time_delay, int loops, unsigned long runtim
   }
 }
 
-// Sweeps the panel in a clockwise direction
-void radar(CRGB color, unsigned long time_delay, int loops, unsigned long runtime)
-{
-  if (firstTime) {
-    DEBUG_PRINT_LN("Radar");
-    firstTime = false;
-    patternRunning = true;
-    globalPatternLoops = loops;
-    if ((runtime != 0) && (!timingReceived)) set_global_timeout(runtime);
-    if (timingReceived) set_global_timeout(commandTiming);
-    ledPatternState = 0;
-    // Clear the display the first time through
-    allOFF(true);
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      // Note we set the display timeout large here so that the image stays displayed.
-      case 0:
-        fill_half_column(0, 0, color);
-        fill_half_column(1, 0, color);
-        fill_half_column(2, 0, color);
-        fill_half_column(3, 0, color);
-        fill_half_column(4, 0, color);
-        updateLed = 1;
-        break;
-      case 1:
-        allOFF(false);
-        break;
-      case 2:
-        fill_half_column(5, 0, color);
-        fill_half_column(6, 0, color);
-        fill_half_column(7, 0, color);
-        fill_half_column(8, 0, color);
-        fill_half_column(9, 0, color);
-        updateLed = 1;
-        break;
-      case 3:
-        allOFF(false);
-        break;
-      case 4:
-        fill_half_column(5, 1, color);
-        fill_half_column(6, 1, color);
-        fill_half_column(7, 1, color);
-        fill_half_column(8, 1, color);
-        fill_half_column(9, 1, color);
-        updateLed = 1;
-        break;
-      case 5:
-        allOFF(false);
-        break;
-      case 6:
-        fill_half_column(0, 1, color);
-        fill_half_column(1, 1, color);
-        fill_half_column(2, 1, color);
-        fill_half_column(3, 1, color);
-        fill_half_column(4, 1, color);
-        updateLed = 1;
-        break;
-      case 7:
-        allOFF(false);
-        break;
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-
-    // Increment the state.
-    ledPatternState++;
-    if (ledPatternState > 7)
-    {
-      ledPatternState = 0;
-      globalPatternLoops--;
-    }
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-
-  if ((runtime == 0) && (!timingReceived)){
-    // Check to see if we have run the loops needed for this pattern
-    loopsDonedoRestoreDefault();
-  } else {
-    // Check for the global timeout to have expired.
-    globalTimerDonedoRestoreDefault();
-  }
-}
-
 void swipe() {
 
   // We set this to false as we're not running a pattern
@@ -1722,8 +1629,8 @@ void runPattern(int pattern) {
       i_heart_u(500, 3, 0);
       break;
 #endif
-    case 8:              //  8 = Radar sweep
-      radar(0xff0000, 250, 6, 0);
+    case 8:              //  8 = Radar sweep — was radar(0xff0000, 250, 6, 0)
+      vmPlay(VMP_RADAR);
       break;
     case 9:              //   = Flashing red heart
       if (digitalRead(JUMP_FRONT_REAR)) {
