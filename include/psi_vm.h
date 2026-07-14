@@ -100,18 +100,17 @@ const uint8_t vmPalette[VC__COUNT][3] PROGMEM = {
 // the native updateLed/set_delay contract every hand-written mode body used.
 //
 // New ops are appended after the ones the probe already measured (through
-// OP_LOOPSTART) rather than inserted mid-list, so a byte value baked into an
-// already-shipped program's PROGMEM array never means something else after a
-// later diff — except OP_SHOWNOW, added here between OP_SHOWRND and OP_CLEAR
-// because it is a SHOW-class op (see below) and reads better grouped with
-// the other three than trailing after OP_LOOPSTART.
+// OP_LOOPSTART) rather than inserted mid-list, so every probe opcode keeps
+// its exact byte value and the probe's program listings stay valid byte-level
+// seeds for the conversion tasks — which is why OP_SHOWNOW (new in this fork,
+// not in the probe) sits at the END, after OP_LOOPSTART, even though it is
+// SHOW-class and would read better grouped with the other three SHOW ops.
 // ---------------------------------------------------------------------------
 enum {
   OP_END = 0,      //                       end of program: loop wrap or oneshot stop
   OP_SHOW,         // d16                   show + set_delay(d)
   OP_SHOWR,        // rep, d16              show + set_delay(d), re-run this frame rep times
   OP_SHOWRND,      // lo16, hi16            show + set_delay(random(lo,hi))
-  OP_SHOWNOW,      //                       show now, KEEP RUNNING (no set_delay, no return)
   OP_CLEAR,        //                       stage all-black
   OP_FILL_ALL,     // color                 stage solid fill
   OP_FILL_ROW,     // row, color, scale     fill_row (scale: CRGB %= semantics, 0 = none)
@@ -123,6 +122,7 @@ enum {
   OP_SCALE_RAND,   // lo, hi                per-LED nscale8_video(random(lo,hi)) (FadeOut p1)
   OP_MUL_RAND,     // max                   per-LED *= random(0,max)             (FadeOut p2)
   OP_LOOPSTART,    //                       loop wraps here instead of program start
+  OP_SHOWNOW,      //                       show now, KEEP RUNNING (no set_delay, no return)
 };
 
 // Encoding helpers.
