@@ -39,6 +39,9 @@ static uint32_t _mock_millis = 0;
 inline uint32_t millis() { return _mock_millis; }
 
 // board geometry (config.h:212-214)
+// config.h:286 / preamble.h:16 — the serial line buffer the contract layer's I2C deferral
+// queue is sized from. Kept in step with the firmware by run.sh's CMD_MAX_LENGTH width guard.
+#define CMD_MAX_LENGTH 96
 #define NUM_LEDS 48
 #define LEDS_PER_COLUMN 6
 #define COLUMNS 10

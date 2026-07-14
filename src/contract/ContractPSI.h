@@ -629,5 +629,65 @@ inline void parseContract(const char* cmd) {
   if (contractParse(cmd + 1, p)) applyContract(p);     // +1 skips the leading '!'
 }
 
+// ---- I2C DEFERRAL: get the contract OUT of the interrupt handler -------------------------
+// receiveEvent() (main.cpp:2258) is the Wire onReceive callback, and it runs in INTERRUPT
+// CONTEXT — it is called from the TWI ISR (__vector_36). Parsing and rendering there is a real
+// hazard, for two reasons that compound:
+//
+//  1. STACK. FastLED's showPixels() ends with an UNCONDITIONAL `sei` (it cli's to bit-bang the
+//     WS2812 data, patches timer0_millis, then re-enables interrupts). Arduino's twi.c re-arms
+//     the I2C slave BEFORE invoking this callback. So the moment a render runs inside the ISR,
+//     interrupts come back on with the slave live, and any further I2C traffic during the
+//     render window RE-ENTERS the same ISR on top of the frame already on the stack. Measured
+//     (test/host/stack_report.py): ~190-230 B per level against 1,076 B of headroom — one level
+//     of nesting is 77% used, two is 95%, three overflows. An AVR stack overflow does not trap;
+//     it walks down into .bss and silently corrupts globals. That is a miserable bug to chase
+//     on a bench.
+//  2. RE-ENTRANCY. parseContract() writes shared effect/LED state. It was reachable from BOTH
+//     main context (serialEvent) and the ISR, so an I2C command could land in the middle of a
+//     serial one and corrupt the state machine — a data bug entirely independent of the stack.
+//
+// THE HAZARD IS INHERITED, NOT INTRODUCED, and this fix is scoped accordingly. Stock upstream
+// reaches the same `sei` by the same route (receiveEvent -> parseCommand -> runPattern ->
+// allOFF -> FastLED.show), so an unmodified PSI Pro has it too. This fork made it worse by
+// adding a SECOND route in, carrying parseContract — the single largest stack frame in the whole
+// image (138 B). So: we take OUR path out of the ISR and leave Neil's native path exactly as it
+// was. Fixing upstream's own exposure is not ours to do in a fork that carries his name.
+//
+// THE HANDSHAKE. g_i2cPending is the entire synchronisation, and the ordering is load-bearing:
+//   * the ISR writes the buffer FIRST and publishes the flag LAST, so loop() can never observe a
+//     half-written line;
+//   * the ISR refuses to touch the buffer at all while the flag is set, so loop() can parse
+//     straight out of g_i2cLine with interrupts ON and no copy — which matters, because copying
+//     it to a local would put another 96 B on the stack we are trying to protect;
+//   * loop() clears the flag only AFTER parsing, which closes the window completely.
+// A line arriving while one is still un-serviced is DROPPED, not queued. That is deliberate: the
+// drop window is one parse (tens of microseconds, against I2C commands that arrive tens of
+// milliseconds apart), and dropping a command is the fail-safe direction where the old behaviour
+// — re-entering the parser and corrupting live state — was not.
+//
+// `volatile` on the flag is required (loop() must re-read it, not cache it), and a bool is one
+// byte on AVR, so the store is atomic and no cli/sei guard is needed around it.
+static volatile bool g_i2cPending = false;
+static char          g_i2cLine[CMD_MAX_LENGTH];
+
+// Called from the I2C ISR. Copies the line and returns. Does NOT parse, does NOT render.
+inline void contractQueueFromISR(const char* cmd) {
+  if (g_i2cPending) return;                       // previous line not serviced yet -> drop
+  uint8_t i = 0;
+  while (cmd[i] && i < (uint8_t)(CMD_MAX_LENGTH - 1)) { g_i2cLine[i] = cmd[i]; i++; }
+  g_i2cLine[i] = '\0';
+  g_i2cPending = true;                            // publish LAST — this is the handshake
+}
+
+// Called from loop(), in MAIN context, every pass (not just inside the 25 ms gate — the first
+// contract command has to be able to ARM the layer, and contractLoopTick() bails early when it
+// is not yet armed, so servicing from in there would deadlock the very first '!' line).
+inline void contractServicePending() {
+  if (!g_i2cPending) return;
+  parseContract(g_i2cLine);                       // safe with interrupts on: the ISR will not
+  g_i2cPending = false;                           // write g_i2cLine while the flag is set
+}
+
 // Phase-1 boot hook (nothing yet; symmetry with the RSeries fork).
 inline void contractSetup() { }

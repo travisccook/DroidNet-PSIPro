@@ -54,7 +54,7 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 //     this hatch ON ........................... 32,394 B  (113.0% — WILL NOT LINK)
 //
 //   the code as it stands TODAY:
-//     shipped (hatch ON + the codegen work) ... 27,134 B  (94.6%) — fits, 1,538 B spare
+//     shipped (hatch ON + the codegen work) ... 27,238 B  (95.0%) — fits, 1,434 B spare
 //     the same code with this hatch OFF ....... 33,782 B  (117.8% — WILL NOT LINK)
 //     the same code, codegen flags removed .... 28,896 B  (100.8% — WILL NOT LINK)
 //

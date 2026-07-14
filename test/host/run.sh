@@ -42,6 +42,31 @@ for f in ../../include/preamble.h ../../include/config.h; do
 done
 echo "CMD_MAX_LENGTH >= $need in preamble.h + config.h (worst v1.2 line ${#worst} chars) OK"
 
+# --- STATIC GUARD: the I2C ISR must not parse or render -------------------------------------
+# receiveEvent() (src/main.cpp) is the Wire onReceive callback and runs in TWI INTERRUPT context.
+# FastLED's show() ends with an unconditional `sei` while the I2C slave is already re-armed, so
+# anything that renders from in there lets the ISR re-enter itself and walk the stack down into
+# .bss (~190-230 B a level against 1,076 B of headroom; three levels overflow). The contract path
+# is therefore DEFERRED: the ISR calls contractQueueFromISR() and loop() calls
+# contractServicePending().
+# compile_contract.cpp's A11 guard proves the BEHAVIOUR of the queue, but it cannot see someone
+# "simplifying" main.cpp's ISR back to a direct parseContract() call — the queue would still pass
+# its own test while the hazard quietly returned. So pin the call site itself. (Comments are
+# stripped first: the ISR's comment block legitimately explains why parseContract is NOT there.)
+if sed 's://.*::' ../../src/main.cpp | awk '/^void receiveEvent/,/^}/' | grep -q 'parseContract'; then
+  echo "FAIL: receiveEvent() names parseContract(). That is the I2C ISR — parsing (and the render"
+  echo "      it triggers) must NOT happen in interrupt context. FastLED's show() re-enables"
+  echo "      interrupts mid-render with the slave re-armed, so the ISR re-enters itself and the"
+  echo "      stack walks into .bss. Queue with contractQueueFromISR(); loop() services it."
+  exit 1
+fi
+if ! grep -q 'contractServicePending()' ../../src/main.cpp; then
+  echo "FAIL: loop() never calls contractServicePending(), so any '!' line the I2C ISR queued is"
+  echo "      never parsed — contract commands over I2C would silently do nothing."
+  exit 1
+fi
+echo "I2C deferral: the ISR queues, loop() services (no parse/render in interrupt context) OK"
+
 echo "[4/5] parser fuzz + differential (ASan/UBSan, deterministic)"
 # The parsers are the one place this project eats bytes off a shared, noisy serial bus, and to
 # save 1,008 B of flash on the PSI they were hand-rolled instead of using strtol/strtoul. This

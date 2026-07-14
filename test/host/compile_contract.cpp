@@ -725,8 +725,59 @@ int main() {
     parseContract("!**X");
   }
 
+  // ---- A11: the I2C deferral — the ISR must QUEUE, never PARSE, never RENDER ---------------
+  // receiveEvent() runs in TWI interrupt context, and FastLED's show() re-enables interrupts
+  // mid-render while the I2C slave is re-armed — so parsing/rendering there lets the ISR
+  // re-enter itself and walk the stack into .bss (~190-230 B a level against 1,076 B of
+  // headroom). The fix is contractQueueFromISR() + contractServicePending(). Pin the contract:
+  //   (a) queueing alone changes NOTHING — no state, and above all NO LATCH (no FastLED.show);
+  //   (b) servicing in main context applies it;
+  //   (c) a line arriving while one is still un-serviced is DROPPED, not queued or interleaved.
+  {
+    parseContract("!**X");
+    parseContract("!P*A:i=solid,c=0000ff,b=200,d=0");     // known base state
+    _mock_millis += 1000;
+
+    // (a) queue, and prove nothing happened
+    mock_resetLatch();
+    contractQueueFromISR("!P*A:i=solid,c=ff0000,b=200,d=0");
+    if (mock_showCount != 0 || mock_fillColumnCount != 0) {
+      printf("FAIL: contractQueueFromISR() rendered from ISR context (show=%d fill=%d). The whole "
+             "point is that the interrupt handler does no work.\n", mock_showCount, mock_fillColumnCount);
+      return 1;
+    }
+    if (g_contractColor.r != 0 || g_contractColor.b != 255) {
+      printf("FAIL: contractQueueFromISR() APPLIED the command (colour already r=%u b=%u). It must "
+             "only copy the line.\n", g_contractColor.r, g_contractColor.b);
+      return 1;
+    }
+
+    // (c) a second line while the first is still pending must be DROPPED, not overwrite it
+    contractQueueFromISR("!P*A:i=solid,c=00ff00,b=200,d=0");
+
+    // (b) service in main context -> the FIRST line applies (red), not the dropped second (green)
+    contractServicePending();
+    if (!(g_contractColor.r == 255 && g_contractColor.g == 0 && g_contractColor.b == 0)) {
+      printf("FAIL: after contractServicePending() the queued line did not apply as expected "
+             "(got r=%u g=%u b=%u, wanted 255,0,0 — the FIRST queued line; the second must have "
+             "been dropped while the first was pending)\n",
+             g_contractColor.r, g_contractColor.g, g_contractColor.b);
+      return 1;
+    }
+    // and the queue is now empty: servicing again must be a no-op
+    g_contractColor = CRGB(0, 0, 255);
+    contractServicePending();
+    if (g_contractColor.b != 255) {
+      printf("FAIL: contractServicePending() re-applied a line that was already serviced — the "
+             "pending flag is not being cleared.\n");
+      return 1;
+    }
+    parseContract("!**X");
+  }
+
   printf("ContractPSI.h type-check + score-native/latch/score-clear/build-ramp/scale "
          "+ v1.2 accent-overlay guards (A1-A9: A7 flash strobes, A8 strobe cap unbypassable, "
-         "A9 a resend replaces the show) + A10 verb-Q ack bytes OK\n");
+         "A9 a resend replaces the show) + A10 verb-Q ack bytes + A11 the I2C ISR only "
+         "queues (never parses, never renders) OK\n");
   return 0;
 }

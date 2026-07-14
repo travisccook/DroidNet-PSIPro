@@ -464,6 +464,11 @@ void loop()
     }
   }
 
+  // Service any '!' line the I2C ISR deferred to us (see ContractPSI.h). Runs in MAIN
+  // context, every pass and outside the 25 ms gate, so the first contract command can still
+  // arm the layer. No-op when nothing is pending.
+  contractServicePending();
+
   // Checked every loop pass (not only inside the 25 ms gate) for crisp, sub-tick
   // pulse-accent expiry. No-op unless a contract P overlay is active.
   contractPulseTick();
@@ -2270,7 +2275,11 @@ void receiveEvent(int eventCode) {
 
     if (command_available)
     {
-      if (cmdString[0]=='!') parseContract(cmdString);  // additive contract branch
+      // ISR CONTEXT. Do not parse here, and above all do not render here: FastLED's show()
+      // re-enables interrupts mid-render (an unconditional sei) while the I2C slave is already
+      // re-armed, so this ISR can re-enter itself and walk the stack down into .bss. Copy the
+      // line out and let loop() do the work. See the I2C DEFERRAL note in ContractPSI.h.
+      if (cmdString[0]=='!') contractQueueFromISR(cmdString);  // additive contract branch
       else                   parseCommand(cmdString);   // unchanged JawaLite path
     }
   }
