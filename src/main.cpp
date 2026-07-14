@@ -1595,12 +1595,12 @@ void runPattern(int pattern) {
       march(0xffffff, 552, 42, 47);
       break;
 #endif
-    case 12:          // 13 - Disco Ball - 4 seconds
-      DiscoBall(150, 30, 3, CRGB::Grey, 4); //gray /30
+    case 12:          // 13 - Disco Ball - 4 seconds — was DiscoBall(150, 30, 3, CRGB::Grey, 4)
+      vmPlay(VMP_DISCO4);
       break;
-    case 13:          // 13 - Disco Ball
+    case 13:          // 13 - Disco Ball — was DiscoBall(150, 0, 3, CRGB::Grey, 0)
       // Time Delay, loops, sparkles, colour.  If loops is 0, this is on indefinately.
-      DiscoBall(150, 0, 3, CRGB::Grey, 0); //gray /30
+      vmPlay(VMP_DISCOINF);
       break;
     case 14:          // 14 - Rebel Symbol — was displayMatrixColor(rebel, 0xff0000, 0x909497, true, 5)
       vmPlay(VMP_REBEL);

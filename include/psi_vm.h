@@ -408,6 +408,74 @@ const uint8_t vmc_pulse[] PROGMEM = {
   OP_END,
 };
 
+// Modes 12/13: DiscoBall(150, ., 3, CRGB::Grey, .) — shared program, two
+// descriptors (mode 12: loops=30, runtime=4; mode 13: loops=0, runtime=0).
+// Full native trace read line by line before any bytecode was written (per
+// the Task 9 process lesson) — this is the FIRST random()-consuming
+// conversion, so the golden's exact Park-Miller draw sequence is
+// load-bearing (see vmSparkleDraw, above, for the row/col draw order).
+//
+// Entry — firstTime block: globalPatternLoops = loops!=0 ? loops*2 : 2;
+// ledPatternState = 0; allOFF(true) (clear + bare show, frozen boot scale) —
+// same VMF_CLEAR shape vmc_radar/vmc_pulse already use (golden frame 0: t=1,
+// scale=10, all-black; frame 1: SAME t=1, scale=20, first sparkle content —
+// both land in vmPlay()'s one firstTime call).
+//
+// Steady-state — every checkDelay()-gated tick (native delay 150 ms,
+// quantized to the ~26 ms poll grid; golden shows a steady +156 ms cadence
+// throughout both modes, no drift): ledPatternState toggles 0/1 every tick.
+// State 0 draws numSparkles=3 random pixels (vmSparkleDraw) and sets
+// updateLed=1; state 1 is `allOFF(false)` (FastLED.clear(), no show of its
+// own) and ALSO sets updateLed=1 — so, unlike radar's inter-quadrant blank
+// (Task 9's OP_CLEARWAIT), DiscoBall's blank tick is NOT invisible: native's
+// shared `if (updateLed) { FastLED.show(brightness()); set_delay(time_delay);
+// }` tail fires for BOTH states every time, so a plain OP_CLEAR + OP_SHOW(150)
+// reproduces the blank tick exactly, no new opcode needed. Verified against
+// the golden dump directly before writing bytecode: lit/blank frames
+// alternate at a steady +156 ms cadence throughout mode12_disco4.psig (26
+// disco frames: 1 entry blackout + 13 sparkle/blank pairs) and
+// mode13_discoinf.psig (53 frames, full 8 s capture, never diverging) — no
+// extra invisible tick between states, confirming this simpler two-state
+// shape (unlike radar's) needs nothing beyond OP_CLEAR/OP_SHOW.
+//
+// LOOP ACCOUNTING (verified, not assumed — this is the one place native's
+// and the VM's counters genuinely diverge in mechanism, though not in
+// observable effect): native decrements globalPatternLoops on EVERY tick
+// (sparkle AND blank), unconditionally — a full sparkle+blank cycle costs TWO
+// decrements — and the firstTime block's `loops * 2` seed exists to cancel
+// that out (loops=30 native param -> globalPatternLoops=60 -> 60 ticks / 2
+// per cycle = 30 full cycles). vmMaybeCountLoop instead decrements ONCE per
+// full lap (it peeks the byte after a returning SHOW; only the blank tick's
+// SHOW here is immediately followed by OP_END, so only that tick's cursor
+// trips the peek) — so encoding the descriptor's loops field as 30, not 60,
+// reproduces the identical 30-cycle count with one decrement per lap instead
+// of native's two-decrements-per-lap raw-tick count. This has ZERO observable
+// effect on mode 12 either way: runtime=4 is nonzero, so vmPlay()'s tail
+// ALWAYS takes the globalTimerDonedoRestoreDefault branch — native's own
+// epilogue has the identical `if ((runtime==0) && !timingReceived) { if
+// (loops) ... } else { globalTimerDonedoRestoreDefault(); }` shape, so the
+// loop-count branch is UNREACHABLE for mode 12 in native too. Mode 12 always
+// reverts on the 4 s wall-clock timeout, never on loop exhaustion (60 native
+// ticks * 150 ms =~9 s, well past the 4 s deadline) — confirmed against the
+// golden: mode12_disco4.psig frame 27 (t=4030) is the first frame of the
+// REVERTED default pattern (swipe), not a 27th disco frame; only 26 disco
+// frames ever render, matching set_global_timeout(4)'s deadline (armed at
+// t=1, expires 4001, first satisfied on the ~26 ms grid at t=4030) exactly.
+// Mode 13 (loops=0, runtime=0) sets g_vmDescLoops=0, so vmMaybeCountLoop's
+// decrement never fires at all (its own `g_vmDescLoops &&` guard) and
+// vmPlay()'s tail never calls loopsDonedoRestoreDefault() either (`if
+// (g_vmDescLoops)`) — indefinite, exactly mirroring native's own `if (loops)`
+// gate around loopsDonedoRestoreDefault(), which is likewise always false
+// when the loops PARAMETER is 0 (native's uint8_t globalPatternLoops counter
+// still silently decrements/underflows forever under the hood; ours simply
+// never decrements at all — both are unobservable no-ops for reversion,
+// since neither is ever consulted when loops==0). Golden confirms:
+// mode13_discoinf.psig never diverges from the steady sparkle/blank cadence
+// for the full 8 s capture (53 frames), no reversion.
+const uint8_t vmc_disco[] PROGMEM = {
+  V_SPARK(3, VC_GREY), V_SHOW(150), OP_CLEAR, V_SHOW(150), OP_END,
+};
+
 // ---------------------------------------------------------------------------
 // Program descriptors.
 // ---------------------------------------------------------------------------
@@ -426,18 +494,20 @@ struct VmProg {
 
 enum {
   VMP_FLASH = 0, VMP_ALARM, VMP_LEIA, VMP_SWSCAN, VMP_KNIGHT, VMP_RADAR,
-  VMP_REBEL, VMP_PULSE,
+  VMP_REBEL, VMP_PULSE, VMP_DISCO4, VMP_DISCOINF,
 };
 
 const VmProg vmProgs[] PROGMEM = {
-  { vmc_flash60,  24, 4,  0 },          // VMP_FLASH  (mode 2)  — was flash(0xffffff, 60, 24, 4)
-  { vmc_flash125, 15, 4,  0 },          // VMP_ALARM  (modes 3/5) — was flash(0xffffff, 125, 15, 4)
-  { vmc_leia,     57, 34, 0 },          // VMP_LEIA   (mode 6)  — was Cylon_Row(0xcccccc, 74, 3, 57, 34)
-  { vmc_swscan,    5, 0,  0 },          // VMP_SWSCAN (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
-  { vmc_knight,    5, 0,  0 },          // VMP_KNIGHT (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
-  { vmc_radar,     6, 0,  VMF_CLEAR },  // VMP_RADAR  (mode 8)  — was radar(0xff0000, 250, 6, 0)
-  { vmc_rebel,     0, 5,  0 },          // VMP_REBEL  (mode 14) — was displayMatrixColor(rebel, ..., true, 5)
-  { vmc_pulse,     3, 0,  VMF_CLEAR },  // VMP_PULSE  (mode 9 rear) — was Pulse(100, 3, 0)
+  { vmc_flash60,  24, 4,  0 },          // VMP_FLASH    (mode 2)  — was flash(0xffffff, 60, 24, 4)
+  { vmc_flash125, 15, 4,  0 },          // VMP_ALARM    (modes 3/5) — was flash(0xffffff, 125, 15, 4)
+  { vmc_leia,     57, 34, 0 },          // VMP_LEIA     (mode 6)  — was Cylon_Row(0xcccccc, 74, 3, 57, 34)
+  { vmc_swscan,    5, 0,  0 },          // VMP_SWSCAN   (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
+  { vmc_knight,    5, 0,  0 },          // VMP_KNIGHT   (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
+  { vmc_radar,     6, 0,  VMF_CLEAR },  // VMP_RADAR    (mode 8)  — was radar(0xff0000, 250, 6, 0)
+  { vmc_rebel,     0, 5,  0 },          // VMP_REBEL    (mode 14) — was displayMatrixColor(rebel, ..., true, 5)
+  { vmc_pulse,     3, 0,  VMF_CLEAR },  // VMP_PULSE    (mode 9 rear) — was Pulse(100, 3, 0)
+  { vmc_disco,    30, 4,  VMF_CLEAR },  // VMP_DISCO4   (mode 12) — was DiscoBall(150, 30, 3, CRGB::Grey, 4)
+  { vmc_disco,     0, 0,  VMF_CLEAR },  // VMP_DISCOINF (mode 13) — was DiscoBall(150, 0, 3, CRGB::Grey, 0)
 };
 
 #ifndef PSI_VM_TABLES_ONLY
@@ -489,6 +559,36 @@ static bool    g_vmDone;             // oneshot finished (hold display)
 static void vmShowDelay(uint16_t d) {
   FastLED.show(brightness());
   set_delay(d);
+}
+
+// DiscoBall's per-sparkle draw (Task 11 — the FIRST random()-consuming
+// conversion). Native (src/main.cpp DiscoBall(), ledPatternState case 0,
+// currently lines 1261-1262 — the brief's cited 1820-1821 is stale, from
+// before Tasks 9/10 deleted radar()/Pulse() above this point and shifted
+// everything down; re-read from the live file, not trusted from the brief):
+//   randRow = random(0, LEDS_PER_COLUMN);
+//   randCol = random(0, COLUMNS);
+//   ledIndex = ledMatrix[randCol][randRow];
+//   if (ledIndex != -1) leds[ledIndex] = color;
+// — ROW drawn before COLUMN, one full row+col pair PER sparkle, interleaved
+// across the numSparkles loop (draw1-row, draw1-col, draw2-row, draw2-col,
+// ...), never batched (all rows then all cols). The golden replays the exact
+// avr-libc Park-Miller random() sequence DiscoBall's calls produced, so this
+// order is load-bearing, not stylistic. A -1 "hole" position still CONSUMES
+// its row+col draw pair — native's `if (ledIndex != -1)` guards only the
+// leds[] write, not the two random() calls feeding it — so the `if` below
+// wraps only the write too, exactly mirroring that. Verified against the
+// golden's first sparkle frame before this was ever compiled: mode12_disco4
+// .psig frame 1 (t=1) lights exactly 1 LED (idx 40) despite numSparkles=3 —
+// two of the three draws landed on holes and were silently skipped, matching
+// bit-for-bit once vmStep()'s OP_SPARKLE case (below) runs this 3 times.
+static void vmSparkleDraw(uint8_t n, CRGB col) {
+  while (n--) {
+    int randRow = random(0, LEDS_PER_COLUMN);
+    int randCol = random(0, COLUMNS);
+    int8_t ledIndex = ledMatrix[randCol][randRow];
+    if (ledIndex != -1) leds[ledIndex] = col;
+  }
 }
 
 // Every native loop-scanning body (scanRow/scanRowDownUp/scanCol/
@@ -647,17 +747,23 @@ static void vmStep() {
                            vmColor(pgm_read_byte(&pal[4])));
         break;
       }
-      // OP_SPARKLE (Task 11), OP_SCALE_RAND/OP_MUL_RAND (Task 12): case
-      // bodies land with their conversion tasks, alongside the programs that
-      // emit them — no shipped program emits either of these bytes yet, so
-      // this fallthrough is unreachable today. It exists so an opcode byte
-      // this build doesn't yet implement can never be misread as extra
-      // operand bytes for whatever case follows it in the switch:
-      // unknown/not-yet-landed ops end the program safely (same as OP_END)
-      // instead of corrupting the frame-cursor walk.
+      case OP_SPARKLE: {
+        uint8_t n = pgm_read_byte(pc++);
+        vmSparkleDraw(n, vmColor(pgm_read_byte(pc++)));
+        break;
+      }
+      // OP_SCALE_RAND/OP_MUL_RAND (Task 12): case bodies land with their
+      // conversion task, alongside the program that emits them — no shipped
+      // program emits either of these bytes yet, so this fallthrough is
+      // unreachable today. It exists so an opcode byte this build doesn't
+      // yet implement can never be misread as extra operand bytes for
+      // whatever case follows it in the switch: unknown/not-yet-landed ops
+      // end the program safely (same as OP_END) instead of corrupting the
+      // frame-cursor walk.
       // (OP_FILL_ROW/OP_FILL_COLR landed Task 8 above — vmc_leia/vmc_swscan/
       // vmc_knight exercise both. OP_HALFCOLR landed Task 9 — vmc_radar.
-      // OP_PIX/OP_FRAME landed Task 10 above — vmc_rebel/vmc_pulse.)
+      // OP_PIX/OP_FRAME landed Task 10 above — vmc_rebel/vmc_pulse.
+      // OP_SPARKLE landed Task 11 above — vmc_disco.)
       case OP_END:
       default:
         if (g_vmFlags & VMF_ONESHOT) {
