@@ -1,7 +1,7 @@
 # DroidNet fork notes — PSI Pro
 
-Working notes for the fork itself. For attribution, the license situation, and the hardware
-warning, read [README.md](README.md) first — none of that is repeated here.
+Working notes for the fork itself. For attribution and the hardware warning, read
+[README.md](README.md) first — none of that is repeated here.
 
 ## What this is
 

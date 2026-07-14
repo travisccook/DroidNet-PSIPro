@@ -1,11 +1,6 @@
-// Part of the DroidNet Driveable-Animation Contract test harness — an additive layer
-// for droid lighting firmware. Copyright (c) 2026 Travis Cook.
-// Shared verbatim (byte-identical) across the DroidNet RSeries/PSI/Flthy forks.
-// The firmware this layer attaches to is the work of its original authors; see the
-// README for full attribution. This file is licensed LGPL-2.1-only when distributed
-// as part of the LGPL-2.1 RSeries fork, and MIT in the other two forks (see
-// LICENSE-DroidNet-Contract). Travis Cook holds the copyright in this file and
-// grants both.
+// Part of the DroidNet Driveable-Animation Contract test harness.
+// Copyright (c) 2026 Travis Cook. Shared byte-identically across the DroidNet
+// RSeries/PSI/Flthy forks.  SPDX-License-Identifier: LGPL-2.1-only OR MIT
 //
 // test/host/fuzz_parsers.cpp — DIFFERENTIAL + ROBUSTNESS fuzzer for the hand-rolled
 // parsers in contract_core.h. Deterministic (fixed seed), self-contained, needs nothing

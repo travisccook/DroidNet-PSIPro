@@ -1,8 +1,6 @@
 // Part of the DroidNet Driveable-Animation Contract — an additive layer bolted onto
-// Neil Hutchison's PSI Pro firmware. Copyright (c) 2026 Travis Cook, MIT-licensed
-// (see LICENSE-DroidNet-Contract). The firmware this layer drives — every render
-// primitive it calls — is the work of Neil Hutchison and contributors and is NOT
-// covered by that license; see the NOTICE in README.md.
+// Neil Hutchison's PSI Pro firmware. Copyright (c) 2026 Travis Cook.
+// SPDX-License-Identifier: MIT
 //
 // src/contract/ContractPSI.h — PSI Pro (MaxPSI) firmware layer for the
 // Driveable-Animation Contract. ADDITIVE: the native JawaLite T/A/D/P grammar is

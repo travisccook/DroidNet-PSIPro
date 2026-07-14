@@ -47,33 +47,6 @@ Neil credits these people in his own docs, and we carry that forward:
 
 ---
 
-## NOTICE — please read before you use, copy or redistribute this
-
-**The upstream PSI Pro project carries no license.** There is no LICENSE file and no permission
-statement anywhere in its source. Under default copyright law that means **all rights are reserved by
-Neil Hutchison and his contributors**. We have no grant to redistribute their code, and we claim no
-rights over it whatsoever.
-
-We are publishing this fork anyway, in the open, in the hope that it is a welcome addition to the
-community. To be plain about where we stand:
-
-- The PSI Pro firmware is (c) Neil Hutchison and contributors. It is theirs. Not ours.
-- This is a hobby project. It is entirely non-commercial. Nothing here is sold, and nothing here ever
-  will be.
-- Whether to license the upstream project, and how, is Neil's call and nobody else's.
-- **If Neil, or Krijn, or Malcolm, or Skelmir would rather this did not exist, we will take it down
-  immediately and without argument.** Open an issue on this repo, or reach the owner any way you
-  like, and it is gone. No discussion needed.
-- If you want the PSI Pro firmware itself, **get it from Neil**: <https://github.com/nhutchison/PSIPro>.
-  Not from us.
-
-There is no LICENSE file in this repo that purports to license Neil's code, because we cannot license
-what is not ours. The only license file here,
-[LICENSE-DroidNet-Contract](LICENSE-DroidNet-Contract), covers *only* the handful of files we wrote
-ourselves, and says so explicitly.
-
----
-
 ## This fork is SERIAL-ONLY by default
 
 **Upstream listens on serial *and* I2C. This fork, out of the box, listens on serial only.** That is
@@ -294,10 +267,10 @@ why we read it closely enough to find this.
 
 ## What is theirs, and what is ours
 
-Be clear-eyed about the split. Their code is around 3,200 lines of carefully-tuned firmware. Ours is
-about 775 lines of new code plus a handful of hooks.
+Their code is around 3,200 lines of carefully-tuned firmware. Ours is about 775 lines of new code
+plus a handful of hooks.
 
-**Theirs** (Neil Hutchison and contributors — do not attribute any of this to us):
+**Theirs** (Neil Hutchison and contributors):
 
 | Path | What it is |
 | --- | --- |
@@ -308,7 +281,7 @@ about 775 lines of new code plus a handful of hooks.
 
 **Earlier droid work by the owner of this repo** (made for one specific droid, C2B5, before
 the contract layer existed; it came in with the seed — see Provenance). Not Neil's, so don't
-credit him for it; not part of the contract layer either, so it is **not** MIT-licensed:
+credit him for it; not part of the contract layer either:
 
 | Path | What it is |
 | --- | --- |
@@ -383,9 +356,6 @@ The chain, honestly:
    chain and it would be dishonest not to say so.
 3. **This repository** — the same code, plus the additive DroidNet contract layer described above.
 
-If any of this looks like it came from the contract layer and it isn't in the "Ours" table, it
-didn't. And if it looks like it came from Neil and it's in the "Earlier droid work" table, it didn't.
-
 ---
 
 ## Credits
@@ -397,25 +367,3 @@ didn't. And if it looks like it came from Neil and it's in the "Earlier droid wo
 - **Skelmir** — bug fixes and Mini support.
 - The FastLED project, on which the firmware depends.
 - **Travis Cook** — the contract layer in `src/contract/` and `test/host/`, and nothing else.
-
----
-
-## License
-
-Read this together with the NOTICE at the top.
-
-- **The original firmware** (`src/main.cpp`, `include/config.h`, `include/matrices.h`,
-  `README_UPSTREAM.md`) is copyright Neil Hutchison and contributors. It carries **no license** —
-  all rights reserved. We are redistributing it here without a grant, in good faith, pending Neil's
-  word, and we will remove it on request.
-- **The earlier droid work** (`visualizer/`, `include/functions.h`, `include/preamble.h`) is
-  copyright Travis Cook, but it is derivative of Neil's firmware — the visualizer reimplements his
-  animations, the two headers prototype his functions. It is **not** part of the contract layer and
-  is **not** MIT-licensed. Treat it as all rights reserved too.
-- **The contract layer only** (`src/contract/*` and `test/host/*`) is copyright 2026 Travis Cook and
-  is offered under the **MIT license** — see [LICENSE-DroidNet-Contract](LICENSE-DroidNet-Contract).
-  That file applies to those paths and to nothing else in this tree.
-
-`src/contract/contract_core.h` is shared byte-identically with the DroidNet RSeries and Flthy forks.
-Because the RSeries firmware is LGPL-2.1, that one file is dual-licensed by its author (LGPL-2.1-only
-when distributed as part of the LGPL fork, MIT here). Its header says so.
