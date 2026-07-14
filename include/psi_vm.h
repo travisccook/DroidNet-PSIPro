@@ -476,6 +476,89 @@ const uint8_t vmc_disco[] PROGMEM = {
   V_SPARK(3, VC_GREY), V_SHOW(150), OP_CLEAR, V_SHOW(150), OP_END,
 };
 
+// Mode 4: Short circuit — was FadeOut(257, 3). Native (src/main.cpp, deleted by
+// this task — line numbers below are current, NOT the stale 1633-1702 an
+// earlier note cited; Tasks 8-11 each deleted code above this point and
+// shifted everything down) does two things per checkDelay()-gated tick,
+// alternating on `ledPatternState`: state 0 dims every LED
+// (`leds[x].nscale8_video(random(220,250))`, x = 0..NUM_LEDS-1, ONE random()
+// call per LED, draw-then-write in index order — this is the FIRST
+// SCALE_RAND/MUL_RAND conversion, so that order is load-bearing exactly like
+// DiscoBall's row/col draw order was in Task 11); state 1 brightens every LED
+// (`leds[x] *= random(0,6)`, same per-LED order — CRGB::operator*= is
+// per-channel qmul8, NOT nscale8_video, so this pass can push a channel UP,
+// unlike the dim pass, which is monotonic non-increasing by construction).
+// No entry clear — FadeOut fades whatever is ALREADY on the panel (the golden
+// row's 7th column feeds `0T4` at t=3000ms into a live default-swipe buffer,
+// mode04_shortcirc.psig frame 115 is the first FadeOut-touched frame, not an
+// all-black one). No runtime/timeout either — native never calls
+// set_global_timeout, and ignores any command timing it was sent (the
+// firstTime block force-clears `timingReceived`) — hence VMF_IGNORE_TIMING.
+//
+// THE QUIRK — "the really ugly way of counting loops" (native's own comment,
+// main.cpp ~line 1127): with case0count=4, case1count=8, loops=3,
+// totalLoopCount = 3*(4+8) = 36. globalPatternLoops seeds to 36 and
+// decrements ONCE PER TICK, unconditionally. ledPatternState toggles via four
+// `if (globalPatternLoops == totalLoopCount - K)` checks (K = 4, 12, 16, 24)
+// — evaluated AFTER that tick's dim/bright pass already ran but BEFORE that
+// tick's own decrement — so a threshold match toggles the state for the
+// *next* tick, not the current one. Only four thresholds are coded, covering
+// cumulative offsets 4/12/16/24 out of a "clean" 3x(4+8)=36 total: they carry
+// the state machine through 1.5 of the intended 3 cycles (dim4, bright8,
+// dim4, bright8) and then simply STOP — no threshold exists for offsets
+// 28/36, so once the 4th toggle fires (at globalPatternLoops==12) the state
+// flips to dim and never flips back; it just keeps dimming every remaining
+// tick until globalPatternLoops hits 0. Simulated exactly against the source
+// (not eyeballed) and cross-checked against every one of the golden's 36
+// FadeOut frames (mode04_shortcirc.psig, frames 115-150 inclusive — frame
+// 115 lands at t=3000, the exact tick the `0T4` command was fed, because
+// checkDelay()'s leftover `doNext` from the prior swipe pattern had already
+// expired; frame 151, t=12142, is the FIRST FRAME OF THE REVERTED DEFAULT
+// SWIPE, back at a steady 26 ms cadence, sum=12240 = fully lit again — not a
+// 37th FadeOut frame): the ACTUAL pass sequence is five blocks, not six —
+//   ticks  1- 5 (frames 115-119): DIM   x5   (not 4 — the off-by-one above)
+//   ticks  6-13 (frames 120-127): BRIGHT x8
+//   ticks 14-17 (frames 128-131): DIM   x4
+//   ticks 18-25 (frames 132-139): BRIGHT x8
+//   ticks 26-36 (frames 140-150): DIM   x11  (the un-thresholded tail —
+//                                              replaces what a clean reading
+//                                              would have rendered as a
+//                                              third dim4+bright8 cycle)
+// 5+8+4+8+11 = 36 total ticks, matching totalLoopCount exactly; 20 dim + 16
+// bright passes overall, vs. the clean (4 dim + 8 bright)x3 = 12 dim + 24
+// bright a straight LOOPSTART/loops=3 encoding would produce (which is
+// exactly the probe's shape, and exactly what golden_compare.py rejects).
+// Golden frame content confirms the block shape independent of the tick
+// count too: every predicted DIM block (115-119, 128-131, 140-150) is
+// strictly non-increasing in total LED byte-sum tick over tick — the only
+// possible signature of nscale8_video, which can never raise a channel — and
+// the two BRIGHT blocks are exactly where that monotonicity breaks.
+//
+// Encoding: rather than reproduce native's threshold arithmetic (the VM's
+// own loop accounting is structurally different — vmMaybeCountLoop decrements
+// once per LAP via an OP_END peek, not once per raw tick, so there is no
+// "globalPatternLoops mid-sequence value" to threshold-compare against inside
+// the VM at all), this bakes the five observed blocks straight into the
+// program as five OP_SCALE_RAND/OP_MUL_RAND + OP_SHOWR(rep) pairs.
+// OP_SHOWR's rep mechanism does not advance g_vmPC until its last rep, so
+// vmStep() restarts each intervening tick from the block's OWN staging op —
+// i.e. every rep re-runs OP_SCALE_RAND/OP_MUL_RAND fresh, drawing 48 NEW
+// random() values and re-applying them to the (already-mutated) buffer —
+// exactly mirroring native's per-tick redraw-in-place. loops=1 in the
+// descriptor below: the ONLY point in this straight-line program where a
+// returning SHOW's peek lands on OP_END is the last rep of the final
+// (11-tick) dim block, so a single decrement (1 -> 0) there is exactly
+// enough to trip loopsDonedoRestoreDefault() on that same tick — matching
+// the golden's immediate revert at frame 151, one tick later, no extra pass.
+const uint8_t vmc_fadeout[] PROGMEM = {
+  OP_SCALE_RAND, 220, 250, V_SHOWR(5, 257),
+  OP_MUL_RAND, 6,          V_SHOWR(8, 257),
+  OP_SCALE_RAND, 220, 250, V_SHOWR(4, 257),
+  OP_MUL_RAND, 6,          V_SHOWR(8, 257),
+  OP_SCALE_RAND, 220, 250, V_SHOWR(11, 257),
+  OP_END,
+};
+
 // ---------------------------------------------------------------------------
 // Program descriptors.
 // ---------------------------------------------------------------------------
@@ -494,20 +577,21 @@ struct VmProg {
 
 enum {
   VMP_FLASH = 0, VMP_ALARM, VMP_LEIA, VMP_SWSCAN, VMP_KNIGHT, VMP_RADAR,
-  VMP_REBEL, VMP_PULSE, VMP_DISCO4, VMP_DISCOINF,
+  VMP_REBEL, VMP_PULSE, VMP_DISCO4, VMP_DISCOINF, VMP_FADEOUT,
 };
 
 const VmProg vmProgs[] PROGMEM = {
-  { vmc_flash60,  24, 4,  0 },          // VMP_FLASH    (mode 2)  — was flash(0xffffff, 60, 24, 4)
-  { vmc_flash125, 15, 4,  0 },          // VMP_ALARM    (modes 3/5) — was flash(0xffffff, 125, 15, 4)
-  { vmc_leia,     57, 34, 0 },          // VMP_LEIA     (mode 6)  — was Cylon_Row(0xcccccc, 74, 3, 57, 34)
-  { vmc_swscan,    5, 0,  0 },          // VMP_SWSCAN   (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
-  { vmc_knight,    5, 0,  0 },          // VMP_KNIGHT   (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
-  { vmc_radar,     6, 0,  VMF_CLEAR },  // VMP_RADAR    (mode 8)  — was radar(0xff0000, 250, 6, 0)
-  { vmc_rebel,     0, 5,  0 },          // VMP_REBEL    (mode 14) — was displayMatrixColor(rebel, ..., true, 5)
-  { vmc_pulse,     3, 0,  VMF_CLEAR },  // VMP_PULSE    (mode 9 rear) — was Pulse(100, 3, 0)
-  { vmc_disco,    30, 4,  VMF_CLEAR },  // VMP_DISCO4   (mode 12) — was DiscoBall(150, 30, 3, CRGB::Grey, 4)
-  { vmc_disco,     0, 0,  VMF_CLEAR },  // VMP_DISCOINF (mode 13) — was DiscoBall(150, 0, 3, CRGB::Grey, 0)
+  { vmc_flash60,  24, 4,  0 },                       // VMP_FLASH    (mode 2)  — was flash(0xffffff, 60, 24, 4)
+  { vmc_flash125, 15, 4,  0 },                       // VMP_ALARM    (modes 3/5) — was flash(0xffffff, 125, 15, 4)
+  { vmc_leia,     57, 34, 0 },                       // VMP_LEIA     (mode 6)  — was Cylon_Row(0xcccccc, 74, 3, 57, 34)
+  { vmc_swscan,    5, 0,  0 },                       // VMP_SWSCAN   (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
+  { vmc_knight,    5, 0,  0 },                       // VMP_KNIGHT   (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
+  { vmc_radar,     6, 0,  VMF_CLEAR },               // VMP_RADAR    (mode 8)  — was radar(0xff0000, 250, 6, 0)
+  { vmc_rebel,     0, 5,  0 },                       // VMP_REBEL    (mode 14) — was displayMatrixColor(rebel, ..., true, 5)
+  { vmc_pulse,     3, 0,  VMF_CLEAR },               // VMP_PULSE    (mode 9 rear) — was Pulse(100, 3, 0)
+  { vmc_disco,    30, 4,  VMF_CLEAR },               // VMP_DISCO4   (mode 12) — was DiscoBall(150, 30, 3, CRGB::Grey, 4)
+  { vmc_disco,     0, 0,  VMF_CLEAR },               // VMP_DISCOINF (mode 13) — was DiscoBall(150, 0, 3, CRGB::Grey, 0)
+  { vmc_fadeout,   1, 0,  VMF_IGNORE_TIMING },       // VMP_FADEOUT  (mode 4)  — was FadeOut(257, 3) — see vmc_fadeout's comment for the loop-tail quirk
 };
 
 #ifndef PSI_VM_TABLES_ONLY
@@ -752,18 +836,29 @@ static void vmStep() {
         vmSparkleDraw(n, vmColor(pgm_read_byte(pc++)));
         break;
       }
-      // OP_SCALE_RAND/OP_MUL_RAND (Task 12): case bodies land with their
-      // conversion task, alongside the program that emits them — no shipped
-      // program emits either of these bytes yet, so this fallthrough is
-      // unreachable today. It exists so an opcode byte this build doesn't
-      // yet implement can never be misread as extra operand bytes for
-      // whatever case follows it in the switch: unknown/not-yet-landed ops
-      // end the program safely (same as OP_END) instead of corrupting the
-      // frame-cursor walk.
+      // OP_SCALE_RAND/OP_MUL_RAND (Task 12): FadeOut's two per-LED random
+      // passes. ONE random() call per LED, draw-then-write, index order
+      // 0..NUM_LEDS-1 — matches native's `for (x=0; x<NUM_LEDS; x++)` body
+      // exactly (see vmc_fadeout's comment for the golden-verified pass
+      // sequence this feeds). Neither op advances g_vmPC on its own — the
+      // caller's OP_SHOWR rep count is what makes a staging op like this one
+      // re-run (with fresh random() draws) every tick of a multi-tick pass.
+      case OP_SCALE_RAND: {
+        uint8_t lo = pgm_read_byte(pc++);
+        uint8_t hi = pgm_read_byte(pc++);
+        for (int x = 0; x < NUM_LEDS; x++) leds[x].nscale8_video(random(lo, hi));
+        break;
+      }
+      case OP_MUL_RAND: {
+        uint8_t mx = pgm_read_byte(pc++);
+        for (int x = 0; x < NUM_LEDS; x++) leds[x] *= random(0, mx);
+        break;
+      }
       // (OP_FILL_ROW/OP_FILL_COLR landed Task 8 above — vmc_leia/vmc_swscan/
       // vmc_knight exercise both. OP_HALFCOLR landed Task 9 — vmc_radar.
       // OP_PIX/OP_FRAME landed Task 10 above — vmc_rebel/vmc_pulse.
-      // OP_SPARKLE landed Task 11 above — vmc_disco.)
+      // OP_SPARKLE landed Task 11 above — vmc_disco. OP_SCALE_RAND/
+      // OP_MUL_RAND landed Task 12 above — vmc_fadeout.)
       case OP_END:
       default:
         if (g_vmFlags & VMF_ONESHOT) {

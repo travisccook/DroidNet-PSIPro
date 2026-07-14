@@ -32,6 +32,7 @@ static const ProgRef progs[] = {
     P(vmc_radar),
     P(vmc_rebel), P(vmc_pulse),
     P(vmc_disco),
+    P(vmc_fadeout),
     // conversion tasks append their programs here
 };
 

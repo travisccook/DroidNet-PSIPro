@@ -1069,78 +1069,6 @@ void swipe() {
   }
 }
 
-// Randomly fades and brightens pixels
-// Generally used for a Short Circuit sequence.
-void FadeOut(unsigned long time_delay, uint8_t loops) {
-
-  // Variables to control the dim/brightness levels
-  uint8_t dim_by;
-  uint8_t multiply_by;
-
-  int case0count = 4;
-  int case1count = 8;
-
-  int totalLoopCount  = loops * (case0count + case1count);
-
-  // Note that we don't set the panel off here first
-  // We use the brightness, and fade API's to play with
-  // the panel appearance.
-
-  if (firstTime) {
-    DEBUG_PRINT_LN("Fade Out");
-    firstTime = false;
-    patternRunning = true;
-    globalPatternLoops = totalLoopCount;
-    ledPatternState = 0;
-    // Just ignore the timing from the command, this sequence doesn't work with it.
-    if (timingReceived) timingReceived = false;
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      // Note we set the display timeout large here so that the image stays displayed.
-      // Do this 4 times ....
-      case 0:
-        for (int x = 0; x < NUM_LEDS; x++) {
-          dim_by = random(220, 250);
-          leds[x].nscale8_video(dim_by);
-        }
-        updateLed = 1;
-        break;
-      // Do this 8 times....
-      case 1:
-        for (int x = 0; x < NUM_LEDS; x++) {
-          multiply_by = random(0, 6);
-          leds[x] *= multiply_by;
-        }
-        updateLed = 1;
-        break;
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-
-    // Toggle the state.
-    // Really ugly way of counting loops :(
-    if (globalPatternLoops == totalLoopCount - case0count) ledPatternState = ledPatternState ^ 1;
-    if (globalPatternLoops == totalLoopCount - (case0count + case1count)) ledPatternState = ledPatternState ^ 1;
-    if (globalPatternLoops == totalLoopCount - (case0count + case1count + case0count)) ledPatternState = ledPatternState ^ 1;
-    if (globalPatternLoops == totalLoopCount - (case0count + case1count + case0count + case1count)) ledPatternState = ledPatternState ^ 1;
-    globalPatternLoops--;
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-
-  // Check to see if we have run the loops needed for this pattern
-  loopsDonedoRestoreDefault();
-}
-
 // Delay, loops, color
 void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime)
 {
@@ -1557,8 +1485,8 @@ void runPattern(int pattern) {
     case 3:              //  3 = Alarm (4s) — was flash(0xffffff, 125, 15, 4)
       vmPlay(VMP_ALARM);
       break;
-    case 4:              //  4 = Short circuit
-      FadeOut(257, 3);
+    case 4:              //  4 = Short circuit — was FadeOut(257, 3)
+      vmPlay(VMP_FADEOUT);
       break;
     case 5:              //  5 = Scream — same as Alarm
       vmPlay(VMP_ALARM);
