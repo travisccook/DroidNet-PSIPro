@@ -16,6 +16,7 @@ mode12_disco4     0T12 8000  front 00,01,14 512
 mode13_discoinf   0T13 8000  front 00,01,14 512
 mode14_rebel      0T14 9000  front 00,01,14 512
 mode15_knight     0T15 12000 front 00,01,14 512
+mode15_alwayson   0T15 30000 front ff,ff,ff 512
 mode16_white      0T16 4000  front 00,01,14 512
 mode17_red        0T17 4000  front 00,01,14 512
 mode18_green      0T18 4000  front 00,01,14 512
