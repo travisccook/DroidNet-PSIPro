@@ -279,6 +279,16 @@ static void vmStep() {
         // golden_compare.py on mode03_alarm: native's period is a steady
         // 130 ms, but with `return` here vmc_flash125 alternated 130/156 ms
         // (one poll-gate's worth of drift on every wrap-crossing toggle).
+        //
+        // RETURNING-SHOW LOOP INVARIANT: because this wrap CONTINUES instead
+        // of returning, a program whose wrap body (from the wrap target — the
+        // byte after OP_LOOPSTART, else program start — through OP_END) holds
+        // no RETURNING show op (OP_SHOW/OP_SHOWR/OP_SHOWRND; OP_SHOWNOW does
+        // not return and does not count) would spin in this loop forever on a
+        // watchdogless AVR. Every shipped program is checked for this
+        // mechanically — and for having at most one OP_LOOPSTART, since
+        // g_vmLoopPtr is a single wrap target — by the decode-walk test
+        // (test/host/test_psi_vm.cpp, run.sh stage 2).
         pc = g_vmLoopPtr;
         continue;
     }
