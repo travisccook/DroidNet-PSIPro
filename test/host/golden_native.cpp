@@ -51,6 +51,24 @@ int main(int argc, char** argv) {
   //   alwaysOnAddress = 0, externalPOTAddress = 1, internalBrightnessAddress = 2
   // ee0/ee1/ee2 are mapped by ADDRESS ORDER (0,1,2), matching both their declaration
   // order and the EEPROM.write() call order in main.cpp's P-command handler.
+  //
+  // Runtime semantics of each cell (setup(), src/main.cpp:407-429) — read these
+  // before choosing --eeprom values, the gates are STRICT:
+  //   cell 0 (ee0, alwaysOnAddress): ==0x00 -> alwaysOn=false (pattern runs its set
+  //     time then returns to default); ==0x01 -> alwaysOn=true. ANY OTHER BYTE
+  //     matches neither `if` and silently keeps the COMPILED default
+  //     (config.h:21 alwaysOn = true).
+  //   cell 1 (ee1, externalPOTAddress): STRICT 0/1 gate. ==0x00 -> POT-driven
+  //     brightness (internalBrightness=false); ==0x01 -> FIXED brightness taken
+  //     from cell 2 (internalBrightness=true). ANY OTHER BYTE silently keeps the
+  //     compiled default false, i.e. behaves like 0x00 (POT path). So
+  //     `--eeprom 00,14,14` exercises the POT path — its frame scales RAMP as the
+  //     30-slot POT average warms up — NOT the fixed-brightness path.
+  //   cell 2 (ee2, internalBrightnessAddress): loaded unconditionally into
+  //     globalBrightnessValue, but INERT at render time unless cell 1 == 0x01
+  //     (brightness() only returns it when internalBrightness is true).
+  // Canonical fixed-brightness capture: `--eeprom 00,01,14` -> every frame's
+  // scale byte is exactly 0x14.
   EEPROM.mem[alwaysOnAddress] = (uint8_t)ee0;
   EEPROM.mem[externalPOTAddress] = (uint8_t)ee1;
   EEPROM.mem[internalBrightnessAddress] = (uint8_t)ee2;
