@@ -3,7 +3,7 @@
 # bolted onto Neil Hutchison's PSI Pro firmware. Copyright (c) 2026 Travis Cook.
 # SPDX-License-Identifier: MIT
 #
-# Host checks for the PSI Pro contract fork (stages 1-4 need no hardware and no toolchain; stage 6 is the real cross-compile):
+# Host checks for the PSI Pro contract fork (stages 1-5 need no hardware and no toolchain; stage 6 is the real cross-compile):
 #   1. contract_core.h parser unit tests
 #   2. ContractPSI.h firmware-layer type-check against a mock of the MaxPSI board API
 #   3. command-buffer width guard (the v1.2 accent keys push a scored line past 63 chars)
@@ -91,14 +91,17 @@ echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # command line that produced the committed .psig files; any regenerated capture
 # that doesn't cmp byte-identical to its committed twin means the mocks or Neil's
 # unmodified main.cpp no longer reproduce what we locked in as ground truth.
+# Matrix columns: <name> <cmd> <ms> <jumper> <eeprom> <pot> [at_ms] — the optional
+# 7th column delays the command feed so buffer-transforming modes (FadeOut) get a
+# painted default-swipe buffer to work on instead of dimming an all-black one.
 BUILD="/tmp/psi-host"
 GOLD="$BUILD/golden"
 mkdir -p "$GOLD"
 ./mk_full_config.sh "$BUILD"
-while read -r name cmd ms jumper ee pot; do
+while read -r name cmd ms jumper ee pot at; do
   [ -z "$name" ] && continue
   "$BUILD/golden_full" --cmd "$cmd" --ms "$ms" --jumper "$jumper" \
-    --eeprom "$ee" --pot "$pot" --out "$GOLD/$name.psig" 2>/dev/null
+    --eeprom "$ee" --pot "$pot" --at "${at:-0}" --out "$GOLD/$name.psig" 2>/dev/null
   if ! cmp -s "golden/$name.psig" "$GOLD/$name.psig"; then
     echo "GOLDEN MISMATCH: $name"
     python3 golden_compare.py "golden/$name.psig" "$GOLD/$name.psig" || true
@@ -109,8 +112,9 @@ echo "      $(wc -l < golden_matrix.txt | tr -d ' ') captures identical."
 
 echo "[6/6] REAL cross-compile (ATmega32U4 (SparkFun Pro Micro)) -- optional"
 # THIS is the stage that makes "it compiles" a claim about the FIRMWARE rather than a claim
-# about our mock. Stages 1-3 are host checks: they prove the contract logic and they pin the
-# board API against a HAND-WRITTEN MOCK -- and a mock is only ever as honest as its author.
+# about our mock. Stages 1-5 are host checks: they prove the contract logic, fuzz the
+# parsers, gate the golden frames, and pin the board API against a HAND-WRITTEN MOCK -- and
+# a mock is only ever as honest as its author.
 # This one was not honest. The first real avr-gcc/xtensa build caught two things stages 1-3
 # could never see, by construction:
 #   * FastLED declares RGB as an ENUMERATOR of fl::EOrder, which name-hides a `struct RGB`.
@@ -122,12 +126,12 @@ echo "[6/6] REAL cross-compile (ATmega32U4 (SparkFun Pro Micro)) -- optional"
 # (Both are fixed. The lesson is why this stage exists.)
 #
 # OPTIONAL because it needs PlatformIO and a ~200 MB toolchain. Skipped cleanly without it:
-# stages 1-3 still run and still mean something -- just strictly less than they appear to.
+# stages 1-5 still run and still mean something -- just strictly less than they appear to.
 PIO="${PIO:-$HOME/.platformio/penv/bin/pio}"
 [ -x "$PIO" ] || PIO="$(command -v pio 2>/dev/null || true)"
 if [ -z "$PIO" ] || [ ! -x "$PIO" ]; then
   echo "SKIP: PlatformIO not found, so NOTHING here was compiled for the real MCU."
-  echo "      Stages 1-3 passed, but they only type-check against our mock."
+  echo "      Stages 1-5 passed, but they only run against our host mocks."
   echo "      Install it and re-run for the real check:  pip install platformio"
   echo "      Or point this at an existing install:      PIO=/path/to/pio $0"
   exit 0

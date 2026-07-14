@@ -3,7 +3,7 @@ mode01_swipe_f    0T1  15000 front 00,01,14 512
 mode01_swipe_r    0T1  15000 rear  00,01,14 512
 mode02_flash      0T2  8000  front 00,01,14 512
 mode03_alarm      0T3  8000  front 00,01,14 512
-mode04_shortcirc  0T4  8000  front 00,01,14 512
+mode04_shortcirc  0T4  14000 front 00,01,14 512 3000
 mode05_scream     0T5  8000  front 00,01,14 512
 mode06_leia       0T6  40000 front 00,01,14 512
 mode07_iheartu    0T7  12000 front 00,01,14 512

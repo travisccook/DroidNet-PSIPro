@@ -25,12 +25,13 @@ int main(int argc, char** argv) {
   const char* cmd = nullptr;
   const char* outPath = nullptr;
   const char* jumper = "front";
-  unsigned long durMs = 10000, seed = 1;
+  unsigned long durMs = 10000, seed = 1, atMs = 0;
   int pot = 512;
   unsigned ee0 = 0xFF, ee1 = 0xFF, ee2 = 0xFF;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--cmd")) cmd = argv[++i];
     else if (!strcmp(argv[i], "--ms")) durMs = strtoul(argv[++i], 0, 10);
+    else if (!strcmp(argv[i], "--at")) atMs = strtoul(argv[++i], 0, 10);
     else if (!strcmp(argv[i], "--jumper")) jumper = argv[++i];
     else if (!strcmp(argv[i], "--pot")) pot = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--seed")) seed = strtoul(argv[++i], 0, 10);
@@ -40,6 +41,7 @@ int main(int argc, char** argv) {
   }
   if (!cmd || !outPath) { fprintf(stderr, "need --cmd and --out\n"); return 2; }
   if (durMs >= 0x80000000UL) { fprintf(stderr, "duration too long\n"); return 2; }
+  if (atMs > durMs) { fprintf(stderr, "--at %lu is past --ms %lu: the command would never fire\n", atMs, durMs); return 2; }
 
   g_avr_next = (uint32_t)seed;
   g_mock_analog = pot;
@@ -75,16 +77,27 @@ int main(int argc, char** argv) {
 
   g_out = fopen(outPath, "wb");
   if (!g_out) { perror(outPath); return 2; }
-  fprintf(g_out, "PSIGOLD1 cmd=%s seed=%lu clock=1ms dur_ms=%lu jumper=%s pot=%d eeprom=%02x,%02x,%02x\nFRAMES\n",
+  fprintf(g_out, "PSIGOLD1 cmd=%s seed=%lu clock=1ms dur_ms=%lu jumper=%s pot=%d eeprom=%02x,%02x,%02x",
           cmd, seed, durMs, jumper, pot, ee0, ee1, ee2);
+  // `at=` is only recorded when nonzero so the at=0 captures (the whole matrix
+  // before --at existed) keep their committed headers byte-identical.
+  if (atMs) fprintf(g_out, " at=%lu", atMs);
+  fprintf(g_out, "\nFRAMES\n");
 
   g_frame_hook = frameHook;  // capture setup()-time frames too
   setup();
   char line[32];
   snprintf(line, sizeof line, "%s\r", cmd);
-  Serial1.feed(line);
+  // --at 0 (the default): feed before the clock starts, exactly as every golden
+  // was originally captured. --at N>0: let the DEFAULT pattern run first and feed
+  // the command on the tick the clock first reaches N — needed for modes like
+  // FadeOut (0T4) that only transform whatever is already painted in leds[]; fed
+  // at boot they would dim an all-black, never-painted buffer into a degenerate
+  // all-black capture.
+  if (atMs == 0) Serial1.feed(line);
   for (uint32_t t = 1; t <= durMs; t++) {
     g_mock_millis = t;
+    if (atMs && t == atMs) Serial1.feed(line);
     loop();
     serialEventRun();  // the Arduino core calls this after every loop()
   }
