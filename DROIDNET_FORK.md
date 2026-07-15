@@ -14,8 +14,10 @@ working exactly as they did.
 - **Role:** the PSI board of the three-board Cantina dome light-show family (RSeries Logics, PSI Pro,
   Flthy HPs). This is the tightest of the three and the pacing item.
 - **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), FastLED. `platformio.ini` is checked in and
-  builds out of the box (`pio run`). It links at 27,238 B of 28,672 B (95.0%) — and only fits
-  because of CONTRACT_SLIM + the codegen flags + PSI_NOINLINE together. See README, "Building".
+  builds out of the box. `pio run` (serial-only, shipped default) links at 26,666 B of 28,672 B
+  (93.0%); `pio run -e PSIPro-i2c` links at 28,108 B (98.0%). Every animation — all 22 upstream
+  modes — is PROGMEM bytecode played by `include/psi_vm.h`'s interpreter; that is what makes both
+  fit. See README, "Building" and "The animation VM: modes are data now".
 - **Seeded from:** the private C2B5 droid working collection @ `2fbd4023` (subdir `PSIPro`),
   2026-07-12, git-tracked files only. That collection is where the PlatformIO restructuring of Neil's
   flat Arduino sketch and the `visualizer/` came from.
@@ -47,9 +49,12 @@ bash test/host/run.sh
 2. `ContractPSI.h` firmware-layer type-check against `test/host/mock_psi.h`, a mock of the MaxPSI
    board API (plus the score-native / frame-latch / score-clear / build-ramp / scale guards).
 
-That is the entire verification story. There has been **no AVR compile and no bench flash**. Flash
-headroom on the 32U4 (~28 KB usable; the contract layer is estimated at 3-4 KB) is the open risk, and
-`CONTRACT_SLIM` in `include/config.h` is the — also untested — escape hatch if the linker overflows.
+The list above predates most of the harness; `bash test/host/run.sh` has grown well past those two
+checks (golden-frame parity against Neil's animation code, parser fuzzing, and a real AVR
+cross-compile of both build configs — see README, "STOP: this has never run on hardware", for the
+current picture). What has NOT changed: there has been **no bench flash**. Flash headroom on the
+32U4 is no longer an open risk — it is measured on every `run.sh` — and there is no `CONTRACT_SLIM`
+escape hatch anymore; see README, "It fits" and "The animation VM: modes are data now".
 
 ## Layout
 
@@ -64,8 +69,10 @@ headroom on the 32U4 (~28 KB usable; the contract layer is estimated at 3-4 KB) 
 
 ## Next steps
 
-1. Bench-compile for AVR and read the flash/SRAM numbers. Everything else waits on this.
-2. If it overflows: enable `CONTRACT_SLIM` and re-measure.
-3. Bench-test on a bare PSI Pro, not in a droid: native modes first (prove the fork really is
+1. **Done:** bench-compile for AVR and read the flash/SRAM numbers — `test/host/run.sh` does this on
+   every run for both configs; see README, "It fits". Nothing to re-measure by hand, and no
+   `CONTRACT_SLIM`-style escape hatch to reach for if the numbers move — see "The animation VM: modes
+   are data now" in README for why.
+2. Bench-test on a bare PSI Pro, not in a droid: native modes first (prove the fork really is
    additive), then a live `!P*A` cue, then a seeded clock, then a pushed score.
-4. Only then anywhere near a droid.
+3. Only then anywhere near a droid.

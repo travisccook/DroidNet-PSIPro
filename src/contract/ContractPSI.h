@@ -13,21 +13,26 @@
 // (see the I2C INTAKE block in include/config.h for the full reasoning and the numbers).
 // It is the single place this fork is less capable than the firmware it forked.
 //
-// INCLUDE ORDER (see main.cpp ~line 351): this header is included AFTER config.h /
+// INCLUDE ORDER (see main.cpp ~line 366): this header is included AFTER config.h /
 // matrices.h / FastLED and AFTER the global state block (leds[], level[],
 // useTempInternalBrightness/tempGlobalBrightnessValue, firstTime, lastPSIeventCode,
-// serialPort) is declared, and AFTER functions.h has prototyped the render
-// primitives it calls (allON/allOFF/flash/scanCol/Cylon_Col/DiscoBall/VUMeter/
-// runPattern/brightness). It is included BEFORE loop()/serialEvent()/receiveEvent()
-// so those can call the contract entry points.
+// serialPort) is declared, AFTER functions.h has prototyped the native render
+// primitives it still calls (allON/allOFF/VUMeter/runPattern/brightness), and AFTER
+// include/psi_vm.h (main.cpp ~line 359) — whose vmContractScan/vmContractSparkle
+// shims replaced the native scanCol()/DiscoBall() this layer used to call directly;
+// see psi_vm.h's own "Contract-layer shims" comment. It is included BEFORE
+// loop()/serialEvent()/receiveEvent() so those can call the contract entry points.
 //
-// DESIGN (verified against src/main.cpp + include/config.h on 2026-07-12):
-//   * Color is TRACTABLE: allON(CRGB,...) main.cpp:461, flash(CRGB,...) main.cpp:1114,
-//     scanCol(...,CRGB,...) main.cpp:727, Cylon_Col(CRGB,...) main.cpp:1209,
-//     DiscoBall(...,CRGB,...) main.cpp:1759, VUMeter(...) main.cpp:1677,
-//     fill_column/fill_row main.cpp:501/531, displayMatrixColor main.cpp:984 — all
-//     already take a live CRGB. runContractAnim() is a parallel dispatcher (vs
-//     runPattern main.cpp:2116) driven by g_effect/g_contractColor.
+// DESIGN (verified against src/main.cpp + include/config.h; re-verified 2026-07-14
+// after the animation-VM sweep deleted flash()/scanCol()/Cylon_Col()/DiscoBall()):
+//   * Color is TRACTABLE: allON(CRGB,...) main.cpp:493, fill_column/fill_row
+//     main.cpp:533/563, displayMatrixColor main.cpp:576, VUMeter(...) main.cpp:795 —
+//     all already take a live CRGB. The two effects that used to call native
+//     scanCol()/DiscoBall() directly (CE_SCAN/CE_SPARKLE, below) now go through
+//     vmContractScan(d, col)/vmContractSparkle(d, col) in include/psi_vm.h — shims
+//     that take the same live CRGB `col` the deleted natives did, not a VM palette
+//     byte. runContractAnim() is a parallel dispatcher (vs runPattern main.cpp:957)
+//     driven by g_effect/g_contractColor.
 //   * Brightness rides the VOLATILE 3P path only (useTempInternalBrightness +
 //     tempGlobalBrightnessValue, main.cpp:2562-2585 / brightness() main.cpp:2595) —
 //     NEVER the 2P EEPROM path (main.cpp:2557) — so B/L/envelope never wear EEPROM.
@@ -50,9 +55,11 @@
 #include "contract_core.h"
 
 // ---- forward declaration: fill_column ---------------------------------------
-// Every OTHER board primitive this layer calls (allON/allOFF/scanCol/DiscoBall/VUMeter/
-// runPattern/brightness) is declared in include/functions.h, which main.cpp pulls in via
-// preamble.h at line 286 — well above our include point at main.cpp:357. fill_column() is
+// Every OTHER board primitive this layer calls (allON/allOFF/VUMeter/runPattern/
+// brightness — the native ones; scanCol()/DiscoBall() are gone, replaced by the
+// vmContractScan/vmContractSparkle shims in include/psi_vm.h) is declared in
+// include/functions.h, which main.cpp pulls in via preamble.h at line 286 — well
+// above our include point at main.cpp:366. fill_column() is
 // the one exception: it is DEFINED at main.cpp:517 but declared in no header at all, so at
 // our include point the name is not yet in scope and the real avr-gcc build fails with
 // "'fill_column' was not declared in this scope". The host mock DEFINED it, which is
@@ -212,10 +219,11 @@ static inline void _renderRainbow(uint16_t delayMs) {
 
 // ---- comet (fx spatial helpers; brightness rides the global 3P path only) ---
 // NOTE (all four column-built looks below): fill_column() only STAGES into leds[]
-// (main.cpp:517-524) — it does not latch. loop() has no global FastLED.show(), so the
+// (main.cpp:533-540) — it does not latch. loop() has no global FastLED.show(), so the
 // frame must be pushed here or the panel freezes on the last shown frame. Every other
-// primitive (allON/allOFF/scanCol/DiscoBall/VUMeter) shows internally; these must not
-// forget to. Enforced by the latch guard in test/host/compile_contract.cpp.
+// primitive this layer calls (allON/allOFF/VUMeter, and the vmContractScan/
+// vmContractSparkle shims that replaced scanCol()/DiscoBall()) shows internally; these
+// must not forget to. Enforced by the latch guard in test/host/compile_contract.cpp.
 // v1.2: every time-driven look takes its COLOR and its TIME ORIGIN as parameters rather
 // than reading g_contractColor/g_effectStartMs directly, so _renderLook() can draw either
 // the base look (g_contractColor, g_effectStartMs) or the accent overlay (g_pulseColor,

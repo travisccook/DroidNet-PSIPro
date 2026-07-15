@@ -95,8 +95,9 @@ clang++ -std=c++17 -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
 
 echo "[6/7] golden-frame parity: mocks + Neil's animation code must reproduce"
 echo "      the committed goldens bit-for-bit (test/host/golden/)."
-# The FULL-variant binary (CONTRACT_SLIM stripped via a shadowed config.h) is the
-# ground truth for all 22 native modes. golden_matrix.txt drives the same capture
+# The FULL-variant binary (built via mk_full_config.sh's shadowed config.h — a
+# historical CONTRACT_SLIM strip that is now a documented no-op, see that script) is
+# the ground truth for all 22 native modes. golden_matrix.txt drives the same capture
 # command line that produced the committed .psig files; any regenerated capture
 # that doesn't cmp byte-identical to its committed twin means the mocks or Neil's
 # unmodified main.cpp no longer reproduce what we locked in as ground truth.
@@ -148,12 +149,18 @@ fi
 echo "using $PIO"
 ( cd ../.. && "$PIO" run -e PSIPro -e PSIPro-i2c )
 echo "cross-compiles for the real MCU (ATmega32U4 (SparkFun Pro Micro)) OK"
-echo "    BOTH configs built: PSIPro (serial-only, 25,754 B) and PSIPro-i2c (27,238 B)."
+echo "    BOTH configs built: PSIPro (serial-only) and PSIPro-i2c — sizes below."
 echo "    (a successful LINK is not a bench test: this firmware has never been flashed.)"
 echo
 echo "    NOTE: this board's flash budget is the tight one — 28,672 B usable, and the"
 echo "    stock upstream firmware already used 87.6% of it. The linker enforces the"
-echo "    ceiling, so if this stage passes, the image FITS. It fits only because of"
-echo "    CONTRACT_SLIM (include/config.h) plus the codegen flags in platformio.ini and"
-echo "    the PSI_NOINLINE outlining in src/contract/ContractPSI.h. Disable any of the"
-echo "    three and this stage fails."
+echo "    ceiling, so if this stage passes, both configs FIT — THAT is the invariant this"
+echo "    stage exists to hold, not any specific byte count, which will keep moving as"
+echo "    animations are added. (as of feature/animation-vm: PSIPro 26,666 B / 93.0%,"
+echo "    PSIPro-i2c 28,108 B / 98.0% — re-measure with 'pio run && pio run -e PSIPro-i2c'"
+echo "    rather than trusting this comment.) It fits because of the codegen flags in"
+echo "    platformio.ini and the PSI_NOINLINE outlining in src/contract/ContractPSI.h —"
+echo "    disable either and this stage fails. There used to be a third leg here,"
+echo "    CONTRACT_SLIM, that dropped five native modes to make room; all 22 upstream"
+echo "    modes are now permanent PROGMEM bytecode (include/psi_vm.h) and CONTRACT_SLIM"
+echo "    is gone."

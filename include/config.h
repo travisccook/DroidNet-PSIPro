@@ -39,44 +39,22 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 
 
 ///////////////////////////////////////////////////
-////////// CONTRACT FLASH ESCAPE HATCH ///////////
+////////// ANIMATIONS ARE DATA, NOT CODE /////////
 /////////////////////////////////////////////////
 
-// REQUIRED, NOT OPTIONAL — and it was not always so. This was written as an opt-in
-// "only if the linker overflows" hatch, back when nothing had ever been cross-compiled
-// and the absolute flash cost was unknown. It has now been linked for real, and the
-// honest numbers are:
+// EPITAPH for CONTRACT_SLIM, the define that used to live on this line. It was an opt-in
+// "drop five heavy native novelty modes if the linker overflows" hatch — i_heart_u (7),
+// red_heart front (9), Imperial March (11), lightsaberBattle (19), StarWarsIntro (20) —
+// written back when the only way to shrink a mode was to delete its hand-written C++ body.
 //
-//   stock upstream PSI Pro, no contract ....... 25,106 B of 28,672 B (87.6%)
-//
-//   as this fork was ORIGINALLY published (before any of the flash work):
-//     this hatch OFF .......................... 38,790 B  (135.3% — WILL NOT LINK)
-//     this hatch ON ........................... 32,394 B  (113.0% — WILL NOT LINK)
-//
-//   the code as it stands TODAY:
-//     shipped (hatch ON + the codegen work) ... 27,238 B  (95.0%) — fits, 1,434 B spare
-//     the same code with this hatch OFF ....... 33,782 B  (117.8% — WILL NOT LINK)
-//     the same code, codegen flags removed .... 28,896 B  (100.8% — WILL NOT LINK)
-//
-// Upstream already used 87.6% of this chip. Only ~3.5 KB was ever free and the contract
-// layer needs ~13.7 KB, so the hatch alone cannot save the build — it reclaims 6,400 B
-// (not the "~3-5 KB" originally guessed here), and that still leaves it 3,722 B over.
-// It fits only in combination with the flash work in platformio.ini's build_flags and the
-// PSI_NOINLINE leaf-outlining in src/contract/ContractPSI.h. Turn any one of those three
-// off and the image overflows again.
-//
-// WHAT IT COSTS YOU: the heaviest novelty native modes are dropped — Mode 7 (i_heart_u),
-// Mode 9 (red_heart, front half), Mode 11 (Imperial March), Mode 19 (lightsaberBattle),
-// Mode 20 (StarWarsIntro). Under -ffunction-sections/--gc-sections they become
-// unreferenced and are stripped. Everything else — every other native mode, the whole
-// JawaLite grammar, the I2C intake — is untouched. DiscoBall (12/13) is deliberately KEPT,
-// because the contract's 'sparkle' effect maps onto it.
-//
-// If you do not want to lose those five modes, do not build this fork: flash Neil
-// Hutchison's upstream PSI Pro instead. There is no configuration of this fork that keeps
-// them AND fits in 28,672 B.
+// It is gone because that premise is gone. Every native mode's animation, including those
+// five, is now a flat PROGMEM byte string played by a small shared interpreter
+// (include/psi_vm.h — "Animations are data, the interpreter is the only animation code.").
+// A new animation costs tens of bytes of opcode data, not a new function; new bitmap art
+// costs an additional 48 B/frame. All 22 upstream modes ship, in both the serial-only and
+// I2C builds, with room to spare — see platformio.ini for the current measured sizes.
 
-#define CONTRACT_SLIM
+
 
 
 ///////////////////////////////////////////////////
@@ -108,16 +86,19 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 // Compiling I2C out removes the TWI vector from the image entirely, and with it the last
 // interrupt that can reach a render at all.
 //
-// WHAT IT BUYS (measured, not estimated):
+// WHAT IT BUYS (measured, not estimated; as of feature/animation-vm — re-measure with
+// `pio run && pio run -e PSIPro-i2c` and test/host/stack_report.py rather than trusting
+// this comment as it ages):
 //                                serial-only      + I2C
-//     flash                  25,754 B (89.8%)   27,238 B (95.0%)
-//     SRAM                    1,300 B (50.8%)    1,581 B (61.8%)
-//     stack budget                    1,260 B            979 B
-//     worst-case stack           396 B (31%)       478 B (49%)
+//     flash                  26,666 B (93.0%)   28,108 B (98.0%)
+//     SRAM                    1,309 B (51.1%)    1,590 B (62.1%)
+//     stack budget                    1,251 B            970 B
+//     worst-case stack           371 B (30%)       441 B (45%)
 //     can an ISR reach a render?          NO      yes (native path)
 //
-// WHAT IT DOES NOT BUY: the five native modes CONTRACT_SLIM drops do not come back.
-// Serial-only with CONTRACT_SLIM off is still 32,624 B (113.8%) and will not link.
+// WHAT IT DOES NOT COST: all 22 upstream modes ship in BOTH configurations — there is
+// no longer a "drop modes to make room" trade here (see the ANIMATIONS ARE DATA note
+// above). The only difference between the two columns is the I2C intake itself.
 //
 // WHEN YOU NEED TO TURN IT BACK ON: if anything on your droid addresses this board over
 // I2C (a MarcDuino, a Teeces/STEALTH setup, any JawaLite master on the bus at address

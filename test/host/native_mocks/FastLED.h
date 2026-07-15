@@ -11,8 +11,8 @@ inline uint8_t qmul8(uint8_t i, uint8_t j) {
 }
 // nscale8x3_video semantics: zero stays zero; nonzero gains +1 iff scale != 0.
 inline uint8_t nscale8_video_ch(uint8_t c, uint8_t scale) {
-  uint8_t nonzeroscale = (scale != 0) ? 1 : 0;
-  return (c == 0) ? 0 : (uint8_t)((((int)c * (int)scale) >> 8) + nonzeroscale);
+  uint8_t bump = (scale != 0) ? 1 : 0;
+  return (c == 0) ? 0 : (uint8_t)((((int)c * (int)scale) >> 8) + bump);
 }
 
 struct CHSV {

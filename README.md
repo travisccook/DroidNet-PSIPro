@@ -62,8 +62,8 @@ JawaLite master on the bus at address 22 — **you want the I2C build**. It is o
 ```
 
 ```bash
-pio run                  # serial-only (default)   25,754 B  89.8% flash
-pio run -e PSIPro-i2c    # + I2C intake            27,238 B  95.0% flash
+pio run                  # serial-only (default)   26,666 B  93.0% flash
+pio run -e PSIPro-i2c    # + I2C intake            28,108 B  98.0% flash
 ```
 
 Be aware of the failure mode if you get this wrong: with I2C compiled out, the board does not
@@ -87,13 +87,14 @@ What it buys, measured:
 
 | | serial-only (default) | with I2C |
 | --- | --- | --- |
-| flash | 25,754 B (89.8%) | 27,238 B (95.0%) |
-| SRAM | 1,300 B (50.8%) | 1,581 B (61.8%) |
-| worst-case stack | 396 B of 1,260 B (31%) | 478 B of 979 B (49%) |
+| flash | 26,666 B (93.0%) | 28,108 B (98.0%) |
+| SRAM | 1,309 B (51.1%) | 1,590 B (62.1%) |
+| worst-case stack | 371 B of 1,251 B (30%) | 441 B of 970 B (45%) |
 | can an interrupt reach a render? | **no** | yes (upstream's native path) |
 
-It does **not** give the five `CONTRACT_SLIM` modes back — serial-only with `CONTRACT_SLIM` off is
-still 32,624 B (113.8%) and will not link.
+Both configurations ship all 22 upstream modes — there is no "drop modes to fit" trade here (see
+[What this fork adds](#what-this-fork-adds)/the animation VM below); the only difference between
+the two columns is the I2C intake itself.
 
 Both configurations are built and type-checked by `test/host/run.sh` on every run, so neither can
 quietly rot.
@@ -118,32 +119,39 @@ not a bench test.** No timing, no brightness, no power draw, no serial behaviour
 has ever been observed on real hardware. The code has never executed a single instruction outside a
 host test.
 
-**It fits — but only just, and not by default.** This is the tightest board of the three, and the
-numbers are worth knowing before you build:
+**It fits, with real headroom in the default build, but not by much in the I2C build.** This is the
+tightest board of the three, and the numbers are worth knowing before you build:
 
 | Build | Flash | of 28,672 B |
 | --- | --- | --- |
 | Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
-| **This fork, as shipped (serial-only)** | **25,754 B** | **89.8%** |
-| This fork with the I2C intake (`-e PSIPro-i2c`) | 27,238 B | 95.0% |
-| …with `CONTRACT_SLIM` disabled | 32,624 B | 113.8% — **will not link** |
-| …with the codegen flags removed | 28,896 B | 100.8% — **will not link** |
+| **This fork, as shipped (serial-only)** | **26,666 B** | **93.0%** |
+| This fork with the I2C intake (`-e PSIPro-i2c`) | 28,108 B | 98.0% |
+| …I2C, with the codegen flags removed | 30,070 B | 104.9% — **will not link** |
+| …I2C, with `PSI_NOINLINE` removed | 29,650 B | 103.4% — **will not link** |
 
-Neil's firmware already used 87.6% of this chip. Only ~3.5 KB was ever free, and the contract layer
-costs ~13.7 KB. It fits only because of three things working *together* — `CONTRACT_SLIM` in
-`include/config.h`, the AVR codegen flags in `platformio.ini`, and the `PSI_NOINLINE` outlining in
-`src/contract/ContractPSI.h`. The last two rows above are what happens when you remove one of them:
-**disable any single leg and the image overflows again.** (For scale: as originally published, before
-this work, this fork linked at 38,790 B — 135.3%.)
+Neil's firmware already used 87.6% of this chip. Every animation in this fork — all 22 upstream
+modes, native and contract alike — is now PROGMEM bytecode played by one small interpreter
+(`include/psi_vm.h`; see "What this fork adds" below), which is *why* there is headroom at all: it
+replaced two dozen hand-written state machines with one. That headroom is not evenly spread, though.
+The **serial-only default has real margin** (2,006 B spare) — either the AVR codegen flags in
+`platformio.ini` or the `PSI_NOINLINE` outlining in `src/contract/ContractPSI.h` could be dropped on
+their own and it would still fit, if barely (99.5% / 98.8%). The **I2C build has almost none** (564 B
+spare) — it genuinely needs both: drop either one and it overflows, per the last two rows above. (For
+scale: as originally published, before any of the flash or VM work, this fork linked at 38,790 B —
+135.3%. There used to be a third leg here too, `CONTRACT_SLIM`, an escape hatch that dropped five
+native novelty modes to claw back room. It is gone — see "What this fork adds", below — because the
+VM made it unnecessary.)
 
 ### SRAM and the stack
 
-SRAM sits at 1,300 B of 2,560 B (50.8%), leaving **1,260 B for the stack** in the default
+SRAM sits at 1,309 B of 2,560 B (51.1%), leaving **1,251 B for the stack** in the default
 serial-only build. That used to be an open question here. It has now been analysed statically
-(`test/host/stack_report.py` regenerates the numbers from `-fstack-usage` plus the real
-disassembly), and in the shipped configuration the answer is good:
+(`test/host/stack_report.py` computes the bound directly from the linked ELF — see the tool's own
+`--help` for why `-fstack-usage` can't be trusted under `-flto`), and in the shipped configuration
+the answer is good:
 
-- **Worst-case stack: 396 B of 1,260 B (31%), and the bound is SOUND** — with the TWI vector gone,
+- **Worst-case stack: 371 B of 1,251 B (30%), and the bound is SOUND** — with the TWI vector gone,
   **no interrupt in the image can reach a render at all**, so there is no nesting to worry about.
   (`stack_report.py` still prints a nesting warning against the USB interrupt; that is its
   conservative model of indirect calls charging a FastLED vtable entry to PluggableUSB's dispatch
@@ -151,11 +159,11 @@ disassembly), and in the shipped configuration the answer is good:
   disassembly.)
 
 - **In the I2C build (`-e PSIPro-i2c`) the picture is the one described below**, and the bound there
-  is *not* sound. Worst case 478 B of 979 B (49%). Deepest path is
+  is *not* sound. Worst case 441 B of 970 B (45%). Deepest path is
   `main → serialEventRun → parseContract (138 B — the largest frame in the image) → allOFF →
   FastLED::show → showPixels`, plus the worst single interrupt. No recursion anywhere, no
   `alloca`/VLA (every frame is a compile-time constant), and **no heap at all** — nothing links
-  `malloc`, so the whole 979 B really is stack and the margin is real.
+  `malloc`, so the whole 970 B really is stack and the margin is real.
 
 - **But that bound is still not sound, and you should know why.** FastLED's `showPixels()` executes
   an unconditional `sei` (it disables interrupts to bit-bang the WS2812 data, patches
@@ -176,13 +184,17 @@ That is now fixed. The contract path is **deferred out of interrupt context**: `
 `contractServicePending()`, which does the parsing and rendering in main context. Neil's native
 command path is left exactly as it was. The results, all from `test/host/stack_report.py`:
 
-| | before the deferral | now |
-| --- | --- | --- |
-| worst-case stack | 596 B of 1,076 B | **478 B of 979 B (49%)** |
-| I2C ISR frame | 188 B | **129 B** |
-| one level of ISR nesting | 827 B | **650 B** (329 B still spare) |
+| | before the deferral | right after it (historical) | current (`feature/animation-vm`) |
+| --- | --- | --- | --- |
+| worst-case stack | 596 B of 1,076 B | 478 B of 979 B (49%) | **441 B of 970 B (45%)** |
+| I2C ISR frame | 188 B | 129 B | **112 B** |
+| one level of ISR nesting | 827 B | 650 B (329 B spare) | **596 B (374 B spare)** |
 
-(The 979 B is lower than the old 1,076 B because the deferral queue costs 96 B of SRAM. Worth it.)
+(979 B was lower than the original 1,076 B because the deferral queue costs 96 B of SRAM. The
+further drop to 970 B since is unrelated to the deferral — it's SRAM drift from the animation-VM
+work in between, not a second stack fix. Re-derive any of this yourself with
+`python3 test/host/stack_report.py --elf .pio/build/PSIPro-i2c/firmware.elf` rather than trusting
+this table as it ages.)
 
 Two guards keep it that way: a behavioural one (`compile_contract.cpp` A11 — the ISR entry point must
 not render or apply anything) and a **static** one in `run.sh`, because the behavioural test alone
@@ -198,10 +210,11 @@ hardware** — the static fact is proven, the frequency is not.
 If you are bench-testing this, that is still the thing to watch for: unexplained corruption of
 unrelated globals under heavy I2C traffic.
 
-`CONTRACT_SLIM` is **not free**. It drops five native novelty modes: 7 (i_heart_u), 9 (red_heart,
-front half), 11 (Imperial March), 19 (lightsaberBattle) and 20 (StarWarsIntro). If you want those
-modes, do not build this fork — flash Neil's upstream PSI Pro. There is no configuration of this
-fork that keeps them and fits.
+This fork used to have a `CONTRACT_SLIM` escape hatch that dropped five native novelty modes — 7
+(i_heart_u), 9 (red_heart, front half), 11 (Imperial March), 19 (lightsaberBattle) and 20
+(StarWarsIntro) — to make room when flash ran short. **That trade-off no longer exists.** All 22
+upstream modes are present in every configuration this fork builds; see "What this fork adds" below
+for how.
 
 If you are thinking of putting this near a droid: **bench-test it on a bare board and check the
 current draw before you trust it.** Neil's warning about the brightness pot and USB power still
@@ -251,6 +264,25 @@ cue renders the same way on every board in the family.
 EEPROM settings, the jumper — untouched. The contract layer only takes over the frame while it is
 armed, and hands the panel straight back to `runPattern()` on stop. This is not a rewrite.
 
+### The animation VM: modes are data now
+
+Every one of the panel's animations — all 22 upstream modes (0-21 and 92), not just the six new
+contract effects above — is PROGMEM bytecode played by one small interpreter (`include/psi_vm.h`).
+"Animations are data, the interpreter is the only animation code." `swipe` (the default idle
+pattern), `VUMeter`, and the two solid fills `allON`/`allOFF` stayed native, deliberately; everything
+else — Flash, Alarm, Leia, I Heart U, Radar, red_heart/Pulse, the Star Wars scan, Imperial March,
+Disco Ball (both variants), Short Circuit, Rebel Symbol, Knight Rider, Lightsaber Battle and the Star
+Wars Intro — is a flat opcode string, converted one mode at a time and golden-frame-gated to
+reproduce Neil's original C byte-for-byte before that C was deleted.
+
+This is why there is no `CONTRACT_SLIM` escape hatch anymore. That define used to buy back flash by
+deleting five of the heaviest hand-written mode bodies — i_heart_u, red_heart, Imperial March,
+lightsaberBattle, StarWarsIntro — because the only way to shrink a mode used to be to delete its
+function. Once every mode is PROGMEM data instead of a dedicated C function, there is nothing left to
+drop: a new animation costs tens of bytes of opcode data (plus 48 B/frame for any new bitmap art it
+needs), not a new function, and all five once-dropped modes now ship in both build configurations
+alongside the other seventeen — see "It fits", above, for current sizes.
+
 ### One bug fix, offered back
 
 While feeding longer command lines through `buildCommand()` we found a genuine out-of-bounds write in
@@ -293,17 +325,19 @@ credit him for it; not part of the contract layer either:
 | Path | Lines | What it is |
 | --- | --- | --- |
 | `src/contract/contract_core.h` | 362 | Pure, dependency-free C++: the wire parser, the beat clock, the effect math, the score table. Byte-identical across all three DroidNet forks. |
-| `src/contract/ContractPSI.h` | 412 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`DiscoBall`/`VUMeter` primitives. Adds no new render primitives of its own. |
+| `src/contract/ContractPSI.h` | 412 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`VUMeter` primitives and the `vmContractScan`/`vmContractSparkle` animation-VM shims (`include/psi_vm.h`). Adds no new render primitives of its own. |
 | `test/host/` | 724 | The host test harness (parser tests + a mock of the board API). |
 
 **Ours, inside the files above** (small hooks, all of them additive):
 
 - `src/main.cpp` — one `#include`, one `if (!contractLoopTick())` guard in `loop()`, one
   `contractPulseTick()` call, an `if (cmdString[0]=='!')` branch in `serialEvent()` and
-  `receiveEvent()`, the `buildCommand()` bounds fix, two `g_contractArmed` guards in `VUMeter()`, and
-  `#ifndef CONTRACT_SLIM` fences around five novelty modes.
-- `include/config.h` — the commented-out `CONTRACT_SLIM` flag.
-- `include/functions.h` — five prototypes for primitives the contract layer calls.
+  `receiveEvent()`, the `buildCommand()` bounds fix, and two `g_contractArmed` guards in `VUMeter()`.
+- `include/functions.h` — prototypes for the native primitives the contract layer calls.
+
+Not part of the contract layer, but ours in the same "additive layer" sense: `include/psi_vm.h`, the
+animation bytecode interpreter every mode (native and contract alike) now plays through — see "The
+animation VM: modes are data now", above.
 
 That is the whole diff. `git diff 11d69a3..HEAD -- src include` will show you exactly this.
 

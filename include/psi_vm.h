@@ -22,9 +22,9 @@
 // represent what red_heart/lightsaberBattle's native bodies actually do.
 // Task 14 added the last two pieces, the contract shims (vmContractScan/
 // vmContractSparkle, below) — every mode conversion AND the two contract
-// shims are now landed; Task 15 does the docs sweep (removing CONTRACT_SLIM
-// itself, softening stale comments elsewhere that still name scanCol/
-// DiscoBall as live primitives).
+// shims are now landed. Task 15 did the docs sweep: CONTRACT_SLIM itself is
+// deleted (include/config.h), and the stale comments elsewhere that still
+// named scanCol()/DiscoBall() as live primitives now point at these shims.
 //
 // INCLUDE ORDER (src/main.cpp ~line 355): included AFTER the global state
 // block (firstTime / patternRunning / globalPatternLoops / timingReceived /
@@ -364,7 +364,14 @@ const uint8_t vmc_knight[] PROGMEM = {
 // so no 25th quadrant (a phantom "start of pass 7") ever renders — exactly
 // mirroring why native's own state0 never re-fires past the last pass.
 // Encoded delay is native's literal 250 throughout; no compensation needed
-// once the tick OP_CLEARWAIT was missing is actually represented.
+// once the tick OP_CLEARWAIT was missing is actually represented. The
+// golden's observed steady-state cadence (286 ms, not native's literal 250)
+// is exactly two grid quantizations, not one: the 250 ms V_SHOW delay isn't
+// satisfied until the next ~26 ms poll on or after it elapses, i.e. it
+// quantizes UP to 260 ms (10 x 26); OP_CLEARWAIT's own silent tick costs one
+// more full poll on top of that (+26); 260 + 26 = 286. This is the same
+// arithmetic Dead end 2's brute-force search over `V_SHOW(D)` rediscovered
+// empirically, per step, before OP_CLEARWAIT made it literal.
 const uint8_t vmc_radar[] PROGMEM = {
   V_HCOLS(0, 5, 0, VC_RED), V_SHOW(250), OP_CLEARWAIT,
   V_HCOLS(5, 5, 0, VC_RED), V_SHOW(250), OP_CLEARWAIT,
@@ -473,19 +480,23 @@ const uint8_t vmc_pulse[] PROGMEM = {
 // extra invisible tick between states, confirming this simpler two-state
 // shape (unlike radar's) needs nothing beyond OP_CLEAR/OP_SHOW.
 //
-// LOOP ACCOUNTING (verified, not assumed — this is the one place native's
-// and the VM's counters genuinely diverge in mechanism, though not in
-// observable effect): native decrements globalPatternLoops on EVERY tick
-// (sparkle AND blank), unconditionally — a full sparkle+blank cycle costs TWO
-// decrements — and the firstTime block's `loops * 2` seed exists to cancel
-// that out (loops=30 native param -> globalPatternLoops=60 -> 60 ticks / 2
-// per cycle = 30 full cycles). vmMaybeCountLoop instead decrements ONCE per
-// full lap (it peeks the byte after a returning SHOW; only the blank tick's
-// SHOW here is immediately followed by OP_END, so only that tick's cursor
-// trips the peek) — so encoding the descriptor's loops field as 30, not 60,
-// reproduces the identical 30-cycle count with one decrement per lap instead
-// of native's two-decrements-per-lap raw-tick count. This has ZERO observable
-// effect on mode 12 either way: runtime=4 is nonzero, so vmPlay()'s tail
+// LOOP ACCOUNTING (verified, not assumed — worked an example rather than
+// eyeballed, but this is the GENERAL consequence of the VM's counting
+// mechanism, not a divergence special to DiscoBall): native decrements
+// globalPatternLoops on EVERY tick (sparkle AND blank), unconditionally — a
+// full sparkle+blank cycle costs TWO decrements — and the firstTime block's
+// `loops * 2` seed exists to cancel that out (loops=30 native param ->
+// globalPatternLoops=60 -> 60 ticks / 2 per cycle = 30 full cycles).
+// vmMaybeCountLoop instead decrements ONCE per full lap (it peeks the byte
+// after a returning SHOW; only the blank tick's SHOW here is immediately
+// followed by OP_END, so only that tick's cursor trips the peek) — so the
+// descriptor's loops field is encoded as 30, native's raw `loops` parameter
+// UNDOUBLED, not 60. That is not a special case: for any native mode whose
+// raw-tick counter is seeded `loops * N` for an N-tick lap, a once-per-lap
+// counter seeded with the same raw, undoubled `loops` reaches zero on the
+// identical lap by construction — vmc_march's 2-tick lap (mode 11, see its
+// own comment) is encoded the exact same way, with no fanfare. This has ZERO
+// observable effect on mode 12 either way: runtime=4 is nonzero, so vmPlay()'s tail
 // ALWAYS takes the globalTimerDonedoRestoreDefault branch — native's own
 // epilogue has the identical `if ((runtime==0) && !timingReceived) { if
 // (loops) ... } else { globalTimerDonedoRestoreDefault(); }` shape, so the

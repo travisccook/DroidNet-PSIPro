@@ -3,6 +3,15 @@
 #include <assert.h>
 #include <stdio.h>
 
+// Name-hiding regression guard (see test/host/run.sh stage [7/7]'s own comment for the full
+// story): FastLED declares RGB as an ENUMERATOR of EOrder, which silently hides any `struct
+// RGB` sharing the name — the real cross-compile caught exactly this once, when the shared
+// contract core still defined `struct RGB` and every plain use of the type failed to build.
+// This mock's own EOrder must keep RGB as a plain integral enumerator; if a `struct RGB` (or
+// anything else) ever shadowed it again, `(int)RGB` would stop compiling here first, on the
+// host, for free.
+static_assert((int)RGB == 0012, "EOrder::RGB must remain a valid enumerator, not a shadowed type");
+
 static int g_hookCalls = 0;
 static uint8_t g_hookScale = 0;
 static void hook(const CRGB*, int, uint8_t s) { g_hookCalls++; g_hookScale = s; }
