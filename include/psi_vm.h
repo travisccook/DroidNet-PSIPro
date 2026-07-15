@@ -1228,8 +1228,18 @@ static void vmContractScan(unsigned long d, const CRGB& col) {
   }
   if (checkDelay()) {
     if (ledPatternState >= 0 && ledPatternState <= COLUMNS - 1) {
+      // Native's per-case allOFF(true) in FULL — not just its clear+show.
+      // allOFF's body (src/main.cpp) ends with `if ((runtime != 0) ||
+      // (timingReceived)) globalTimerDonedoRestoreDefault();`, and scanCol
+      // called it with runtime defaulted to 0, so the tail reduces to the
+      // timingReceived branch below — inherited by scanCol on EVERY gated
+      // tick even though scanCol's own body never names timingReceived.
+      // (allOFF's firstTime block is dead here: the shim's own firstTime
+      // block above has already cleared the flag, exactly as native
+      // scanCol's had by the time its cases ran.)
       FastLED.clear();
-      FastLED.show();                // native's per-case allOFF(true): clear + bare show
+      FastLED.show();                // native allOFF(true): clear + bare show
+      if (timingReceived) globalTimerDonedoRestoreDefault();
       fill_column((uint8_t)ledPatternState, col, 0);
       vmShowDelay(d);
     }
@@ -1239,10 +1249,11 @@ static void vmContractScan(unsigned long d, const CRGB& col) {
       globalPatternLoops--;
     }
   }
-  // native scanCol() has no runtime/loops epilogue at all (no
-  // loopsDonedoRestoreDefault/globalTimerDonedoRestoreDefault call anywhere in
-  // its body) and never references timingReceived — globalPatternLoops
-  // decrements for bookkeeping only. Nothing to mirror here.
+  // native scanCol()'s OWN body has no runtime/loops epilogue (no
+  // loopsDonedoRestoreDefault/globalTimerDonedoRestoreDefault call of its
+  // own, and no reference to timingReceived) — globalPatternLoops decrements
+  // for bookkeeping only. Its ONE timing conditional is the inherited
+  // allOFF(true) tail mirrored above, inside the gated tick.
 }
 
 static void vmContractSparkle(unsigned long d, const CRGB& col) {
