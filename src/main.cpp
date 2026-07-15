@@ -1042,6 +1042,10 @@ void runPattern(int pattern) {
       // Set loops to 0 to remain on indefinately.
       VUMeter(250, 0, 0);
       break;
+    case 22:          // 22 - Processing sweep (fork addition — not an upstream mode; the
+                       // marginal-cost demo, see vmc_process's comment in include/psi_vm.h)
+      vmPlay(VMP_PROCESS);
+      break;
     default:
       // Reset back to the state before calling this function
       DEBUG_PRINT("Pattern "); DEBUG_PRINT(pattern); DEBUG_PRINT_LN(" not valid.  Ignoring");

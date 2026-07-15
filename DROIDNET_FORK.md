@@ -20,7 +20,8 @@ working exactly as they did.
   (swipe/VUMeter/allON/allOFF) is PROGMEM bytecode played by `include/psi_vm.h`'s interpreter (the
   contract effects remain parametric C++ renderers; CE_SCAN/CE_SPARKLE via hand-written shims in
   psi_vm.h), and that is what makes both fit. See README, "Building" and "The animation VM: modes
-  are data now".
+  are data now". Mode 22 ("processing sweep") is a fork-added demo animation, not one of the 23
+  upstream modes — it exists to measure the marginal cost of a new one: 94 B, both configs.
 - **Seeded from:** the private C2B5 droid working collection @ `2fbd4023` (subdir `PSIPro`),
   2026-07-12, git-tracked files only. That collection is where the PlatformIO restructuring of Neil's
   flat Arduino sketch and the `visualizer/` came from.

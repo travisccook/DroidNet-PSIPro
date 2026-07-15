@@ -799,6 +799,40 @@ const uint8_t vmc_swintro[] PROGMEM = {
   OP_END,
 };
 
+// Mode 22 (fork addition, unused by upstream — see the dispatch case in
+// src/main.cpp): "processing sweep" — a gold column wipe left-to-right, then
+// a white full-panel blink. Not a conversion of any native mode; there is no
+// native reference to trace, so THIS PROGMEM array + its descriptor below
+// (five bytes: code pointer, loops, runtime, flags) ARE the reference —
+// captured straight into test/host/golden/ as a regression lock, same as
+// every converted program's golden, just without a native golden to diff
+// against first. Exists to make the marginal-cost claim in README's "The
+// animation VM: modes are data now" section measurable, not just asserted:
+// the flash delta THIS commit produces (this array + the descriptor row +
+// one dispatch case, nothing else touched) is the price of one new
+// animation. loops=3 (three full column-wipe-then-blink laps; VMF_CLEAR's
+// entry blackout only fires once, on firstTime, same as every other
+// VMF_CLEAR program above — not repeated per lap) and runtime=0 (no timer;
+// the descriptor's loops field alone drives reversion via
+// loopsDonedoRestoreDefault(), exactly like vmc_pulse/vmc_iheartu/
+// vmc_redheart above), both authored choices, not measurements of anything
+// native. VMF_CLEAR gives it the same "blackout, then first content frame"
+// entry shape every other converted program above already has, so it reads
+// as one more member of the family rather than a special case.
+const uint8_t vmc_process[] PROGMEM = {
+  OP_CLEAR, V_FCOLS(0, 1, VC_GOLD), V_SHOW(120),
+  V_FCOLS(1, 1, VC_GOLD), V_SHOW(120),
+  V_FCOLS(2, 1, VC_GOLD), V_SHOW(120),
+  V_FCOLS(3, 1, VC_GOLD), V_SHOW(120),
+  V_FCOLS(4, 1, VC_GOLD), V_SHOW(120),
+  V_FCOLS(5, 1, VC_GOLD), V_SHOW(120),
+  V_FCOLS(6, 1, VC_GOLD), V_SHOW(120),
+  V_FCOLS(7, 1, VC_GOLD), V_SHOW(120),
+  V_FCOLS(8, 1, VC_GOLD), V_SHOW(120),
+  V_FCOLS(9, 1, VC_GOLD), V_SHOW(120),
+  OP_FILL_ALL, VC_W, V_SHOW(150), OP_CLEAR, V_SHOW(150), OP_END,
+};
+
 // ---------------------------------------------------------------------------
 // Program descriptors.
 // ---------------------------------------------------------------------------
@@ -819,6 +853,11 @@ enum {
   VMP_FLASH = 0, VMP_ALARM, VMP_LEIA, VMP_SWSCAN, VMP_KNIGHT, VMP_RADAR,
   VMP_REBEL, VMP_PULSE, VMP_DISCO4, VMP_DISCOINF, VMP_FADEOUT,
   VMP_IHEARTU, VMP_REDHEART, VMP_MARCH, VMP_SABER, VMP_SWINTRO,
+  // VMP_PROCESS (Task 16, fork addition — not an upstream mode; see vmc_process's
+  // own comment above and the mode 22 dispatch case in src/main.cpp) is appended
+  // last, after every conversion task's id, same append-only rule as VC_*/BM_*/
+  // FP_*/the opcode enum: a shipped id's numeric value must never move.
+  VMP_PROCESS,
 };
 
 const VmProg vmProgs[] PROGMEM = {
@@ -838,6 +877,7 @@ const VmProg vmProgs[] PROGMEM = {
   { vmc_march,    42, 47, VMF_CLEAR },               // VMP_MARCH    (mode 11) — was march(0xffffff, 552, 42, 47)
   { vmc_saber,     0, 0,  VMF_CLEAR | VMF_ONESHOT }, // VMP_SABER    (mode 19) — was lightsaberBattle(250)
   { vmc_swintro,   4, 10, VMF_CLEAR },               // VMP_SWINTRO  (mode 20) — was StarWarsIntro(500, 4, 0xC8AA00, 10)
+  { vmc_process,   3, 0,  VMF_CLEAR },               // VMP_PROCESS  (mode 22) — fork addition, no native equivalent; see vmc_process's comment
 };
 
 #ifndef PSI_VM_TABLES_ONLY

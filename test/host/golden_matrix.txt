@@ -26,3 +26,4 @@ mode21_vu4        0T21 8000  front 00,01,14 512
 mode92_vuinf      0T92 8000  front 00,01,14 512
 mode02_alwayson   0T2  8000  front ff,ff,ff 512
 mode19_alwayson   0T19 12000 front ff,ff,ff 512
+mode22_process    0T22 15000 front 00,01,14 512

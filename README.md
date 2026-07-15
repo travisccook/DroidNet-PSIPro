@@ -286,7 +286,10 @@ lightsaberBattle, StarWarsIntro — because the only way to shrink a mode used t
 function. With every once-droppable mode now PROGMEM data instead of a dedicated C function, there is
 nothing left to drop: a new animation costs tens of bytes of opcode data (plus 48 B/frame for any new
 bitmap art it needs), not a new function, and all five once-dropped modes now ship in both build
-configurations alongside the other eighteen — see "It fits", above, for current sizes.
+configurations alongside the other eighteen — see "It fits", above, for current sizes. Proved, not just
+asserted: mode 22 ("processing sweep", a fork addition — not one of the 23 upstream modes above) is a
+new standalone animation added as pure `vmc_process` data plus one dispatch case, at a measured cost of
+94 B in both build configurations.
 
 ### One bug fix, offered back
 
