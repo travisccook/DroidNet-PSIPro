@@ -3,20 +3,22 @@
 # bolted onto Neil Hutchison's PSI Pro firmware. Copyright (c) 2026 Travis Cook.
 # SPDX-License-Identifier: MIT
 #
-# Host checks for the PSI Pro contract fork (stages 1-6 need no hardware and no toolchain; stage 7 is the real cross-compile):
+# Host checks for the PSI Pro contract fork (stages 1-8 need no hardware and no toolchain; stage 9 is the real cross-compile):
 #   1. contract_core.h parser unit tests
 #   2. psi_vm.h decode-walk test (every VM program: known ops, in-bounds arities, reaches OP_END)
 #   3. ContractPSI.h firmware-layer type-check against a mock of the MaxPSI board API
 #   4. command-buffer width guard (the v1.2 accent keys push a scored line past 63 chars)
 #   5. parser fuzz + differential (ASan/UBSan)
 #   6. golden-frame parity against the committed captures (test/host/golden/)
-#   7. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
+#   7. scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock
+#   8. HSV oracle: CE_RAINBOW (CHSV->CRGB) == FastLED 3.5.0 hsv2rgb_rainbow (full cube)
+#   9. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
 set -e
 cd "$(dirname "$0")"
-echo "[1/7] contract_core parser unit tests"
+echo "[1/9] contract_core parser unit tests"
 clang++ -std=c++17 -Wall -Wextra -O0 test_contract_core.cpp -o /tmp/psi_contract_test
 /tmp/psi_contract_test
-echo "[2/7] psi_vm.h decode-walk test"
+echo "[2/9] psi_vm.h decode-walk test"
 # Structural check of every VM program (test/host/test_psi_vm.cpp): ops are known,
 # arities consume in-bounds bytes, every program reaches OP_END within its array. Built
 # in PSI_VM_TABLES_ONLY mode (defined by the test file itself) — no firmware globals, no
@@ -24,7 +26,7 @@ echo "[2/7] psi_vm.h decode-walk test"
 clang++ -std=c++17 -O1 -fsigned-char -fsanitize=address,undefined \
         -I . -I native_mocks test_psi_vm.cpp -o /tmp/psi_vm_decode
 /tmp/psi_vm_decode
-echo "[3/7] ContractPSI.h firmware type-check"
+echo "[3/9] ContractPSI.h firmware type-check"
 # BOTH configurations. This fork is serial-only by default (include/config.h, I2C INTAKE),
 # and I2C is an opt-in -D. An option nobody compiles is an option that rots, so check both:
 # the serial-only build is what ships, and the I2C build is what anyone with a MarcDuino on
@@ -34,7 +36,7 @@ clang++ -std=c++17 -Wall -Wextra compile_contract.cpp -o /tmp/psi_fw_syntax
 clang++ -std=c++17 -Wall -Wextra -D PSI_ENABLE_I2C compile_contract.cpp -o /tmp/psi_fw_syntax_i2c
 /tmp/psi_fw_syntax_i2c
 
-echo "[4/7] command-buffer width guard"
+echo "[4/9] command-buffer width guard"
 # buildCommand() (src/main.cpp) DROPS every byte past CMD_MAX_LENGTH-1 and terminates
 # there — an over-long line is SILENTLY TRUNCATED and then parsed as if complete. The
 # longest scored line the Studio emitter can produce must therefore fit, with its NUL.
@@ -81,7 +83,7 @@ if ! grep -q 'contractServicePending()' ../../src/main.cpp; then
 fi
 echo "I2C deferral: the ISR queues, loop() services (no parse/render in interrupt context) OK"
 
-echo "[5/7] parser fuzz + differential (ASan/UBSan, deterministic)"
+echo "[5/9] parser fuzz + differential (ASan/UBSan, deterministic)"
 # The parsers are the one place this project eats bytes off a shared, noisy serial bus, and to
 # save 1,008 B of flash on the PSI they were hand-rolled instead of using strtol/strtoul. This
 # stage is the differential that keeps them honest: ~1.55M checks against an INDEPENDENT model
@@ -93,7 +95,7 @@ clang++ -std=c++17 -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
         fuzz_parsers.cpp -o /tmp/psipro_fuzz
 /tmp/psipro_fuzz
 
-echo "[6/7] golden-frame parity: mocks + Neil's animation code must reproduce"
+echo "[6/9] golden-frame parity: mocks + Neil's animation code must reproduce"
 echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # The FULL-variant binary (built via mk_full_config.sh's shadowed config.h — a
 # historical CONTRACT_SLIM strip that is now a documented no-op, see that script) is
@@ -140,7 +142,25 @@ if [ "$matrix_names" != "$golden_names" ]; then
   exit 1
 fi
 
-echo "[7/7] REAL cross-compile (ATmega32U4 (SparkFun Pro Micro)) -- optional"
+echo "[7/9] scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock"
+# include/FastLED.h replaced FastLED with a from-scratch WS2812 driver. The 31 goldens
+# gate the firmware's STAGING against native_mocks/FastLED.h, NOT against that driver, so
+# on their own they say nothing about the swap. This oracle is the bridge: it holds the
+# driver's scale8 / scale8_video / nscale8x3_video / qmul8 to BOTH references over all
+# 256*256 inputs -- equal to the mock means every golden transfers to the driver, equal
+# to FastLED 3.5.0 means the panel sees what stock FastLED drew. Self-contained.
+clang++ -std=c++17 -O1 -fsigned-char -Wall -Wextra test_scale_oracle.cpp -o /tmp/psi_scale_oracle
+/tmp/psi_scale_oracle
+
+echo "[8/9] HSV oracle: CE_RAINBOW (CHSV->CRGB) == FastLED 3.5.0 hsv2rgb_rainbow"
+# The firmware's one CHSV call site (CE_RAINBOW, ContractPSI.h:216) is covered by no
+# golden. If the driver's rainbow drifted from FastLED's, CE_RAINBOW's hue mapping -- and
+# the Studio visualiser's JS parity vectors -- would drift with it. Full 256^3 cube plus
+# the s=v=255 call-site sweep; a nonzero diff fails the suite (set -e).
+clang++ -std=c++17 -O2 -fsigned-char -Wall -Wextra test_hsv_oracle.cpp -o /tmp/psi_hsv_oracle
+/tmp/psi_hsv_oracle
+
+echo "[9/9] REAL cross-compile (ATmega32U4 (SparkFun Pro Micro)) -- optional"
 # THIS is the stage that makes "it compiles" a claim about the FIRMWARE rather than a claim
 # about our mock. Stages 1-6 are host checks: they prove the contract logic, fuzz the
 # parsers, gate the golden frames, and pin the board API against a HAND-WRITTEN MOCK -- and

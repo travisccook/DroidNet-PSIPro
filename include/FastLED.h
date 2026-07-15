@@ -48,11 +48,18 @@
 #ifndef DROIDNET_FASTLED_H
 #define DROIDNET_FASTLED_H
 
+#include <stdint.h>
+#include <string.h>
+#if defined(__AVR__)
 #include <Arduino.h>            // also supplies `byte` etc. to functions.h, as FastLED.h did
 #include <avr/io.h>
 #include <avr/interrupt.h>
-#include <string.h>
-#include <stdint.h>
+#endif
+// The colour types and 8-bit math below are pure and host-portable: the scale/HSV
+// oracles (test/host/test_scale_oracle.cpp, test_hsv_oracle.cpp) include THIS file
+// on the host and hold these exact functions to the vendored FastLED 3.5.0 source.
+// Only the WS2812 controller (emitter, pin/timer access) is AVR-only and is guarded
+// out on the host — the AVR build is byte-for-byte unchanged by that guard.
 
 // ---------------------------------------------------------------------------
 // lib8tion-compatible 8-bit math.
@@ -252,6 +259,7 @@ enum EOrder { RGB = 0012, RBG = 0021, GRB = 0102, GBR = 0120, BRG = 0201, BGR = 
 // FastLED.addLeds<WS2812, PIN, ORDER>(...) call site unchanged.
 struct WS2812 {};
 
+#if defined(__AVR__)  // WS2812 controller: AVR-only (pin access + cycle-exact bit-bang + timer)
 class CFastLED {
 public:
   // Compile-time pin binding, like FastLED's. This firmware only ever drives
@@ -408,5 +416,6 @@ uint8_t CFastLED::sWire[(size_t)CFastLED::kMaxLeds * 3 + 1];
 // Single-TU firmware (src/main.cpp is the only compiled unit; the other headers are
 // #included into it), so defining the instance in the header is safe.
 static CFastLED FastLED;
+#endif  // defined(__AVR__)
 
 #endif  // DROIDNET_FASTLED_H
