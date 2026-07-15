@@ -15,21 +15,15 @@
 // (see docs/superpowers/plans/2026-07-14-psi-animation-vm.md), never all at
 // once.
 //
-// STATUS (this file, Task 6 of that plan): the opcode enum below is decided
-// IN FULL — every op through the last conversion task (Task 13) is reserved
-// now, in this order, so a program's byte layout never shifts under a later
-// diff and the decode-walk test's arity table (test/host/test_psi_vm.cpp)
-// never has to renumber anything it already pinned. What is NOT here yet:
-// vmStep() case bodies for the ops no shipped program uses (OP_FILL_ROW/
-// OP_FILL_COLR land in Task 8, OP_HALFCOLR in Task 9, OP_PIX/OP_FRAME in
-// Task 10, OP_SPARKLE in Task 11, OP_SCALE_RAND/OP_MUL_RAND in Task 12), the
-// bitmap tables (vmBitmaps/vmFramePals/BM_*/FP_*, Task 10 — introducing them
-// now would revive PROGMEM bitmaps before any native code is deleted and
-// squeeze the I2C env), every program but the two flash variants, and the
-// contract shims (vmContractScan/vmContractSparkle, Task 14). vmPlay() is
-// not called from anywhere yet either — src/main.cpp's runPattern() dispatch
-// is untouched until Task 7. So: fully-specified interface, partially-built
-// engine, zero behavior change.
+// STATUS (this file, Task 6 of that plan): the opcode enum below was decided
+// IN FULL through Task 13's original scope — but Task 13 itself found it
+// needed one more, OP_SHOWLIVE (see its own comment, below), for the same
+// reason Task 9 needed OP_CLEARWAIT: no combination of the existing ops could
+// represent what red_heart/lightsaberBattle's native bodies actually do.
+// What is NOT here yet: the contract shims (vmContractScan/
+// vmContractSparkle, Task 14). Every mode-conversion task through Task 13 is
+// now landed; Task 15 does the docs sweep (removing CONTRACT_SLIM itself,
+// softening stale comments).
 //
 // INCLUDE ORDER (src/main.cpp ~line 355): included AFTER the global state
 // block (firstTime / patternRunning / globalPatternLoops / timingReceived /
@@ -121,36 +115,40 @@ const uint8_t vmPalette[VC__COUNT][3] PROGMEM = {
 };
 
 // ---------------------------------------------------------------------------
-// Bitmap ids + blit palettes for OP_FRAME. Task 10 introduces only what modes
-// 14 (rebel) and 9-rear (Pulse) need — BM_REBEL/BM_PULSE and the FP_HEART/
-// FP_PULSE palettes below. The lightsaber (22 frames) and I/Heart/U letter
-// bitmaps arrive with the tasks that convert those modes (Task 13); pulling
-// them in now would revive +1,056 B of PROGMEM the slim build currently
-// keeps stripped, for no shipped program, and squeeze the I2C env's already
-// tight headroom. These two enums are plain integer constants baked into
-// vmc_rebel/vmc_pulse's PROGMEM bytes via V_FRAME() (they cost nothing to
-// declare), so they live out here with the other tables; the vmBitmaps
-// POINTER table itself — which must reference the real `rebel`/`pulse`
-// PROGMEM byte arrays declared in matrices.h — lives inside the
-// PSI_VM_TABLES_ONLY fence below, next to vmColor(). See that table's own
-// comment for why: unlike a mere declaration, an initialized global pointer
-// table is real data that needs `rebel`/`pulse` to actually be DEFINED in
-// the same translation unit, which is true in the firmware build (matrices.h
-// precedes this header, main.cpp ~line 289 vs ~line 359) but not in the
-// decode-walk test (PSI_VM_TABLES_ONLY, no matrices.h).
+// Bitmap ids + blit palettes for OP_FRAME. Task 10 introduced BM_REBEL/
+// BM_PULSE + FP_HEART/FP_PULSE. Task 13 Part 1 (this commit) appends
+// BM_I/BM_HEART/BM_U — I/Heart/U reuse FP_HEART unchanged
+// (displayMatrixColor(LetterI/Heart/LetterU, 0xff0000, 0x909497, ...) is the
+// same fg/bg pair rebel already uses, verified against i_heart_u/red_heart's
+// own call sites in src/main.cpp before this task deleted them). Task 13
+// Part 2 (next commit) appends BM_LS0..BM_LS21 (the lightsaber's 22 frames)
+// + FP_SABER/FP_CLASH — deferred to its own commit so the +1,056 B PROGMEM
+// it revives lands only after Part 1's native deletions (i_heart_u/
+// red_heart/march) have already shrunk both envs, making the I2C squeeze
+// visible as its own step. New ids are always APPENDED (never inserted),
+// same append-only rule as the opcode enum below — a shipped program's
+// PROGMEM bytes already bake in the numeric id, so renumbering an earlier id
+// would silently corrupt it.
 // BM__COUNT / FP__COUNT are zero-cost sentinels (compile-time constants only,
 // never stored): the decode-walk test bounds-checks every OP_FRAME operand
 // against them, and the static_asserts below pin each table's row count to
-// its enum — so when Task 13 grows both (lightsaber/letter bitmaps, saber
-// palettes), adding an enumerator without its table row (or vice versa)
-// fails the BUILD, not a later golden run.
-enum { BM_REBEL = 0, BM_PULSE, BM__COUNT };
+// its enum — so adding an enumerator without its table row (or vice versa)
+// fails the BUILD, not a later golden run. The vmBitmaps POINTER table
+// itself — which must reference the real PROGMEM byte arrays declared in
+// matrices.h — lives inside the PSI_VM_TABLES_ONLY fence below, next to
+// vmColor(). See that table's own comment for why: unlike a mere
+// declaration, an initialized global pointer table is real data that needs
+// those symbols to actually be DEFINED in the same translation unit, which
+// is true in the firmware build (matrices.h precedes this header, main.cpp
+// ~line 289 vs ~line 359) but not in the decode-walk test
+// (PSI_VM_TABLES_ONLY, no matrices.h).
+enum { BM_REBEL = 0, BM_PULSE, BM_I, BM_HEART, BM_U, BM__COUNT };
 
 // Bitmap blit palettes: {fg, bg, color2, color3, color4} color ids, indexed
 // by OP_FRAME's palId operand.
 enum { FP_HEART = 0, FP_PULSE, FP__COUNT };
 const uint8_t vmFramePals[][5] PROGMEM = {
-  { VC_RED,     VC_GREYBG,  VC_K, VC_K, VC_K },  // rebel (mode 14); also I/Heart/U's fg/bg (Task 13)
+  { VC_RED,     VC_GREYBG,  VC_K, VC_K, VC_K },  // rebel (mode 14); also I/Heart/U's fg/bg
   { VC_PULSEFG, VC_PULSEBG, VC_K, VC_K, VC_K },  // pulse trace (mode 9 rear)
 };
 static_assert(sizeof(vmFramePals) / sizeof(vmFramePals[0]) == FP__COUNT,
@@ -202,6 +200,29 @@ enum {
   // being enough). Nothing about vmStep()'s existing ops, loop mechanics, or
   // any shipped program changes; this is additive only.
   OP_CLEARWAIT,    //                       stage all-black, KEEP delay/loop state, RETURN (no show)
+  // OP_SHOWLIVE is the second genuine, unplanned addition (an 18th op),
+  // added here in Task 13 for the same class of reason OP_CLEARWAIT was:
+  // no combination of the existing ops represents what red_heart() and
+  // lightsaberBattle() actually do. Both call displayMatrixColor(...,
+  // displayMe=true, ...) — which itself calls FastLED.show(brightness())
+  // — and THEN, unconditionally, their own shared
+  // `if (updateLed) { FastLED.show(brightness()); set_delay(time_delay); }`
+  // tail fires too, since updateLed is set regardless of displayMe. That is
+  // a real double show(brightness()) in the SAME checkDelay()-gated tick —
+  // proven against the golden, not assumed: mode09_heart_f.psig frames 1-2
+  // are bit-identical, same t_ms, both scale 20 (LIVE brightness, i.e. the
+  // EEPROM-derived value, not the frozen boot-time scale OP_SHOWNOW's bare
+  // FastLED.show() would render — this golden's replay row uses an internal
+  // brightness of 20 while the compiled boot default is 10, so the two are
+  // NOT numerically interchangeable here, ruling out reusing OP_SHOWNOW for
+  // this shape). OP_SHOWLIVE closes that gap: like OP_SHOWNOW it shows and
+  // falls through without arming a delay or returning, but with LIVE
+  // brightness() instead of a bare call — mirroring displayMatrixColor's own
+  // displayMe=true branch exactly. A program pairs it with a normal OP_SHOW
+  // right after (see vmc_redheart/vmc_saber) to reproduce the second,
+  // delay-arming show. Nothing about vmStep()'s existing ops, loop
+  // mechanics, or any shipped program changes; this is additive only.
+  OP_SHOWLIVE,     //                       show(brightness()) now, KEEP RUNNING (no set_delay, no return)
 };
 
 // Encoding helpers.
@@ -559,6 +580,87 @@ const uint8_t vmc_fadeout[] PROGMEM = {
   OP_END,
 };
 
+// Mode 7: I <heart> U — was i_heart_u(500, 3, 0). Native (src/main.cpp,
+// deleted by this task): firstTime sets globalPatternLoops = loops (3, NOT
+// doubled — contrast vmc_march below) and allOFF(true) (VMF_CLEAR shape,
+// golden frame 0: t=1, scale=10, all-black). Six ledPatternState steps per
+// lap, each a SINGLE show (unlike red_heart below): 0=LetterI, 1=blank,
+// 2=Heart, 3=blank, 4=LetterU, 5=blank — every displayMatrixColor call here
+// passes displayMe=false (`displayMatrixColor(LetterI, 0xff0000, 0x909497,
+// false, 0)`), so only the shared `if (updateLed) { FastLED.show(brightness());
+// set_delay(time_delay); }` tail shows, once per state — no OP_SHOWLIVE
+// needed here (contrast red_heart, which passes displayMe=true). time_delay
+// is the constant 500 param throughout; no per-state override exists in this
+// function. Loop decrements once per 6-state lap (state wraps 5->0), matching
+// VMF_CLEAR's default wrap-point (program start — no OP_LOOPSTART needed,
+// the whole 6-state program IS the loop body) with loops=3 directly.
+// Golden-verified: mode07_iheartu.psig has 18 content frames (6 states x 3
+// loops) after the entry blackout, then frame 19 (t=8866) is the first
+// reverted swipe frame.
+const uint8_t vmc_iheartu[] PROGMEM = {
+  V_FRAME(BM_I, FP_HEART),     V_SHOW(500),
+  OP_CLEAR,                    V_SHOW(500),
+  V_FRAME(BM_HEART, FP_HEART), V_SHOW(500),
+  OP_CLEAR,                    V_SHOW(500),
+  V_FRAME(BM_U, FP_HEART),     V_SHOW(500),
+  OP_CLEAR,                    V_SHOW(500),
+  OP_END,
+};
+
+// Mode 9 (front): flashing red heart — was red_heart(500, 3, 0). Same
+// six-state skeleton as vmc_iheartu (globalPatternLoops = loops directly, no
+// doubling; VMF_CLEAR entry), but EVERY displayMatrixColor call here passes
+// displayMe=true (`displayMatrixColor(Heart, 0xff0000, 0x909497, true, 0)`)
+// on states 0/2/4 — so those three states show TWICE in the same tick: once
+// inside displayMatrixColor itself (displayMe=true's own `FastLED.show
+// (brightness())`), then again via the shared updateLed tail, exactly like
+// every other state's single show. This is genuinely a live-brightness
+// double show, not OP_SHOWNOW's frozen-boot-scale one (see OP_SHOWLIVE's
+// enum comment for the golden proof) — encoded as OP_SHOWLIVE immediately
+// after the frame stage, then a normal V_SHOW(500) for the second show +
+// delay. States 1/3/5 (allOFF(false), displayMe N/A) show once, same as
+// vmc_iheartu's blanks. Golden-verified: mode09_heart_f.psig frames 1-2 are
+// bit-identical duplicates (t=1, scale=20 — LIVE, not the frozen boot value
+// 10), and the full capture has 27 content frames (9 double-shows + 9
+// single blanks, 3 loops x 3 heart-states) before frame 28 (t=8866) reverts
+// to swipe — matching loops=3 directly, same accounting as vmc_iheartu.
+const uint8_t vmc_redheart[] PROGMEM = {
+  V_FRAME(BM_HEART, FP_HEART), OP_SHOWLIVE, V_SHOW(500),
+  OP_CLEAR,                                 V_SHOW(500),
+  V_FRAME(BM_HEART, FP_HEART), OP_SHOWLIVE, V_SHOW(500),
+  OP_CLEAR,                                 V_SHOW(500),
+  V_FRAME(BM_HEART, FP_HEART), OP_SHOWLIVE, V_SHOW(500),
+  OP_CLEAR,                                 V_SHOW(500),
+  OP_END,
+};
+
+// Mode 11: Imperial March — was march(0xffffff, 552, 42, 47). Native
+// (src/main.cpp, deleted by this task): firstTime sets globalPatternLoops =
+// loops * 2 (84) and allOFF(true) (VMF_CLEAR, golden frame 0: t=1, scale=10,
+// all-black, followed SAME TICK by the first content frame — golden frame 1
+// is also t=1). Two ledPatternState steps, toggling every tick: state 0
+// lights columns 0-4 white / 5-9 black; state 1 the mirror image. Unlike
+// every other converted mode, globalPatternLoops decrements EVERY tick here
+// (both states), unconditionally, right after the toggle — a full 2-state
+// lap costs native TWO decrements, so the native `loops` PARAMETER (42) is
+// what vmMaybeCountLoop's once-per-lap accounting should encode directly
+// (42 laps x 2 ticks/lap = 84 ticks, matching native's raw 84-tick budget
+// exactly) — no OP_LOOPSTART needed, the whole 2-state program is the loop
+// body. In practice this loop count is UNOBSERVABLE either way: runtime=47
+// is nonzero, so both native's tail (`if ((runtime==0)&&(!timingReceived))
+// ... else globalTimerDonedoRestoreDefault();`) and vmPlay()'s identical-
+// shape tail always take the timer branch, never the loop-count branch —
+// confirmed against the golden: mode11_march.psig shows content through
+// frame 83 (t=46,...) and reverts at frame 84 (t=47034), well short of a
+// theoretical 84-tick loop exhaustion (which 552 ms/tick would reach around
+// t=46,368 give or take — close, but it's the 47 s wall clock that actually
+// fires first, same shape as mode 12/14's timer-always-wins precedent).
+const uint8_t vmc_march[] PROGMEM = {
+  V_FCOLS(0, 5, VC_W), V_FCOLS(5, 5, VC_K), V_SHOW(552),
+  V_FCOLS(0, 5, VC_K), V_FCOLS(5, 5, VC_W), V_SHOW(552),
+  OP_END,
+};
+
 // ---------------------------------------------------------------------------
 // Program descriptors.
 // ---------------------------------------------------------------------------
@@ -578,6 +680,7 @@ struct VmProg {
 enum {
   VMP_FLASH = 0, VMP_ALARM, VMP_LEIA, VMP_SWSCAN, VMP_KNIGHT, VMP_RADAR,
   VMP_REBEL, VMP_PULSE, VMP_DISCO4, VMP_DISCOINF, VMP_FADEOUT,
+  VMP_IHEARTU, VMP_REDHEART, VMP_MARCH,
 };
 
 const VmProg vmProgs[] PROGMEM = {
@@ -592,6 +695,9 @@ const VmProg vmProgs[] PROGMEM = {
   { vmc_disco,    30, 4,  VMF_CLEAR },               // VMP_DISCO4   (mode 12) — was DiscoBall(150, 30, 3, CRGB::Grey, 4)
   { vmc_disco,     0, 0,  VMF_CLEAR },               // VMP_DISCOINF (mode 13) — was DiscoBall(150, 0, 3, CRGB::Grey, 0)
   { vmc_fadeout,   1, 0,  VMF_IGNORE_TIMING },       // VMP_FADEOUT  (mode 4)  — was FadeOut(257, 3) — see vmc_fadeout's comment for the loop-tail quirk
+  { vmc_iheartu,   3, 0,  VMF_CLEAR },               // VMP_IHEARTU  (mode 7)  — was i_heart_u(500, 3, 0)
+  { vmc_redheart,  3, 0,  VMF_CLEAR },               // VMP_REDHEART (mode 9 front) — was red_heart(500, 3, 0)
+  { vmc_march,    42, 47, VMF_CLEAR },               // VMP_MARCH    (mode 11) — was march(0xffffff, 552, 42, 47)
 };
 
 #ifndef PSI_VM_TABLES_ONLY
@@ -614,18 +720,21 @@ static CRGB vmColor(uint8_t id) {
   }
 }
 
-// OP_FRAME's bitmap pointer table — indexed by BM_REBEL/BM_PULSE (declared
-// with the rest of the bitmap/palette tables, above). Lives inside this
-// fence, unlike vmFramePals/BM_*/FP_*, because it is a POINTER table: each
-// entry is the real address of `rebel`/`pulse`, the PROGMEM byte arrays
-// matrices.h declares — real data, not just a declaration, so linking it
-// requires those two symbols to actually be defined in this translation
-// unit. The firmware build satisfies that (matrices.h precedes this header's
-// include point, main.cpp ~line 289 vs ~line 359); the decode-walk test
-// (PSI_VM_TABLES_ONLY) does not include matrices.h at all, which is exactly
-// why this table — like vmColor() above, for the same "needs firmware-only
-// symbols" reason — sits behind the fence instead of with the other tables.
-const byte* const vmBitmaps[] PROGMEM = { rebel, pulse };
+// OP_FRAME's bitmap pointer table — indexed by BM_REBEL/BM_PULSE/BM_I/
+// BM_HEART/BM_U (declared with the rest of the bitmap/palette tables,
+// above). Lives inside this fence, unlike vmFramePals/BM_*/FP_*, because it
+// is a POINTER table: each entry is the real address of `rebel`/`pulse`/
+// `LetterI`/`Heart`/`LetterU`, the PROGMEM byte arrays matrices.h declares —
+// real data, not just a declaration, so linking it requires those symbols to
+// actually be defined in this translation unit. The firmware build
+// satisfies that (matrices.h precedes this header's include point, main.cpp
+// ~line 289 vs ~line 359); the decode-walk test (PSI_VM_TABLES_ONLY) does
+// not include matrices.h at all, which is exactly why this table — like
+// vmColor() above, for the same "needs firmware-only symbols" reason — sits
+// behind the fence instead of with the other tables. Referencing LetterI/
+// Heart/LetterU here is what actually revives their 48 B-each PROGMEM
+// bitmaps (the enum ids above cost nothing by themselves).
+const byte* const vmBitmaps[] PROGMEM = { rebel, pulse, LetterI, Heart, LetterU };
 static_assert(sizeof(vmBitmaps) / sizeof(vmBitmaps[0]) == BM__COUNT,
               "vmBitmaps must have exactly one entry per BM_* id (BM__COUNT)");
 
@@ -744,6 +853,14 @@ static void vmStep() {
         // frame 0: scale 10 committed vs 20 from an earlier show(brightness())
         // draft here) — do not "fix" this to show(brightness()).
         FastLED.show();
+        break;
+      case OP_SHOWLIVE:
+        // show(brightness()), NOT a bare show() — mirrors displayMatrixColor's
+        // own displayMe=true tail (`if (displayMe) FastLED.show(brightness());`),
+        // the FIRST of red_heart/lightsaberBattle's two same-tick shows. See
+        // OP_SHOWLIVE's enum comment, above, for the golden proof this needs
+        // LIVE brightness, not OP_SHOWNOW's frozen boot scale.
+        FastLED.show(brightness());
         break;
       case OP_FILL_ROW: {
         uint8_t r = pgm_read_byte(pc++);

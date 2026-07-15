@@ -807,181 +807,8 @@ void displayMatrixColor(const byte* matrix, CRGB fgcolor, CRGB bgcolor, bool dis
 // END LED Helper Functions //
 //////////////////////////////
 
-// Displays the message I <heart> U.
-void i_heart_u(unsigned long time_delay, int loops, unsigned long runtime) // 5 seconds command 0T7
-{
-  if (firstTime) {
-    DEBUG_PRINT_LN("I Heart U");
-    firstTime = false;
-    patternRunning = true;
-    globalPatternLoops = loops;
-    if ((runtime != 0) && (!timingReceived)) set_global_timeout(runtime);
-    if (timingReceived) set_global_timeout(commandTiming);
-    ledPatternState = 0;
-    // Clear the display the first time through
-    allOFF(true);
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      // Note we set the display timeout large here so that the image stays displayed.
-      case 0: displayMatrixColor(LetterI, 0xff0000, 0x909497, false, 0); updateLed = 1; break;
-      case 1: allOFF(false); updateLed = 1; break;
-      case 2: displayMatrixColor(Heart, 0xff0000, 0x909497, false, 0); updateLed = 1; break;
-      case 3: allOFF(false); updateLed = 1; break;
-      case 4: displayMatrixColor(LetterU, 0xff0000, 0x909497, false, 0); updateLed = 1; break;
-      case 5: allOFF(false); updateLed = 1; break;
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-
-    // Increment the state.
-    ledPatternState++;
-    if (ledPatternState > 5)
-    {
-      ledPatternState = 0;
-      globalPatternLoops--;
-    }
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-
-  if ((runtime == 0) && (!timingReceived)){
-    // Check to see if we have run the loops needed for this pattern
-    loopsDonedoRestoreDefault();
-  } else {
-    // Check for the global timeout to have expired.
-    globalTimerDonedoRestoreDefault();
-  }
-}
-
-// Displays a flashing heart.
-void red_heart(unsigned long time_delay, int loops, unsigned long runtime) //5 seconds command 0T9
-{
-  if (firstTime) {
-    DEBUG_PRINT("Flashing Red Heart");
-    firstTime = false;
-    patternRunning = true;
-    globalPatternLoops = loops;
-    if ((runtime != 0) && (!timingReceived)) set_global_timeout(runtime);
-    if (timingReceived) set_global_timeout(commandTiming);
-    ledPatternState = 0;
-    // Clear the display the first time through
-    allOFF(true);
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      // Note we set the display timeout large here so that the image stays displayed.
-      case 0: displayMatrixColor(Heart, 0xff0000, 0x909497, true, 0); updateLed = 1; break;//ffffff
-      case 1: allOFF(false); updateLed = 1; break;
-      case 2: displayMatrixColor(Heart, 0xff0000, 0x909497, true, 0); updateLed = 1; break;
-      case 3: allOFF(false); updateLed = 1; break;
-      case 4: displayMatrixColor(Heart, 0xff0000, 0x909497, true, 0); updateLed = 1; break;
-      case 5: allOFF(false); updateLed = 1; break;
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-
-    // Increment the state.
-    ledPatternState++;
-    if (ledPatternState > 5)
-    {
-      ledPatternState = 0;
-      globalPatternLoops--;
-    }
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-
-  if ((runtime == 0) && (!timingReceived)){
-    // Check to see if we have run the loops needed for this pattern
-    loopsDonedoRestoreDefault();
-  } else {
-    // Check for the global timeout to have expired.
-    globalTimerDonedoRestoreDefault();
-  }
-}
-
-void march(CRGB color, unsigned long time_delay, int loops, unsigned long runtime) //47 seconds Command 0T11
-{
-  if (firstTime) {
-    DEBUG_PRINT_LN("Imperial March");
-    firstTime = false;
-    patternRunning = true;
-    globalPatternLoops = loops * 2;
-    if ((runtime != 0) && (!timingReceived)) set_global_timeout(runtime);
-    if (timingReceived) set_global_timeout(commandTiming);
-    ledPatternState = 0;
-    // Clear the display the first time through
-    allOFF(true);
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      // Note we set the display timeout large here so that the image stays displayed.
-      case 0:
-        for (int i = 0; i < COLUMNS; i++)
-        {
-          if (i < COLUMNS / 2)
-          {
-            fill_column(i, color);
-          }
-          else fill_column(i, 0x000000);
-        }
-        updateLed = 1;
-        break;
-      case 1:
-        for (int i = 0; i < COLUMNS; i++)
-        {
-          if (i < COLUMNS / 2)
-          {
-            fill_column(i, 0x000000);
-          }
-          else fill_column(i, color);
-        }
-        updateLed = 1;
-        break;
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-
-    // Toggle the state.
-    ledPatternState = ledPatternState ^ 1;
-    globalPatternLoops--;
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-
-  if ((runtime == 0) && (!timingReceived)){
-    // Check to see if we have run the loops needed for this pattern
-    loopsDonedoRestoreDefault();
-  } else {
-    // Check for the global timeout to have expired.
-    globalTimerDonedoRestoreDefault();
-  }
-}
+// i_heart_u/red_heart/march (modes 7/9-front/11) were here — replaced by
+// VMP_IHEARTU/VMP_REDHEART/VMP_MARCH bytecode programs (include/psi_vm.h).
 
 void swipe() {
 
@@ -1494,35 +1321,21 @@ void runPattern(int pattern) {
     case 6:              //  6 = Leia message (34s) — was Cylon_Row(0xcccccc, 74, 3, 57, 34)
       vmPlay(VMP_LEIA);
       break;
-#ifndef CONTRACT_SLIM
-    case 7:              //  7 = I heart U
-      i_heart_u(500, 3, 0);
+    case 7:              //  7 = I heart U — was i_heart_u(500, 3, 0)
+      vmPlay(VMP_IHEARTU);
       break;
-#endif
     case 8:              //  8 = Radar sweep — was radar(0xff0000, 250, 6, 0)
       vmPlay(VMP_RADAR);
       break;
-    case 9:              //   = Flashing red heart
-      if (digitalRead(JUMP_FRONT_REAR)) {
-        // Display the beating heart on the front
-#ifndef CONTRACT_SLIM
-        red_heart(500, 3, 0); //3x1s 500ms on, 500ms off
-#else
-        allON(CRGB::Red, true);  // slim build: red_heart stripped; hold red instead
-#endif
-      } else {
-        // Display the Pulse on the back — was Pulse(100, 3, 0)
-        vmPlay(VMP_PULSE);
-      }
+    case 9:              //   = Flashing red heart (front) / Pulse trace (rear)
+      vmPlay(digitalRead(JUMP_FRONT_REAR) ? VMP_REDHEART : VMP_PULSE);
       break;
     case 10:              //  10 = Star Wars Animation — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
       vmPlay(VMP_SWSCAN);
       break;
-#ifndef CONTRACT_SLIM
-    case 11:              //  11 = Imperial March (47s)
-      march(0xffffff, 552, 42, 47);
+    case 11:              //  11 = Imperial March (47s) — was march(0xffffff, 552, 42, 47)
+      vmPlay(VMP_MARCH);
       break;
-#endif
     case 12:          // 13 - Disco Ball - 4 seconds — was DiscoBall(150, 30, 3, CRGB::Grey, 4)
       vmPlay(VMP_DISCO4);
       break;

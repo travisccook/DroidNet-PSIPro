@@ -33,12 +33,14 @@ static const ProgRef progs[] = {
     P(vmc_rebel), P(vmc_pulse),
     P(vmc_disco),
     P(vmc_fadeout),
+    P(vmc_iheartu), P(vmc_redheart), P(vmc_march),
     // conversion tasks append their programs here
 };
 
 static int arity(uint8_t op) {
   switch (op) {
-    case OP_END: case OP_CLEAR: case OP_LOOPSTART: case OP_SHOWNOW: case OP_CLEARWAIT: return 0;
+    case OP_END: case OP_CLEAR: case OP_LOOPSTART: case OP_SHOWNOW:
+    case OP_CLEARWAIT: case OP_SHOWLIVE: return 0;
     case OP_FILL_ALL: case OP_MUL_RAND: return 1;
     case OP_SHOW: case OP_PIX: case OP_FRAME: case OP_SPARKLE: case OP_SCALE_RAND: return 2;
     case OP_SHOWR: case OP_FILL_ROW: case OP_FILL_COLR: return 3;
@@ -71,6 +73,9 @@ static bool validColorId(uint8_t c) {
 static bool returningShow(uint8_t op) {
   // OP_SHOWNOW deliberately excluded: it neither arms a delay nor returns
   // from vmStep(), so it cannot terminate the OP_END continue-wrap.
+  // OP_SHOWLIVE excluded for the identical reason (it is OP_SHOWNOW's
+  // live-brightness twin — see its enum comment in psi_vm.h — same
+  // show-and-fall-through shape, same inability to break the wrap spin).
   // OP_CLEARWAIT also excluded: it DOES return (so it cannot spin the wrap
   // loop forever either), but it never calls show(), so a wrap body relying
   // on it alone would render no visible frame — every shipped program's wrap
