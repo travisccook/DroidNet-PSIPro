@@ -1,0 +1,41 @@
+{
+  "built": "2026-07-15",
+  "toolchain": "PlatformIO Core 6.1.19, esptool 4.9.0, avrdude (tool-avrdude 1.70300)",
+  "status": "NEVER FLASHED TO HARDWARE \u2014 built and verified against DroidNet's flasher logic only. Bench-test before field use.",
+  "flash_via": "DroidNet web UI -> Flash tab (upload file, connect board over USB).",
+  "board": "PSI Pro (Neil Hutchison) \u2014 SparkFun Pro Micro, ATmega32U4 @16MHz",
+  "source_repo": "https://github.com/travisccook/DroidNet-PSIPro",
+  "source_commit": "fd352e7",
+  "artifacts": [
+    {
+      "file": "DroidNet-PSIPro-atmega32u4-serial-fd352e7.hex",
+      "role": "PRIMARY \u2014 serial-only (default, ISR-safe)",
+      "chip": "atmega32u4",
+      "mcu": "ATmega32U4",
+      "env": "PSIPro",
+      "droidnet_flash": {
+        "file_type": "hex",
+        "select_chip": "auto (Leonardo/Micro, avr109 @57600)",
+        "flash_address": "n/a",
+        "note": "Serial-only build (I2C intake disabled). DroidNet does the 1200-baud Pro-Micro bootloader reset automatically. Board auto-detected from MCU signature."
+      },
+      "size_bytes": 67096,
+      "sha256": "31885932c134190a1ea6da264ff2f92c3f694bfab7f0b915da4356993605ae0c"
+    },
+    {
+      "file": "DroidNet-PSIPro-atmega32u4-i2c-fd352e7.hex",
+      "role": "opt-in I2C variant",
+      "chip": "atmega32u4",
+      "mcu": "ATmega32U4",
+      "env": "PSIPro-i2c",
+      "droidnet_flash": {
+        "file_type": "hex",
+        "select_chip": "auto (Leonardo/Micro, avr109 @57600)",
+        "flash_address": "n/a",
+        "note": "Adds upstream I2C/JawaLite intake. FastLED render is SREG-masked so the TWI ISR can't re-enter (see fork README). Only flash if you drive the PSI over I2C."
+      },
+      "size_bytes": 71167,
+      "sha256": "fda7de801f9d17831dde23af92b77771c368b4973254acb2a2f1ec9b58463a08"
+    }
+  ]
+}

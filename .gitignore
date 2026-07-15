@@ -10,3 +10,7 @@ build/
 .DS_Store
 node_modules/
 dist/
+
+# Committed flashable firmware images live here on purpose (override *.hex above)
+!firmware/
+!firmware/**
