@@ -97,9 +97,11 @@ echo "[6/7] golden-frame parity: mocks + Neil's animation code must reproduce"
 echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # The FULL-variant binary (built via mk_full_config.sh's shadowed config.h — a
 # historical CONTRACT_SLIM strip that is now a documented no-op, see that script) is
-# the ground truth. golden_matrix.txt's 29 rows are not 29 modes: 28 of them are captures of
+# the ground truth. golden_matrix.txt's 31 rows are not 31 modes: 28 of them are captures of
 # the 23 upstream modes' (0-21 and 92) native ground truth (several modes get more than one row —
-# front/rear jumper, alwaysOn) plus one fork-added row, mode22_process, whose "ground truth" is the
+# front/rear jumper, alwaysOn); two more (contract_scan/contract_sparkle) are the contract
+# CE_SCAN/CE_SPARKLE looks captured from the pre-shim natives (scanCol/DiscoBall at 9502cad),
+# which the VM shims must reproduce byte-for-byte; the last, mode22_process, has "ground truth" from the
 # VM program itself (see vmc_process's comment, include/psi_vm.h) rather than any native code.
 # golden_matrix.txt drives the same capture
 # command line that produced the committed .psig files; any regenerated capture
