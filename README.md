@@ -92,7 +92,7 @@ What it buys, measured:
 | worst-case stack | 371 B of 1,251 B (30%) | 441 B of 970 B (45%) |
 | can an interrupt reach a render? | **no** | yes (upstream's native path) |
 
-Both configurations ship all 22 upstream modes — there is no "drop modes to fit" trade here (see
+Both configurations ship all 23 upstream modes (0-21 and 92) — there is no "drop modes to fit" trade here (see
 [What this fork adds](#what-this-fork-adds)/the animation VM below); the only difference between
 the two columns is the I2C intake itself.
 
@@ -130,10 +130,11 @@ tightest board of the three, and the numbers are worth knowing before you build:
 | …I2C, with the codegen flags removed | 30,070 B | 104.9% — **will not link** |
 | …I2C, with `PSI_NOINLINE` removed | 29,650 B | 103.4% — **will not link** |
 
-Neil's firmware already used 87.6% of this chip. Every animation in this fork — all 22 upstream
-modes, native and contract alike — is now PROGMEM bytecode played by one small interpreter
-(`include/psi_vm.h`; see "What this fork adds" below), which is *why* there is headroom at all: it
-replaced two dozen hand-written state machines with one. That headroom is not evenly spread, though.
+Neil's firmware already used 87.6% of this chip. All 23 upstream modes (0-21 and 92) ship, and every
+animation in this fork — upstream mode or contract effect — except the four deliberate native
+holdouts (`swipe`/`VUMeter`/`allON`/`allOFF`; see "What this fork adds" below) is PROGMEM bytecode
+played by one small interpreter (`include/psi_vm.h`), which is *why* there is headroom at all: it
+replaced the hand-written per-mode state machines with one. That headroom is not evenly spread, though.
 The **serial-only default has real margin** (2,006 B spare) — either the AVR codegen flags in
 `platformio.ini` or the `PSI_NOINLINE` outlining in `src/contract/ContractPSI.h` could be dropped on
 their own and it would still fit, if barely (99.5% / 98.8%). The **I2C build has almost none** (564 B
@@ -212,7 +213,7 @@ unrelated globals under heavy I2C traffic.
 
 This fork used to have a `CONTRACT_SLIM` escape hatch that dropped five native novelty modes — 7
 (i_heart_u), 9 (red_heart, front half), 11 (Imperial March), 19 (lightsaberBattle) and 20
-(StarWarsIntro) — to make room when flash ran short. **That trade-off no longer exists.** All 22
+(StarWarsIntro) — to make room when flash ran short. **That trade-off no longer exists.** All 23
 upstream modes are present in every configuration this fork builds; see "What this fork adds" below
 for how.
 
@@ -266,22 +267,23 @@ armed, and hands the panel straight back to `runPattern()` on stop. This is not 
 
 ### The animation VM: modes are data now
 
-Every one of the panel's animations — all 22 upstream modes (0-21 and 92), not just the six new
-contract effects above — is PROGMEM bytecode played by one small interpreter (`include/psi_vm.h`).
-"Animations are data, the interpreter is the only animation code." `swipe` (the default idle
-pattern), `VUMeter`, and the two solid fills `allON`/`allOFF` stayed native, deliberately; everything
-else — Flash, Alarm, Leia, I Heart U, Radar, red_heart/Pulse, the Star Wars scan, Imperial March,
-Disco Ball (both variants), Short Circuit, Rebel Symbol, Knight Rider, Lightsaber Battle and the Star
-Wars Intro — is a flat opcode string, converted one mode at a time and golden-frame-gated to
-reproduce Neil's original C byte-for-byte before that C was deleted.
+All 23 upstream modes (0-21 and 92) ship, and every animation — upstream mode or contract effect,
+not just the six new contract effects above — is PROGMEM bytecode played by one small interpreter
+(`include/psi_vm.h`), except the four deliberate native holdouts: `swipe` (the default idle
+pattern), `VUMeter`, and the two solid fills `allON`/`allOFF` stayed native, by design. "Animations
+are data, the interpreter is the only animation code." Everything else — Flash, Alarm, Leia, I Heart
+U, Radar, red_heart/Pulse, the Star Wars scan, Imperial March, Disco Ball (both variants), Short
+Circuit, Rebel Symbol, Knight Rider, Lightsaber Battle and the Star Wars Intro — is a flat opcode
+string, converted one mode at a time and golden-frame-gated to reproduce Neil's original C
+byte-for-byte before that C was deleted.
 
 This is why there is no `CONTRACT_SLIM` escape hatch anymore. That define used to buy back flash by
 deleting five of the heaviest hand-written mode bodies — i_heart_u, red_heart, Imperial March,
 lightsaberBattle, StarWarsIntro — because the only way to shrink a mode used to be to delete its
-function. Once every mode is PROGMEM data instead of a dedicated C function, there is nothing left to
-drop: a new animation costs tens of bytes of opcode data (plus 48 B/frame for any new bitmap art it
-needs), not a new function, and all five once-dropped modes now ship in both build configurations
-alongside the other seventeen — see "It fits", above, for current sizes.
+function. With every once-droppable mode now PROGMEM data instead of a dedicated C function, there is
+nothing left to drop: a new animation costs tens of bytes of opcode data (plus 48 B/frame for any new
+bitmap art it needs), not a new function, and all five once-dropped modes now ship in both build
+configurations alongside the other eighteen — see "It fits", above, for current sizes.
 
 ### One bug fix, offered back
 

@@ -48,11 +48,13 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 // written back when the only way to shrink a mode was to delete its hand-written C++ body.
 //
 // It is gone because that premise is gone. Every native mode's animation, including those
-// five, is now a flat PROGMEM byte string played by a small shared interpreter
+// five — all except the four deliberate native holdouts (swipe/VUMeter/allON/allOFF) —
+// is now a flat PROGMEM byte string played by a small shared interpreter
 // (include/psi_vm.h — "Animations are data, the interpreter is the only animation code.").
 // A new animation costs tens of bytes of opcode data, not a new function; new bitmap art
-// costs an additional 48 B/frame. All 22 upstream modes ship, in both the serial-only and
-// I2C builds, with room to spare — see platformio.ini for the current measured sizes.
+// costs an additional 48 B/frame. All 23 upstream modes (0-21 and 92) ship, in both the
+// serial-only and I2C builds, with room to spare — see platformio.ini for the current
+// measured sizes.
 
 
 
@@ -96,7 +98,7 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 //     worst-case stack           371 B (30%)       441 B (45%)
 //     can an ISR reach a render?          NO      yes (native path)
 //
-// WHAT IT DOES NOT COST: all 22 upstream modes ship in BOTH configurations — there is
+// WHAT IT DOES NOT COST: all 23 upstream modes ship in BOTH configurations — there is
 // no longer a "drop modes to make room" trade here (see the ANIMATIONS ARE DATA note
 // above). The only difference between the two columns is the I2C intake itself.
 //

@@ -97,7 +97,7 @@ echo "[6/7] golden-frame parity: mocks + Neil's animation code must reproduce"
 echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # The FULL-variant binary (built via mk_full_config.sh's shadowed config.h — a
 # historical CONTRACT_SLIM strip that is now a documented no-op, see that script) is
-# the ground truth for all 22 native modes. golden_matrix.txt drives the same capture
+# the ground truth for all 23 native modes (0-21 and 92). golden_matrix.txt drives the same capture
 # command line that produced the committed .psig files; any regenerated capture
 # that doesn't cmp byte-identical to its committed twin means the mocks or Neil's
 # unmodified main.cpp no longer reproduce what we locked in as ground truth.
@@ -161,6 +161,6 @@ echo "    PSIPro-i2c 28,108 B / 98.0% — re-measure with 'pio run && pio run -e
 echo "    rather than trusting this comment.) It fits because of the codegen flags in"
 echo "    platformio.ini and the PSI_NOINLINE outlining in src/contract/ContractPSI.h —"
 echo "    disable either and this stage fails. There used to be a third leg here,"
-echo "    CONTRACT_SLIM, that dropped five native modes to make room; all 22 upstream"
-echo "    modes are now permanent PROGMEM bytecode (include/psi_vm.h) and CONTRACT_SLIM"
-echo "    is gone."
+echo "    CONTRACT_SLIM, that dropped five native modes to make room; those five are"
+echo "    now permanent PROGMEM bytecode (include/psi_vm.h), all 23 upstream modes"
+echo "    ship, and CONTRACT_SLIM is gone."
