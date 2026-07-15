@@ -593,101 +593,30 @@ void displayMatrixColor(const byte* matrix, CRGB fgcolor, CRGB bgcolor, bool dis
     if (runtime != 0) set_global_timeout(runtime);
   }
 
-  // First row is easy
-  for (int i = 0; i < 6; i++) {
-    ledOn = pgm_read_byte(&(matrix[i])); // Read pixel
-    switch (ledOn){
-      case 0: leds[ledNum] = bgcolor; break;
-      case 1: leds[ledNum] = fgcolor; break;
-      case 2: leds[ledNum] = color2; break;
-      case 3: leds[ledNum] = color3; break;
-      case 4: leds[ledNum] = color4; break;
-      case 5: leds[ledNum] = color5; break;
-      case 6: leds[ledNum] = color6; break;
-      case 7: leds[ledNum] = color7; break;
-      case 8: leds[ledNum] = color8; break;
-    }  
-    ledNum++;
-  }
-  // Second row, we take 7-14 and make them 14-7
-  for (int i = 0; i < 8; i++) {
-    ledOn = pgm_read_dword(&(matrix[13 - i]));
-    switch (ledOn){
-      case 0: leds[ledNum] = bgcolor; break;
-      case 1: leds[ledNum] = fgcolor; break;
-      case 2: leds[ledNum] = color2; break;
-      case 3: leds[ledNum] = color3; break;
-      case 4: leds[ledNum] = color4; break;
-      case 5: leds[ledNum] = color5; break;
-      case 6: leds[ledNum] = color6; break;
-      case 7: leds[ledNum] = color7; break;
-      case 8: leds[ledNum] = color8; break;
-    }  
-    ledNum++;
-  }
-  // Third row, we take 15-24 as is
-  for (int i = 0; i < 10; i++) {
-    ledOn = pgm_read_dword(&(matrix[14 + i]));
-    switch (ledOn){
-      case 0: leds[ledNum] = bgcolor; break;
-      case 1: leds[ledNum] = fgcolor; break;
-      case 2: leds[ledNum] = color2; break;
-      case 3: leds[ledNum] = color3; break;
-      case 4: leds[ledNum] = color4; break;
-      case 5: leds[ledNum] = color5; break;
-      case 6: leds[ledNum] = color6; break;
-      case 7: leds[ledNum] = color7; break;
-      case 8: leds[ledNum] = color8; break;
-    }  
-    ledNum++;
-  }
-  // Fourth row, we take 25-34 and make them 34-25
-  for (int i = 0; i < 10; i++) {
-    ledOn = pgm_read_dword(&(matrix[33 - i]));
-    switch (ledOn){
-      case 0: leds[ledNum] = bgcolor; break;
-      case 1: leds[ledNum] = fgcolor; break;
-      case 2: leds[ledNum] = color2; break;
-      case 3: leds[ledNum] = color3; break;
-      case 4: leds[ledNum] = color4; break;
-      case 5: leds[ledNum] = color5; break;
-      case 6: leds[ledNum] = color6; break;
-      case 7: leds[ledNum] = color7; break;
-      case 8: leds[ledNum] = color8; break;
-    }  
-    ledNum++;
-  }
-  // Fifth row, we take 35-42 as is
-  for (int i = 0; i < 8; i++) {
-    ledOn = pgm_read_dword(&(matrix[34 + i]));
-    switch (ledOn){
-      case 0: leds[ledNum] = bgcolor; break;
-      case 1: leds[ledNum] = fgcolor; break;
-      case 2: leds[ledNum] = color2; break;
-      case 3: leds[ledNum] = color3; break;
-      case 4: leds[ledNum] = color4; break;
-      case 5: leds[ledNum] = color5; break;
-      case 6: leds[ledNum] = color6; break;
-      case 7: leds[ledNum] = color7; break;
-      case 8: leds[ledNum] = color8; break;
-    }  
-    ledNum++;
-  }
-  // Sixth and final row, we take 43-48 and make them 48-43
-  for (int i = 0; i < 6; i++) {
-    ledOn = pgm_read_dword(&(matrix[47 - i]));
-    switch (ledOn){
-      case 0: leds[ledNum] = bgcolor; break;
-      case 1: leds[ledNum] = fgcolor; break;
-      case 2: leds[ledNum] = color2; break;
-      case 3: leds[ledNum] = color3; break;
-      case 4: leds[ledNum] = color4; break;
-      case 5: leds[ledNum] = color5; break;
-      case 6: leds[ledNum] = color6; break;
-      case 7: leds[ledNum] = color7; break;
-      case 8: leds[ledNum] = color8; break;
-    }  
-    ledNum++;
+  // Palette indexed by the matrix cell value (0..8): 0 = bgcolor, 1 = fgcolor,
+  // 2..8 = the optional extra colours. This collapses the six identical per-row
+  // colour switches this function used to carry into a single indexed store.
+  const CRGB palette[9] = { bgcolor, fgcolor, color2, color3, color4,
+                            color5, color6, color7, color8 };
+
+  // The panel is wired boustrophedon: six rows of 6/8/10/10/8/6 LEDs, alternate
+  // rows reversed. (start, count, step) walks the PROGMEM matrix in output-LED
+  // order -- the exact same visitation the six hand-unrolled loops did (row 1
+  // forward from 0, row 2 reverse from 13, row 3 forward from 14, row 4 reverse
+  // from 33, row 5 forward from 34, row 6 reverse from 47). pgm_read_BYTE, not
+  // dword: the matrix is a byte array, and the old dword reads over-read three
+  // bytes past each cell (only the low byte was ever used).
+  static const int8_t rowStart[6] = { 0, 13, 14, 33, 34, 47 };
+  static const int8_t rowCount[6] = { 6,  8, 10, 10,  8,  6 };
+  static const int8_t rowStep[6]  = { 1, -1,  1, -1,  1, -1 };
+  for (uint8_t r = 0; r < 6; r++) {
+    int8_t idx = rowStart[r];
+    for (int8_t k = 0; k < rowCount[r]; k++) {
+      ledOn = pgm_read_byte(&matrix[idx]);
+      if (ledOn < 9) leds[ledNum] = palette[ledOn];  // cells are 0..8; others leave the LED as-is, as before
+      ledNum++;
+      idx += rowStep[r];
+    }
   }
 
   if (displayMe) FastLED.show(brightness());
