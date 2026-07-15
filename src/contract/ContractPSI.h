@@ -303,14 +303,14 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
     case CE_FLASH:   _renderFlash(col, d, t0);                      break;
     case CE_PULSE:   allON(col, true, 0);                           break;  // envelope pumps brightness
     case CE_RAINBOW: _renderRainbow(d);                             break;
-    case CE_SCAN:    scanCol(d, 0, col, true);                      break;
+    case CE_SCAN:    vmContractScan(d, col);                        break;
     case CE_COMET:   _renderComet(col, t0);                         break;
     case CE_CHASE:   _renderChase(col, t0);                         break;
     case CE_WIPE:    _renderWipe(col, t0);                          break;
     case CE_GRADIENT:_renderGradient(t0);                           break;
     case CE_COLORCYCLE: _renderColorcycle(t0);                      break;
     case CE_TWINKLE: _renderTwinkle(col);                           break;
-    case CE_SPARKLE: DiscoBall(d, 0, 3, col, 0);                    break;
+    case CE_SPARKLE: vmContractSparkle(d, col);                     break;
     case CE_METER:   VUMeter(d, 0, 0);                              break;  // level[] fed by verb L
     case CE_NATIVE:  runPattern(g_nativeCode);                      break;
     default:         allON(col, true, 0);                           break;

@@ -20,10 +20,11 @@
 // needed one more, OP_SHOWLIVE (see its own comment, below), for the same
 // reason Task 9 needed OP_CLEARWAIT: no combination of the existing ops could
 // represent what red_heart/lightsaberBattle's native bodies actually do.
-// What is NOT here yet: the contract shims (vmContractScan/
-// vmContractSparkle, Task 14). Every mode-conversion task through Task 13 is
-// now landed; Task 15 does the docs sweep (removing CONTRACT_SLIM itself,
-// softening stale comments).
+// Task 14 added the last two pieces, the contract shims (vmContractScan/
+// vmContractSparkle, below) — every mode conversion AND the two contract
+// shims are now landed; Task 15 does the docs sweep (removing CONTRACT_SLIM
+// itself, softening stale comments elsewhere that still name scanCol/
+// DiscoBall as live primitives).
 //
 // INCLUDE ORDER (src/main.cpp ~line 355): included AFTER the global state
 // block (firstTime / patternRunning / globalPatternLoops / timingReceived /
@@ -1205,8 +1206,78 @@ inline void vmPlay(uint8_t progId) {
   }
 }
 
-// vmContractScan / vmContractSparkle (the ContractPSI.h CE_SCAN / CE_SPARKLE
-// shims) land in Task 14, once scanCol()/DiscoBall() have no other caller.
+// ---------------------------------------------------------------------------
+// Contract-layer shims (Task 14): ContractPSI.h's CE_SCAN / CE_SPARKLE cases
+// used to call the native scanCol()/DiscoBall() directly; both natives are now
+// deleted (no other caller — the mode 6/10/15 sweep group and modes 12/13 were
+// already ported to bytecode in earlier tasks, per the comments above). These
+// mirror the exact per-tick semantics of the ONE call shape the contract layer
+// ever used — scanCol(d, 0, col, true) and DiscoBall(d, 0, 3, col, 0) — traced
+// line-by-line against src/main.cpp before this was written (see
+// task-14-report.md for the side-by-side). Not general re-implementations of
+// either native (e.g. DiscoBall's loops/runtime params are hardcoded to the
+// values the contract always passed, exactly like vmContractScan already
+// hardcodes start_col=0/scanDirection=1 below), under the contract's own
+// firstTime re-init protocol (runContractAnim() sets firstTime on effect
+// switch, same as every native mode body's own lifecycle).
+static void vmContractScan(unsigned long d, const CRGB& col) {
+  if (firstTime) {
+    ledPatternState = COLUMNS - 1;   // scanCol(...,start_col=0,scanDirection=1) entry state
+    firstTime = false;
+    patternRunning = true;
+  }
+  if (checkDelay()) {
+    if (ledPatternState >= 0 && ledPatternState <= COLUMNS - 1) {
+      FastLED.clear();
+      FastLED.show();                // native's per-case allOFF(true): clear + bare show
+      fill_column((uint8_t)ledPatternState, col, 0);
+      vmShowDelay(d);
+    }
+    ledPatternState--;
+    if (ledPatternState < 0) {
+      ledPatternState = COLUMNS - 1;
+      globalPatternLoops--;
+    }
+  }
+  // native scanCol() has no runtime/loops epilogue at all (no
+  // loopsDonedoRestoreDefault/globalTimerDonedoRestoreDefault call anywhere in
+  // its body) and never references timingReceived — globalPatternLoops
+  // decrements for bookkeeping only. Nothing to mirror here.
+}
+
+static void vmContractSparkle(unsigned long d, const CRGB& col) {
+  if (firstTime) {
+    firstTime = false;
+    patternRunning = true;
+    globalPatternLoops = 2;          // native loops==0 seed (loops*2 branch not taken)
+    // native's firstTime block: `if ((runtime!=0)&&(!timingReceived)) set_global_timeout(runtime);`
+    // is dead at this call shape (runtime==0 always); `if (timingReceived) set_global_timeout(...)`
+    // is NOT dead — timingReceived is native-JawaLite global state (main.cpp doTcommand(), set by
+    // a T-command with a nonzero timing value) that the contract layer never reads or clears, so a
+    // stale native timing command left armed before the board entered contract mode is still live
+    // here. CE_METER's still-native VUMeter(d,0,0) call two cases below carries the identical
+    // pattern unmodified, and every ported mode's vmPlay() (above) mirrors it too — mirrored here
+    // for the same reason: an unmirrored gap would be a new asymmetry, not a simplification.
+    if (timingReceived) set_global_timeout(commandTiming);
+    ledPatternState = 0;
+    FastLED.clear();
+    FastLED.show();                  // native's firstTime allOFF(true): clear + bare show
+  }
+  if (checkDelay()) {
+    if (ledPatternState == 0) vmSparkleDraw(3, col);
+    else FastLED.clear();            // native's ledPatternState==1: allOFF(false), clear only, no show
+    ledPatternState ^= 1;
+    globalPatternLoops--;
+    vmShowDelay(d);
+  }
+  // native's tail runs UNCONDITIONALLY every call (not gated by checkDelay):
+  //   if ((runtime==0) && (!timingReceived)) { if (loops) loopsDonedoRestoreDefault(); }
+  //   else { globalTimerDonedoRestoreDefault(); }
+  // runtime==0 and loops==0 always at this call shape, so the first branch is dead (loops=0 =>
+  // no-op) and the whole thing collapses to: fire globalTimerDonedoRestoreDefault() iff
+  // timingReceived is (still) true.
+  if (timingReceived) globalTimerDonedoRestoreDefault();
+}
 
 #endif  // PSI_VM_TABLES_ONLY
 

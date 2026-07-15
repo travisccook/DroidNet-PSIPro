@@ -10,14 +10,18 @@
 // the 25 ms gate calls contractLoopTick()/runPattern() and nothing else). A renderer
 // that builds a frame with fill_column() alone therefore latches NOTHING and the panel
 // freezes on the last shown frame. The mock models exactly which primitives latch:
-//   * allON/allOFF   -> FastLED.show() when showLED (main.cpp:488 / 509)
-//   * scanCol/DiscoBall/VUMeter/runPattern -> latch internally (main.cpp:735/1765/1684/…)
+//   * allON/allOFF                          -> FastLED.show() when showLED (main.cpp:488 / 509)
+//   * vmContractScan/vmContractSparkle/VUMeter/runPattern -> latch internally
+//     (include/psi_vm.h vmContractScan/vmContractSparkle; main.cpp VUMeter/runPattern)
 //   * fill_column    -> writes leds[] ONLY, never shows (main.cpp:517-524)  <-- the trap
-// Every signature mirrors src/main.cpp + include/config.h as verified 2026-07-12:
+// Every signature mirrors src/main.cpp + include/psi_vm.h + include/config.h as verified
+// 2026-07-14 (Task 14 — scanCol()/DiscoBall() are deleted from main.cpp; CE_SCAN/CE_SPARKLE
+// now render through the VM shims below, which this mock stubs the same way the natives it
+// replaced were stubbed: a bare latch, not a behavioral simulation):
 //   allON(CRGB,bool,unsigned long)                 main.cpp:461
 //   allOFF(bool,unsigned long)                     main.cpp:480
-//   scanCol(unsigned long,int,CRGB,bool)           main.cpp:727
-//   DiscoBall(unsigned long,int,int,CRGB,unsigned long)  main.cpp:1759
+//   vmContractScan(unsigned long,const CRGB&)      include/psi_vm.h (Task 14)
+//   vmContractSparkle(unsigned long,const CRGB&)   include/psi_vm.h (Task 14)
 //   VUMeter(unsigned long,uint8_t,unsigned long)   main.cpp:1677
 //   fill_column(uint8_t,CRGB,uint8_t=0)            main.cpp:517
 //   runPattern(int)                                main.cpp:2116
@@ -114,8 +118,8 @@ inline void allOFF(bool showLED, unsigned long = 0) {
   FastLED.clear();
   if (showLED) FastLED.show();                          // main.cpp:509
 }
-inline void scanCol(unsigned long, int, CRGB, bool) { FastLED.show(brightness()); }        // main.cpp:735
-inline void DiscoBall(unsigned long, int, int, CRGB, unsigned long) { FastLED.show(brightness()); }  // main.cpp:1765
+inline void vmContractScan(unsigned long, const CRGB&) { FastLED.show(brightness()); }     // include/psi_vm.h (Task 14)
+inline void vmContractSparkle(unsigned long, const CRGB&) { FastLED.show(brightness()); }  // include/psi_vm.h (Task 14)
 inline void VUMeter(unsigned long, uint8_t, unsigned long) { FastLED.show(brightness()); } // main.cpp:1684
 inline void runPattern(int) { FastLED.show(brightness()); }                                // native looks latch
 // STAGES ONLY — deliberately does NOT show (faithful to main.cpp:517-524).
