@@ -131,10 +131,11 @@ tightest board of the three, and the numbers are worth knowing before you build:
 | …I2C, with `PSI_NOINLINE` removed | 29,650 B | 103.4% — **will not link** |
 
 Neil's firmware already used 87.6% of this chip. All 23 upstream modes (0-21 and 92) ship, and every
-animation in this fork — upstream mode or contract effect — except the four deliberate native
-holdouts (`swipe`/`VUMeter`/`allON`/`allOFF`; see "What this fork adds" below) is PROGMEM bytecode
-played by one small interpreter (`include/psi_vm.h`), which is *why* there is headroom at all: it
-replaced the hand-written per-mode state machines with one. That headroom is not evenly spread, though.
+upstream mode's animation except the four deliberate native holdouts
+(`swipe`/`VUMeter`/`allON`/`allOFF`; see "What this fork adds" below) is PROGMEM bytecode played by
+one small interpreter (`include/psi_vm.h`) — the contract effects remain parametric C++ renderers —
+which is *why* there is headroom at all: it replaced the hand-written per-mode state machines with
+one. That headroom is not evenly spread, though.
 The **serial-only default has real margin** (2,006 B spare) — either the AVR codegen flags in
 `platformio.ini` or the `PSI_NOINLINE` outlining in `src/contract/ContractPSI.h` could be dropped on
 their own and it would still fit, if barely (99.5% / 98.8%). The **I2C build has almost none** (564 B
@@ -267,11 +268,13 @@ armed, and hands the panel straight back to `runPattern()` on stop. This is not 
 
 ### The animation VM: modes are data now
 
-All 23 upstream modes (0-21 and 92) ship, and every animation — upstream mode or contract effect,
-not just the six new contract effects above — is PROGMEM bytecode played by one small interpreter
-(`include/psi_vm.h`), except the four deliberate native holdouts: `swipe` (the default idle
-pattern), `VUMeter`, and the two solid fills `allON`/`allOFF` stayed native, by design. "Animations
-are data, the interpreter is the only animation code." Everything else — Flash, Alarm, Leia, I Heart
+All 23 upstream modes (0-21 and 92) ship, and every upstream mode's animation is PROGMEM bytecode
+played by one small interpreter (`include/psi_vm.h`), except the four deliberate native holdouts:
+`swipe` (the default idle pattern), `VUMeter`, and the two solid fills `allON`/`allOFF` stayed
+native, by design. (The six contract effects above are not bytecode either — they remain parametric
+C++ renderers; the contract's `scan` and `sparkle` now render through hand-written shims in
+`psi_vm.h` that replaced the deleted natives, not through the interpreter.) "Animations are data,
+the interpreter is the only animation code." Every other upstream mode — Flash, Alarm, Leia, I Heart
 U, Radar, red_heart/Pulse, the Star Wars scan, Imperial March, Disco Ball (both variants), Short
 Circuit, Rebel Symbol, Knight Rider, Lightsaber Battle and the Star Wars Intro — is a flat opcode
 string, converted one mode at a time and golden-frame-gated to reproduce Neil's original C
@@ -338,8 +341,9 @@ credit him for it; not part of the contract layer either:
 - `include/functions.h` — prototypes for the native primitives the contract layer calls.
 
 Not part of the contract layer, but ours in the same "additive layer" sense: `include/psi_vm.h`, the
-animation bytecode interpreter every mode (native and contract alike) now plays through — see "The
-animation VM: modes are data now", above.
+animation bytecode interpreter the upstream modes now play through (all but the four native
+holdouts), plus the hand-written `vmContractScan`/`vmContractSparkle` shims the contract's scan and
+sparkle effects render through — see "The animation VM: modes are data now", above.
 
 That is the whole diff. `git diff 11d69a3..HEAD -- src include` will show you exactly this.
 

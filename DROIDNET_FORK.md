@@ -16,9 +16,11 @@ working exactly as they did.
 - **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), FastLED. `platformio.ini` is checked in and
   builds out of the box. `pio run` (serial-only, shipped default) links at 26,666 B of 28,672 B
   (93.0%); `pio run -e PSIPro-i2c` links at 28,108 B (98.0%). All 23 upstream modes (0-21 and 92)
-  ship; every animation except the four deliberate native holdouts (swipe/VUMeter/allON/allOFF) is
-  PROGMEM bytecode played by `include/psi_vm.h`'s interpreter, and that is what makes both fit.
-  See README, "Building" and "The animation VM: modes are data now".
+  ship; every upstream mode's animation except the four deliberate native holdouts
+  (swipe/VUMeter/allON/allOFF) is PROGMEM bytecode played by `include/psi_vm.h`'s interpreter (the
+  contract effects remain parametric C++ renderers; CE_SCAN/CE_SPARKLE via hand-written shims in
+  psi_vm.h), and that is what makes both fit. See README, "Building" and "The animation VM: modes
+  are data now".
 - **Seeded from:** the private C2B5 droid working collection @ `2fbd4023` (subdir `PSIPro`),
   2026-07-12, git-tracked files only. That collection is where the PlatformIO restructuring of Neil's
   flat Arduino sketch and the `visualizer/` came from.
