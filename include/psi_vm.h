@@ -116,19 +116,18 @@ const uint8_t vmPalette[VC__COUNT][3] PROGMEM = {
 
 // ---------------------------------------------------------------------------
 // Bitmap ids + blit palettes for OP_FRAME. Task 10 introduced BM_REBEL/
-// BM_PULSE + FP_HEART/FP_PULSE. Task 13 Part 1 (this commit) appends
-// BM_I/BM_HEART/BM_U — I/Heart/U reuse FP_HEART unchanged
-// (displayMatrixColor(LetterI/Heart/LetterU, 0xff0000, 0x909497, ...) is the
-// same fg/bg pair rebel already uses, verified against i_heart_u/red_heart's
-// own call sites in src/main.cpp before this task deleted them). Task 13
-// Part 2 (next commit) appends BM_LS0..BM_LS21 (the lightsaber's 22 frames)
-// + FP_SABER/FP_CLASH — deferred to its own commit so the +1,056 B PROGMEM
-// it revives lands only after Part 1's native deletions (i_heart_u/
-// red_heart/march) have already shrunk both envs, making the I2C squeeze
-// visible as its own step. New ids are always APPENDED (never inserted),
-// same append-only rule as the opcode enum below — a shipped program's
-// PROGMEM bytes already bake in the numeric id, so renumbering an earlier id
-// would silently corrupt it.
+// BM_PULSE + FP_HEART/FP_PULSE. Task 13 Part 1 appended BM_I/BM_HEART/BM_U —
+// I/Heart/U reuse FP_HEART unchanged (displayMatrixColor(LetterI/Heart/
+// LetterU, 0xff0000, 0x909497, ...) is the same fg/bg pair rebel already
+// uses, verified against i_heart_u/red_heart's own call sites in
+// src/main.cpp before that commit deleted them). Task 13 Part 2 (this
+// commit) appends BM_LS0..BM_LS21 (the lightsaber's 22 frames) + FP_SABER/
+// FP_CLASH — deferred to its own commit so the +1,056 B PROGMEM it revives
+// lands only after Part 1's native deletions (i_heart_u/red_heart/march)
+// had already shrunk both envs, making the I2C squeeze visible as its own
+// step. New ids are always APPENDED (never inserted), same append-only rule
+// as the opcode enum below — a shipped program's PROGMEM bytes already bake
+// in the numeric id, so renumbering an earlier id would silently corrupt it.
 // BM__COUNT / FP__COUNT are zero-cost sentinels (compile-time constants only,
 // never stored): the decode-walk test bounds-checks every OP_FRAME operand
 // against them, and the static_asserts below pin each table's row count to
@@ -142,14 +141,28 @@ const uint8_t vmPalette[VC__COUNT][3] PROGMEM = {
 // is true in the firmware build (matrices.h precedes this header, main.cpp
 // ~line 289 vs ~line 359) but not in the decode-walk test
 // (PSI_VM_TABLES_ONLY, no matrices.h).
-enum { BM_REBEL = 0, BM_PULSE, BM_I, BM_HEART, BM_U, BM__COUNT };
+enum {
+  BM_REBEL = 0, BM_PULSE, BM_I, BM_HEART, BM_U,
+  BM_LS0, BM_LS1, BM_LS2, BM_LS3, BM_LS4, BM_LS5, BM_LS6, BM_LS7, BM_LS8,
+  BM_LS9, BM_LS10, BM_LS11, BM_LS12, BM_LS13, BM_LS14, BM_LS15, BM_LS16,
+  BM_LS17, BM_LS18, BM_LS19, BM_LS20, BM_LS21,
+  BM__COUNT
+};
 
 // Bitmap blit palettes: {fg, bg, color2, color3, color4} color ids, indexed
-// by OP_FRAME's palId operand.
-enum { FP_HEART = 0, FP_PULSE, FP__COUNT };
+// by OP_FRAME's palId operand. FP_SABER/FP_CLASH verified against
+// lightsaberBattle's own displayMatrixColor call sites (src/main.cpp, before
+// this commit deleted it): every state but the two clashes calls
+// displayMatrixColor(lightsaberN, 0xffffff, 0x000000, true, 0, 0xff0000,
+// 0x0000cc) — fg=white, bg=black, color2=red, color3=blue(SABBLUE); the two
+// clash states (native cases 6/15) add a 7th arg, 0x999999 (GREY99), as
+// color4.
+enum { FP_HEART = 0, FP_PULSE, FP_SABER, FP_CLASH, FP__COUNT };
 const uint8_t vmFramePals[][5] PROGMEM = {
-  { VC_RED,     VC_GREYBG,  VC_K, VC_K, VC_K },  // rebel (mode 14); also I/Heart/U's fg/bg
-  { VC_PULSEFG, VC_PULSEBG, VC_K, VC_K, VC_K },  // pulse trace (mode 9 rear)
+  { VC_RED,     VC_GREYBG,  VC_K,   VC_K,       VC_K },       // rebel (mode 14); also I/Heart/U's fg/bg
+  { VC_PULSEFG, VC_PULSEBG, VC_K,   VC_K,       VC_K },       // pulse trace (mode 9 rear)
+  { VC_W,       VC_K,       VC_RED, VC_SABBLUE, VC_K },       // lightsaber (mode 19)
+  { VC_W,       VC_K,       VC_RED, VC_SABBLUE, VC_GREY99 },  // lightsaber clash (states 6/15)
 };
 static_assert(sizeof(vmFramePals) / sizeof(vmFramePals[0]) == FP__COUNT,
               "vmFramePals must have exactly one row per FP_* id (FP__COUNT)");
@@ -661,6 +674,119 @@ const uint8_t vmc_march[] PROGMEM = {
   OP_END,
 };
 
+// Mode 19: Lightsaber Battle — was lightsaberBattle(250). Native
+// (src/main.cpp, deleted by this task): firstTime sets ledPatternState=0,
+// allOFF(true) (VMF_CLEAR), and unconditionally forces timingReceived=false
+// (this sequence never honors a received command timing — same shape as
+// FadeOut's VMF_IGNORE_TIMING, though moot here since g_vmRuntime is 0 and
+// never read for a oneshot's reversion; omitted, see below). 23 states
+// (cases 0-22), each a displayMatrixColor(lightsaberN, 0xffffff, 0x000000,
+// true, 0, 0xff0000, 0x0000cc[, 0x999999]) call — displayMe=true, so EVERY
+// state double-shows exactly like red_heart (OP_SHOWLIVE then a normal
+// V_SHOW), golden-proven: mode19_saber.psig's first 46 frames are 23
+// bit-identical same-t_ms pairs. Bitmap sequence: ls0..ls5, ls6(CLASH,
+// FP_CLASH, this state's frame ALSO overrides time_delay to 100 for the
+// gap to the next frame), ls4 again (reused, not ls6's neighbor — verified
+// against case 7's literal `lightsaber4` argument), ls7..ls13, ls14(CLASH,
+// same 100 ms override), ls15..ls21 (this last state also overrides
+// time_delay, to 500). Case 23 (ledPatternState=99, updateLed=0 — no show,
+// no set_delay call at all) is a native "do nothing visible, but still
+// consume exactly one tick" step, same shape as StarWarsIntro's case 8
+// below — but unlike that one, lightsaberBattle has no loop to wrap back
+// into: vmStep()'s own OP_END/VMF_ONESHOT branch (`g_vmDone=true; return;`,
+// already landed in the core — see vmPlay()'s tail) already shows nothing
+// and returns on this same tick, so no new opcode is needed here; the plain
+// OP_END after the last V_SHOW(500) reproduces case 23 exactly for free.
+// Golden-verified down to the exact transition tick: mode19_saber.psig's
+// pair-22 (ls21, native case 22) lands at t=5408, and the first reverted
+// swipe frame lands at t=5954 — 546 ms later (500 native delay + ~20 ms
+// grid quantization + one genuine extra ~26 ms tick for the no-op OP_END
+// call, exactly mirroring native's case-23 tick before its own
+// `if ((ledPatternState==99)&&(!alwaysOn))` revert). VMF_ONESHOT's hold
+// semantics (g_vmDone latched, vmStep() never called again once alwaysOn
+// keeps the revert from firing) reproduce mode19_alwayson.psig exactly:
+// that capture's LAST frame pair also lands at t=5408 and the .psig simply
+// has no more frame records after it — no more show() calls, ever, matching
+// "hold = no more show() calls" precisely.
+const uint8_t vmc_saber[] PROGMEM = {
+  V_FRAME(BM_LS0,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS1,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS2,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS3,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS4,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS5,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS6,  FP_CLASH), OP_SHOWLIVE, V_SHOW(100),
+  V_FRAME(BM_LS4,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS7,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS8,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS9,  FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS10, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS11, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS12, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS13, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS14, FP_CLASH), OP_SHOWLIVE, V_SHOW(100),
+  V_FRAME(BM_LS15, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS16, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS17, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS18, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS19, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS20, FP_SABER), OP_SHOWLIVE, V_SHOW(250),
+  V_FRAME(BM_LS21, FP_SABER), OP_SHOWLIVE, V_SHOW(500),
+  OP_END,
+};
+
+// Mode 20: Star Wars Intro Text — was StarWarsIntro(500, 4, 0xC8AA00, 10).
+// Native (src/main.cpp, deleted by this task): firstTime sets
+// globalPatternLoops=loops (4), allOFF(true) (VMF_CLEAR), and
+// ledPatternState=2 — cases 0/1 are DEAD CODE (unreachable: nothing ever
+// sets the state to 0 or 1). Real flow is a 4-frame prologue (cases 2-5,
+// each shown once) then a 2-frame loop (cases 6-7) separated by a silent
+// no-show "case 8" tick that decrements the loop and jumps back to case 6 —
+// structurally identical to lightsaberBattle's case 23 above, EXCEPT this
+// one loops (case 8 sets ledPatternState back to 6, not a terminal state),
+// so it genuinely needs a returning, no-show, delay-preserving tick between
+// laps: OP_CLEARWAIT (Task 9), reused here for a second, unrelated purpose
+// (its own FastLED.clear() is harmless — case 6, the very next thing to
+// run, clears again itself before drawing anything, so no frame ever
+// observes case 8's intermediate buffer state). Golden-verified: the
+// case7->case6 (via case 8) transition is consistently ~546 ms
+// (500 + ~20 ms grid quantization + one genuine extra ~26 ms tick for
+// OP_CLEARWAIT), while every other transition (prologue-to-prologue,
+// case6->case7) is ~520 ms (500 + quantization only, no extra tick) —
+// mode20_swintro.psig frames 5->6 (2080->2600, 520) vs 6->7 (2600->3146,
+// 546) prove the asymmetry directly. Per-row scales (fill_row's third arg,
+// CRGB %= semantics) and knock-out pixel lists transcribed directly from
+// the native switch, case by case, in source order (draw-then-knock-out,
+// matching native's own sequential leds[] writes). loops=4 is native's raw
+// parameter, encoded for fidelity though unobservable: runtime=10 is
+// nonzero, so vmPlay()'s tail always takes the timer branch (same
+// timer-always-wins shape as vmc_march/vmc_rebel/vmc_disco4), confirmed
+// against the golden — content runs through frame 19 (t=9542, mid-case-6)
+// and reverts at frame 20 (t=10036), matching the 10 s deadline, not a
+// loop-count boundary.
+const uint8_t vmc_swintro[] PROGMEM = {
+  V_FROW(4, VC_GOLD, 0), V_SHOW(500),                                     // case 2
+  OP_CLEAR, V_SHOW(500),                                                  // case 3
+  V_FROW(3, VC_GOLD, 0), V_PIX(33, VC_K), V_PIX(24, VC_K), V_SHOW(500),   // case 4
+  OP_CLEAR, V_FROW(4, VC_GOLD, 0), V_FROW(2, VC_GOLD, 100),               // case 5
+    V_PIX(14, VC_K), V_PIX(15, VC_K), V_PIX(22, VC_K), V_PIX(23, VC_K), V_SHOW(500),
+  OP_LOOPSTART,
+  OP_CLEAR, V_FROW(3, VC_GOLD, 0), V_PIX(33, VC_K), V_PIX(24, VC_K),      // case 6
+    V_FROW(2, VC_GOLD, 100),
+    V_PIX(14, VC_K), V_PIX(15, VC_K), V_PIX(22, VC_K), V_PIX(23, VC_K),
+    V_FROW(1, VC_GOLD, 20),
+    V_PIX(13, VC_K), V_PIX(12, VC_K), V_PIX(7, VC_K), V_PIX(6, VC_K), V_SHOW(500),
+  OP_CLEAR, V_FROW(4, VC_GOLD, 0),                                        // case 7
+    V_FROW(2, VC_GOLD, 100),
+    V_PIX(14, VC_K), V_PIX(15, VC_K), V_PIX(22, VC_K), V_PIX(23, VC_K),
+    V_FROW(1, VC_GOLD, 20),
+    V_PIX(13, VC_K), V_PIX(12, VC_K), V_PIX(7, VC_K), V_PIX(6, VC_K),
+    V_FROW(0, VC_GOLD, 12),
+    V_PIX(0, VC_K), V_PIX(1, VC_K), V_PIX(4, VC_K), V_PIX(5, VC_K), V_SHOW(500),
+  OP_CLEARWAIT,                                                          // case 8 (silent, loops to case 6)
+  OP_END,
+};
+
 // ---------------------------------------------------------------------------
 // Program descriptors.
 // ---------------------------------------------------------------------------
@@ -680,7 +806,7 @@ struct VmProg {
 enum {
   VMP_FLASH = 0, VMP_ALARM, VMP_LEIA, VMP_SWSCAN, VMP_KNIGHT, VMP_RADAR,
   VMP_REBEL, VMP_PULSE, VMP_DISCO4, VMP_DISCOINF, VMP_FADEOUT,
-  VMP_IHEARTU, VMP_REDHEART, VMP_MARCH,
+  VMP_IHEARTU, VMP_REDHEART, VMP_MARCH, VMP_SABER, VMP_SWINTRO,
 };
 
 const VmProg vmProgs[] PROGMEM = {
@@ -698,6 +824,8 @@ const VmProg vmProgs[] PROGMEM = {
   { vmc_iheartu,   3, 0,  VMF_CLEAR },               // VMP_IHEARTU  (mode 7)  — was i_heart_u(500, 3, 0)
   { vmc_redheart,  3, 0,  VMF_CLEAR },               // VMP_REDHEART (mode 9 front) — was red_heart(500, 3, 0)
   { vmc_march,    42, 47, VMF_CLEAR },               // VMP_MARCH    (mode 11) — was march(0xffffff, 552, 42, 47)
+  { vmc_saber,     0, 0,  VMF_CLEAR | VMF_ONESHOT }, // VMP_SABER    (mode 19) — was lightsaberBattle(250)
+  { vmc_swintro,   4, 10, VMF_CLEAR },               // VMP_SWINTRO  (mode 20) — was StarWarsIntro(500, 4, 0xC8AA00, 10)
 };
 
 #ifndef PSI_VM_TABLES_ONLY
@@ -721,20 +849,29 @@ static CRGB vmColor(uint8_t id) {
 }
 
 // OP_FRAME's bitmap pointer table — indexed by BM_REBEL/BM_PULSE/BM_I/
-// BM_HEART/BM_U (declared with the rest of the bitmap/palette tables,
-// above). Lives inside this fence, unlike vmFramePals/BM_*/FP_*, because it
-// is a POINTER table: each entry is the real address of `rebel`/`pulse`/
-// `LetterI`/`Heart`/`LetterU`, the PROGMEM byte arrays matrices.h declares —
-// real data, not just a declaration, so linking it requires those symbols to
-// actually be defined in this translation unit. The firmware build
-// satisfies that (matrices.h precedes this header's include point, main.cpp
-// ~line 289 vs ~line 359); the decode-walk test (PSI_VM_TABLES_ONLY) does
-// not include matrices.h at all, which is exactly why this table — like
-// vmColor() above, for the same "needs firmware-only symbols" reason — sits
-// behind the fence instead of with the other tables. Referencing LetterI/
-// Heart/LetterU here is what actually revives their 48 B-each PROGMEM
-// bitmaps (the enum ids above cost nothing by themselves).
-const byte* const vmBitmaps[] PROGMEM = { rebel, pulse, LetterI, Heart, LetterU };
+// BM_HEART/BM_U/BM_LS0..BM_LS21 (declared with the rest of the bitmap/
+// palette tables, above). Lives inside this fence, unlike vmFramePals/
+// BM_*/FP_*, because it is a POINTER table: each entry is the real address
+// of `rebel`/`pulse`/`LetterI`/`Heart`/`LetterU`/`lightsaber0..21`, the
+// PROGMEM byte arrays matrices.h declares — real data, not just a
+// declaration, so linking it requires those symbols to actually be DEFINED
+// in this translation unit. The firmware build satisfies that (matrices.h
+// precedes this header's include point, main.cpp ~line 289 vs ~line 359);
+// the decode-walk test (PSI_VM_TABLES_ONLY) does not include matrices.h at
+// all, which is exactly why this table — like vmColor() above, for the same
+// "needs firmware-only symbols" reason — sits behind the fence instead of
+// with the other tables. Referencing lightsaber0..21 here is what actually
+// revives their 48 B-each PROGMEM bitmaps (+1,056 B total) — the enum ids
+// above cost nothing by themselves; this is the I2C squeeze moment Task 13
+// split into its own commit for.
+const byte* const vmBitmaps[] PROGMEM = {
+  rebel, pulse, LetterI, Heart, LetterU,
+  lightsaber0, lightsaber1, lightsaber2, lightsaber3, lightsaber4,
+  lightsaber5, lightsaber6, lightsaber7, lightsaber8, lightsaber9,
+  lightsaber10, lightsaber11, lightsaber12, lightsaber13, lightsaber14,
+  lightsaber15, lightsaber16, lightsaber17, lightsaber18, lightsaber19,
+  lightsaber20, lightsaber21,
+};
 static_assert(sizeof(vmBitmaps) / sizeof(vmBitmaps[0]) == BM__COUNT,
               "vmBitmaps must have exactly one entry per BM_* id (BM__COUNT)");
 

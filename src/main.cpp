@@ -1051,166 +1051,8 @@ void DiscoBall(unsigned long time_delay, int loops, int numSparkles, CRGB color,
   } 
 }
 
-void lightsaberBattle(unsigned long time_delay)
-{
-    if (firstTime) {
-    DEBUG_PRINT_LN("Lightsaber Battle");
-    firstTime = false;
-    patternRunning = true;
-    ledPatternState = 0;
-    // Clear the display the first time through
-    allOFF(true);
-    // Just ignore the timing from the command, this sequence doesn't work with it.
-    if (timingReceived) timingReceived = false;
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      // Note we set the display timeout large here so that the image stays displayed.
-      case 0: displayMatrixColor(lightsaber0, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 1; updateLed = 1; break;
-      case 1: displayMatrixColor(lightsaber1, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 2; updateLed = 1; break;
-      case 2: displayMatrixColor(lightsaber2, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 3; updateLed = 1; break;
-      case 3: displayMatrixColor(lightsaber3, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 4; updateLed = 1; break;
-      case 4: displayMatrixColor(lightsaber4, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 5; updateLed = 1; break;
-      case 5: displayMatrixColor(lightsaber5, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 6; updateLed = 1; break;
-      case 6: displayMatrixColor(lightsaber6, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc, 0x999999); ledPatternState = 7; updateLed = 1; time_delay=100; break;
-      case 7: displayMatrixColor(lightsaber4, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 8; updateLed = 1; break;
-      case 8: displayMatrixColor(lightsaber7, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 9; updateLed = 1; break;
-      case 9: displayMatrixColor(lightsaber8, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 10; updateLed = 1; break;
-      case 10: displayMatrixColor(lightsaber9, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 11; updateLed = 1; break;
-      case 11: displayMatrixColor(lightsaber10, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 12; updateLed = 1; break;
-      case 12: displayMatrixColor(lightsaber11, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 13; updateLed = 1; break;
-      case 13: displayMatrixColor(lightsaber12, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 14; updateLed = 1; break;
-      case 14: displayMatrixColor(lightsaber13, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 15; updateLed = 1; break;
-      case 15: displayMatrixColor(lightsaber14, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc, 0x999999); ledPatternState = 16; updateLed = 1; time_delay=100; break;
-      case 16: displayMatrixColor(lightsaber15, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 17; updateLed = 1; break;
-      case 17: displayMatrixColor(lightsaber16, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 18; updateLed = 1; break;
-      case 18: displayMatrixColor(lightsaber17, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 19; updateLed = 1; break;
-      case 19: displayMatrixColor(lightsaber18, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 20; updateLed = 1; break;
-      case 20: displayMatrixColor(lightsaber19, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 21; updateLed = 1; break;
-      case 21: displayMatrixColor(lightsaber20, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 22; updateLed = 1; break;
-      case 22: displayMatrixColor(lightsaber21, 0xffffff, 0x000000, true, 0, 0xff0000, 0x0000cc); ledPatternState = 23; updateLed = 1; time_delay=500; break;
-      case 23: ledPatternState = 99; updateLed = 0; break;
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-
-  // Check to see if we have run the loops needed for this pattern
-  if ((ledPatternState == 99) && (!alwaysOn))
-  {
-    // Set back to the default pattern
-    lastPSIeventCode = defaultPattern;
-    patternRunning = false;
-  }
-}
-
-// Scrolling text getting smaller and dimming as it rises up the screen
-void StarWarsIntro(unsigned long time_delay, uint8_t loops, CRGB color, unsigned long runtime)
-{
-
-  if (firstTime) {
-    DEBUG_PRINT_LN("Star Wars");
-    firstTime = false;
-    patternRunning = true;
-    globalPatternLoops = loops;
-    if ((runtime != 0) && (!timingReceived)) set_global_timeout(runtime);
-    if (timingReceived) set_global_timeout(commandTiming);
-    ledPatternState = 2;
-    allOFF(true);
-  }
-
-  updateLed = 0;
-
-  if (checkDelay()) {
-    switch (ledPatternState) {
-      // Note we set the display timeout large here so that the image stays displayed.
-      case 0: fill_row(5, color); ledPatternState=1; updateLed = 1; break;
-      case 1: allOFF(false);      ledPatternState=2; updateLed = 1; break;
-      case 2: fill_row(4, color); ledPatternState=3; updateLed = 1; break;
-      case 3: allOFF(false);      ledPatternState=4; updateLed = 1; break;
-      case 4: //fill_row(5, color); 
-              fill_row(3, color); 
-              leds[33]=0x000000;
-              leds[24]=0x000000; ledPatternState=5; updateLed = 1; break;
-      case 5: allOFF(false);
-	      fill_row(4, color); 
-	      fill_row(2, color, 100); 
-              // Turn off some pixels to shrink row 2
-              leds[14]=0x000000;
-              leds[15]=0x000000;
-              leds[22]=0x000000;
-              leds[23]=0x000000;
-              ledPatternState=6; updateLed = 1; break;
-       case 6: allOFF(false); 
-              //fill_row(5, color);
-              fill_row(3, color);
-              leds[33]=0x000000;
-              leds[24]=0x000000;
-              fill_row(2, color, 100); 
-              // Turn off some pixels to shrink row 2
-              leds[14]=0x000000;
-              leds[15]=0x000000;
-              leds[22]=0x000000;
-              leds[23]=0x000000;
-              fill_row(1, color, 20);
-              // Turn off some pixels to shrink row 1 
-              leds[13]=0x000000;
-              leds[12]=0x000000;
-              leds[7]=0x000000;
-              leds[6]=0x000000;
-              ledPatternState=7; updateLed = 1; break;
-      case 7: allOFF(false); 
-              fill_row(4, color);
-              fill_row(2, color, 100);
-              // Turn off some pixels to shrink row 2
-              leds[14]=0x000000;
-              leds[15]=0x000000;
-              leds[22]=0x000000;
-              leds[23]=0x000000;
-              fill_row(1, color, 20);
-              // Turn off some pixels to shrink row 1 
-              leds[13]=0x000000;
-              leds[12]=0x000000;
-              leds[7]=0x000000;
-              leds[6]=0x000000;
-              fill_row(0, color, 12);
-              // Turn off some pixels to shrink row 0
-              leds[0]=0x000000;
-              leds[1]=0x000000;
-              leds[4]=0x000000;
-              leds[5]=0x000000;ledPatternState=8; updateLed = 1; break;
-      case 8: ledPatternState=6; updateLed = 0; globalPatternLoops--; break;
-      default: {
-          // Do nothing.
-          break;
-        }
-    }
-  }
-
-  if (updateLed) {
-    FastLED.show(brightness());
-    set_delay(time_delay);
-  }
-
-  if ((runtime == 0) && (!timingReceived)){
-    // Check to see if we have run the loops needed for this pattern
-    loopsDonedoRestoreDefault();
-  } else {
-    // Check for the global timeout to have expired.
-    globalTimerDonedoRestoreDefault();
-  }
-  
-}
+// lightsaberBattle/StarWarsIntro (modes 19/20) were here — replaced by
+// VMP_SABER/VMP_SWINTRO bytecode programs (include/psi_vm.h).
 
 ///////////////////
 // OTHER HELPERS //
@@ -1358,14 +1200,12 @@ void runPattern(int pattern) {
     case 18:              //  18 - Turns Panel On Green Indefinitely
       allON(CRGB::Green, true);
       break;
-#ifndef CONTRACT_SLIM
-    case 19:              //  19 - Complex animation test, Lightsaber Battle
-      lightsaberBattle(250);
+    case 19:              //  19 - Complex animation test, Lightsaber Battle — was lightsaberBattle(250)
+      vmPlay(VMP_SABER);
       break;
-    case 20:             // 20 - Star Wars Intro Text (10 seconds)
-      StarWarsIntro(500, 4, 0xC8AA00, 10);
+    case 20:             // 20 - Star Wars Intro Text (10 seconds) — was StarWarsIntro(500, 4, 0xC8AA00, 10)
+      vmPlay(VMP_SWINTRO);
       break;
-#endif
     case 21:          // 12 - VU Meter (4 seconds).
       // Set loops to 0 to remain on indefinately.
       VUMeter(250, 20, 4);

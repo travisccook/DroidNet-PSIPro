@@ -34,6 +34,7 @@ static const ProgRef progs[] = {
     P(vmc_disco),
     P(vmc_fadeout),
     P(vmc_iheartu), P(vmc_redheart), P(vmc_march),
+    P(vmc_saber), P(vmc_swintro),
     // conversion tasks append their programs here
 };
 
@@ -156,6 +157,27 @@ int main() {
       return 1;
     }
   }
-  printf("test_psi_vm: %zu programs OK\n", sizeof(progs) / sizeof(progs[0]));
+
+  // Task 10 reviewer follow-up (noted in progress.md, closed here): OP_FRAME's
+  // bmp/pal operands are bounds-checked against BM__COUNT/FP__COUNT above, but
+  // nothing previously walked vmFramePals' OWN five color-id columns through
+  // validColorId() — a hand-typed VC_* row (like FP_SABER/FP_CLASH, Task 13)
+  // could silently bake an out-of-range id that vmColor() would read past
+  // vmPalette[] for, unchecked, exactly the class of gap colorOperandIndex()
+  // already closes for program bytes.
+  for (size_t r = 0; r < FP__COUNT; r++) {
+    for (size_t c = 0; c < 5; c++) {
+      uint8_t id = vmFramePals[r][c];
+      if (!validColorId(id)) {
+        printf("vmFramePals[%zu][%zu]: color id %u — not < VC__COUNT (%d) and not a "
+               "role id (0xFD/0xFE/0xFF); vmColor would read past vmPalette\n",
+               r, c, id, (int)VC__COUNT);
+        return 1;
+      }
+    }
+  }
+
+  printf("test_psi_vm: %zu programs OK, %d vmFramePals rows OK\n",
+         sizeof(progs) / sizeof(progs[0]), (int)FP__COUNT);
   return 0;
 }
