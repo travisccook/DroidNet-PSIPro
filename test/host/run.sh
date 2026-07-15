@@ -124,6 +124,20 @@ while read -r name cmd ms jumper ee pot at; do
 done < golden_matrix.txt
 echo "      $(wc -l < golden_matrix.txt | tr -d ' ') captures identical."
 
+# Set equality, both directions, between golden_matrix.txt's row names and
+# test/host/golden/*.psig's basenames: the loop above only proves that every
+# NAMED row's regenerated capture matches its committed twin — it says
+# nothing about a matrix row with no committed golden (silently never
+# diffed) or a committed .psig nothing in the matrix drives (a stale capture
+# left behind by a renamed/deleted row, never regenerated or checked again).
+matrix_names="$(awk 'NF{print $1}' golden_matrix.txt | sort -u)"
+golden_names="$(cd golden && ls -1 *.psig | sed 's/\.psig$//' | sort -u)"
+if [ "$matrix_names" != "$golden_names" ]; then
+  echo "MATRIX/GOLDEN NAME MISMATCH (golden_matrix.txt rows vs test/host/golden/*.psig):"
+  diff <(echo "$matrix_names") <(echo "$golden_names") || true
+  exit 1
+fi
+
 echo "[7/7] REAL cross-compile (ATmega32U4 (SparkFun Pro Micro)) -- optional"
 # THIS is the stage that makes "it compiles" a claim about the FIRMWARE rather than a claim
 # about our mock. Stages 1-6 are host checks: they prove the contract logic, fuzz the

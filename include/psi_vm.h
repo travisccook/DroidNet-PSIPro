@@ -188,6 +188,8 @@ enum {
   OP_SHOW,         // d16                   show + set_delay(d)
   OP_SHOWR,        // rep, d16              show + set_delay(d), re-run this frame rep times
   OP_SHOWRND,      // lo16, hi16            show + set_delay(random(lo,hi))
+                   // — reserved: no shipped program uses this op yet (swipe,
+                   // the one native mode with a randomized delay, stayed native)
   OP_CLEAR,        //                       stage all-black
   OP_FILL_ALL,     // color                 stage solid fill
   OP_FILL_ROW,     // row, color, scale     fill_row (scale: CRGB %= semantics, 0 = none)

@@ -24,6 +24,14 @@
 #include <assert.h>
 #include <stdio.h>
 
+// Panel geometry, mirrored from include/config.h's NUM_LEDS/COLUMNS/
+// LEDS_PER_COLUMN — duplicated rather than #included, since this file builds
+// psi_vm.h in PSI_VM_TABLES_ONLY mode against native_mocks/, not the real
+// config.h (which the tables-only build has no other reason to pull in).
+static const int PSI_NUM_LEDS = 48;
+static const int PSI_COLUMNS  = 10;
+static const int PSI_ROWS     = 6;   // config.h's LEDS_PER_COLUMN
+
 struct ProgRef { const char* name; const uint8_t* code; size_t len; };
 #define P(x) {#x, x, sizeof(x)}
 static const ProgRef progs[] = {
@@ -126,6 +134,56 @@ int main() {
           return 1;
         }
       }
+      // Spatial operands: OP_PIX/OP_FILL_ROW/OP_FILL_COLR/OP_HALFCOLR index
+      // leds[]/fill_row/fill_column geometry UNCHECKED at runtime, the same
+      // zero-cost tradeoff as OP_FRAME's table ids and the color ids above —
+      // so bound them here instead.
+      if (op == OP_PIX) {
+        uint8_t idx = pr.code[i];
+        if (idx >= PSI_NUM_LEDS) {
+          printf("%s: OP_PIX at %zu names LED index %u, but the panel has only %d "
+                 "LEDs — a runtime write past leds[]\n", pr.name, i - 1, idx, PSI_NUM_LEDS);
+          return 1;
+        }
+      }
+      if (op == OP_FILL_ROW) {
+        uint8_t row = pr.code[i];
+        if (row >= PSI_ROWS) {
+          printf("%s: OP_FILL_ROW at %zu names row %u, but the panel has only %d "
+                 "rows — fill_row would index out of bounds\n", pr.name, i - 1, row, PSI_ROWS);
+          return 1;
+        }
+      }
+      if (op == OP_FILL_COLR) {
+        uint8_t start = pr.code[i], count = pr.code[i + 1];
+        if ((int)start + (int)count > PSI_COLUMNS) {
+          printf("%s: OP_FILL_COLR at %zu spans columns %u..%u, past the panel's %d "
+                 "columns\n", pr.name, i - 1, start, start + count - 1, PSI_COLUMNS);
+          return 1;
+        }
+      }
+      if (op == OP_HALFCOLR) {
+        uint8_t start = pr.code[i], count = pr.code[i + 1], half = pr.code[i + 2];
+        if ((int)start + (int)count > PSI_COLUMNS) {
+          printf("%s: OP_HALFCOLR at %zu spans columns %u..%u, past the panel's %d "
+                 "columns\n", pr.name, i - 1, start, start + count - 1, PSI_COLUMNS);
+          return 1;
+        }
+        if (half >= 2) {
+          printf("%s: OP_HALFCOLR at %zu names half %u, but only 0 (top) / 1 (bottom) "
+                 "exist\n", pr.name, i - 1, half);
+          return 1;
+        }
+      }
+      if (op == OP_SHOWR) {
+        uint8_t rep = pr.code[i];
+        if (rep == 0) {
+          printf("%s: OP_SHOWR at %zu has rep=0 — g_vmRepLeft (uint8_t) underflows to "
+                 "255 on the first decrement instead of hitting 0, so the frame would "
+                 "silently re-run 255 extra ticks\n", pr.name, i - 1);
+          return 1;
+        }
+      }
       i += (size_t)a;
       if (op == OP_LOOPSTART) {
         loopStarts++;
@@ -175,6 +233,30 @@ int main() {
         return 1;
       }
     }
+  }
+
+  // Completeness: every vmProgs[] descriptor's code pointer must appear in
+  // progs[] above, or a shipped program could ship without ever passing
+  // through this decode-walk at all (a new VmProg row added without a
+  // matching P() entry here). vmProgs[] and VmProg::code both live outside
+  // the PSI_VM_TABLES_ONLY fence (include/psi_vm.h), and PROGMEM/
+  // pgm_read_ptr are no-ops on this host build (native_mocks/Arduino.h — see
+  // its PROGMEM section), so a plain pointer comparison against progs[] is
+  // safe here without going through pgm_read_ptr.
+  {
+    const size_t nVmProgs = sizeof(vmProgs) / sizeof(vmProgs[0]);
+    for (size_t k = 0; k < nVmProgs; k++) {
+      bool found = false;
+      for (const auto& pr : progs) {
+        if (pr.code == vmProgs[k].code) { found = true; break; }
+      }
+      if (!found) {
+        printf("vmProgs[%zu]: code pointer not covered by any progs[] entry above — "
+               "this program ships but the decode-walk above never checked it\n", k);
+        return 1;
+      }
+    }
+    printf("test_psi_vm: %zu/%zu vmProgs[] entries covered by progs[]\n", nVmProgs, nVmProgs);
   }
 
   printf("test_psi_vm: %zu programs OK, %d vmFramePals rows OK\n",
