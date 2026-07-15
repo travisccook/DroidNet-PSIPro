@@ -116,7 +116,8 @@ Host-only test instrument proving byte-exact fidelity. Zero production-file chan
 
 ## 6. Acceptance criteria
 
-1. All 22 upstream display modes present and selectable in BOTH envs (five restored).
+1. All 23 upstream display modes (case labels 0–21 plus 92) present and selectable in
+   BOTH envs (five restored).
 2. Every VM-encoded mode's golden replay is `cmp`-identical to Neil's original C
    (captured pre-conversion via config-shadow), same seed/clock/config.
 3. Full host suite green (341 checks + fuzz + new stages); both envs link with
