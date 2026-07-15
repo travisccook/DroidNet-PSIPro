@@ -92,7 +92,7 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 // `pio run && pio run -e PSIPro-i2c` and test/host/stack_report.py rather than trusting
 // this comment as it ages):
 //                                serial-only      + I2C
-//     flash                  26,666 B (93.0%)   28,108 B (98.0%)
+//     flash                  26,760 B (93.3%)   28,202 B (98.4%)
 //     SRAM                    1,309 B (51.1%)    1,590 B (62.1%)
 //     stack budget                    1,251 B            970 B
 //     worst-case stack           371 B (30%)       441 B (45%)

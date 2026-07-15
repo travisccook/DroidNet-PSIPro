@@ -97,7 +97,11 @@ echo "[6/7] golden-frame parity: mocks + Neil's animation code must reproduce"
 echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # The FULL-variant binary (built via mk_full_config.sh's shadowed config.h — a
 # historical CONTRACT_SLIM strip that is now a documented no-op, see that script) is
-# the ground truth for all 23 native modes (0-21 and 92). golden_matrix.txt drives the same capture
+# the ground truth. golden_matrix.txt's 29 rows are not 29 modes: 28 of them are captures of
+# the 23 upstream modes' (0-21 and 92) native ground truth (several modes get more than one row —
+# front/rear jumper, alwaysOn) plus one fork-added row, mode22_process, whose "ground truth" is the
+# VM program itself (see vmc_process's comment, include/psi_vm.h) rather than any native code.
+# golden_matrix.txt drives the same capture
 # command line that produced the committed .psig files; any regenerated capture
 # that doesn't cmp byte-identical to its committed twin means the mocks or Neil's
 # unmodified main.cpp no longer reproduce what we locked in as ground truth.
@@ -156,8 +160,8 @@ echo "    NOTE: this board's flash budget is the tight one — 28,672 B usable, 
 echo "    stock upstream firmware already used 87.6% of it. The linker enforces the"
 echo "    ceiling, so if this stage passes, both configs FIT — THAT is the invariant this"
 echo "    stage exists to hold, not any specific byte count, which will keep moving as"
-echo "    animations are added. (as of feature/animation-vm: PSIPro 26,666 B / 93.0%,"
-echo "    PSIPro-i2c 28,108 B / 98.0% — re-measure with 'pio run && pio run -e PSIPro-i2c'"
+echo "    animations are added. (as of feature/animation-vm: PSIPro 26,760 B / 93.3%,"
+echo "    PSIPro-i2c 28,202 B / 98.4% — re-measure with 'pio run && pio run -e PSIPro-i2c'"
 echo "    rather than trusting this comment.) It fits because of the codegen flags in"
 echo "    platformio.ini and the PSI_NOINLINE outlining in src/contract/ContractPSI.h —"
 echo "    disable either and this stage fails. There used to be a third leg here,"

@@ -62,8 +62,8 @@ JawaLite master on the bus at address 22 — **you want the I2C build**. It is o
 ```
 
 ```bash
-pio run                  # serial-only (default)   26,666 B  93.0% flash
-pio run -e PSIPro-i2c    # + I2C intake            28,108 B  98.0% flash
+pio run                  # serial-only (default)   26,760 B  93.3% flash
+pio run -e PSIPro-i2c    # + I2C intake            28,202 B  98.4% flash
 ```
 
 Be aware of the failure mode if you get this wrong: with I2C compiled out, the board does not
@@ -87,7 +87,7 @@ What it buys, measured:
 
 | | serial-only (default) | with I2C |
 | --- | --- | --- |
-| flash | 26,666 B (93.0%) | 28,108 B (98.0%) |
+| flash | 26,760 B (93.3%) | 28,202 B (98.4%) |
 | SRAM | 1,309 B (51.1%) | 1,590 B (62.1%) |
 | worst-case stack | 371 B of 1,251 B (30%) | 441 B of 970 B (45%) |
 | can an interrupt reach a render? | **no** | yes (upstream's native path) |
@@ -125,8 +125,8 @@ tightest board of the three, and the numbers are worth knowing before you build:
 | Build | Flash | of 28,672 B |
 | --- | --- | --- |
 | Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
-| **This fork, as shipped (serial-only)** | **26,666 B** | **93.0%** |
-| This fork with the I2C intake (`-e PSIPro-i2c`) | 28,108 B | 98.0% |
+| **This fork, as shipped (serial-only)** | **26,760 B** | **93.3%** |
+| This fork with the I2C intake (`-e PSIPro-i2c`) | 28,202 B | 98.4% |
 | …I2C, with the codegen flags removed | 30,070 B | 104.9% — **will not link** |
 | …I2C, with `PSI_NOINLINE` removed | 29,650 B | 103.4% — **will not link** |
 
@@ -136,14 +136,20 @@ upstream mode's animation except the four deliberate native holdouts
 one small interpreter (`include/psi_vm.h`) — the contract effects remain parametric C++ renderers —
 which is *why* there is headroom at all: it replaced the hand-written per-mode state machines with
 one. That headroom is not evenly spread, though.
-The **serial-only default has real margin** (2,006 B spare) — either the AVR codegen flags in
+The **serial-only default has real margin** (1,912 B spare) — either the AVR codegen flags in
 `platformio.ini` or the `PSI_NOINLINE` outlining in `src/contract/ContractPSI.h` could be dropped on
-their own and it would still fit, if barely (99.5% / 98.8%). The **I2C build has almost none** (564 B
+their own and it would still fit, if barely (99.5% / 98.8%). The **I2C build has almost none** (470 B
 spare) — it genuinely needs both: drop either one and it overflows, per the last two rows above. (For
 scale: as originally published, before any of the flash or VM work, this fork linked at 38,790 B —
 135.3%. There used to be a third leg here too, `CONTRACT_SLIM`, an escape hatch that dropped five
 native novelty modes to claw back room. It is gone — see "What this fork adds", below — because the
 VM made it unnecessary.)
+
+The design target going into the VM conversion was roughly 26.3-26.4 KB serial / 27.7-27.8 KB I2C —
+the probe's own byte-cost estimate plus about 100 B of slack. The shipped totals above land about
+0.4 KB over that in both environments: the measured price of byte-exactness (a handful of ops and
+program shapes the probe's seeds got wrong, forced by the golden captures) plus the +94 B mode-22
+demo — both configurations still fit, but only because the linker enforces the ceiling on every run.
 
 ### SRAM and the stack
 

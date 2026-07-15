@@ -14,14 +14,15 @@ working exactly as they did.
 - **Role:** the PSI board of the three-board Cantina dome light-show family (RSeries Logics, PSI Pro,
   Flthy HPs). This is the tightest of the three and the pacing item.
 - **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), FastLED. `platformio.ini` is checked in and
-  builds out of the box. `pio run` (serial-only, shipped default) links at 26,666 B of 28,672 B
-  (93.0%); `pio run -e PSIPro-i2c` links at 28,108 B (98.0%). All 23 upstream modes (0-21 and 92)
-  ship; every upstream mode's animation except the four deliberate native holdouts
+  builds out of the box. `pio run` (serial-only, shipped default) links at 26,760 B of 28,672 B
+  (93.3%); `pio run -e PSIPro-i2c` links at 28,202 B (98.4%). Both totals already include mode 22
+  ("processing sweep"), a fork-added demo animation that is not one of the 23 upstream modes — it
+  exists to measure the marginal cost of a new one: 94 B, both configs. All 23 upstream modes (0-21
+  and 92) ship; every upstream mode's animation except the four deliberate native holdouts
   (swipe/VUMeter/allON/allOFF) is PROGMEM bytecode played by `include/psi_vm.h`'s interpreter (the
   contract effects remain parametric C++ renderers; CE_SCAN/CE_SPARKLE via hand-written shims in
   psi_vm.h), and that is what makes both fit. See README, "Building" and "The animation VM: modes
-  are data now". Mode 22 ("processing sweep") is a fork-added demo animation, not one of the 23
-  upstream modes — it exists to measure the marginal cost of a new one: 94 B, both configs.
+  are data now".
 - **Seeded from:** the private C2B5 droid working collection @ `2fbd4023` (subdir `PSIPro`),
   2026-07-12, git-tracked files only. That collection is where the PlatformIO restructuring of Neil's
   flat Arduino sketch and the `visualizer/` came from.

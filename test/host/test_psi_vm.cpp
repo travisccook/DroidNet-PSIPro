@@ -36,7 +36,6 @@ static const ProgRef progs[] = {
     P(vmc_iheartu), P(vmc_redheart), P(vmc_march),
     P(vmc_saber), P(vmc_swintro),
     P(vmc_process),
-    // conversion tasks append their programs here
 };
 
 static int arity(uint8_t op) {
