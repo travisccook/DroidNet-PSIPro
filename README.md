@@ -224,9 +224,9 @@ This fork used to have a `CONTRACT_SLIM` escape hatch that dropped five native n
 upstream modes are present in every configuration this fork builds; see "What this fork adds" below
 for how.
 
-If you are thinking of putting this near a droid: **bench-test it on a bare board and check the
-current draw before you trust it.** Neil's warning about the brightness pot and USB power still
-applies, and applies harder to code nobody has run.
+Neil's warning about the brightness setting and USB power still applies: this PSI can draw more power
+than a computer's USB port can supply, so keep the brightness low when it is powered over USB. See
+[README_UPSTREAM.md](README_UPSTREAM.md).
 
 ---
 
