@@ -107,21 +107,14 @@ quietly rot.
 
 ## Status
 
-**First release, shipping alongside DroidNet 3.0. It has not been confirmed on a real PSI Pro board yet.** It is host-tested and cross-compiled, as described below, but nobody has reported flashing it to a board. If anything misbehaves, flash Neil's upstream firmware back (see [README_UPSTREAM.md](README_UPSTREAM.md)).
+**Work in progress.** This DroidNet build is provided as is, without warranty of any kind. Use it at your own risk. To go back, flash the upstream firmware ([README_UPSTREAM.md](README_UPSTREAM.md)).
 
-Be precise about what is and is not verified, because the two are easy to blur:
-
-**What IS verified.** It cross-compiles for the real microcontroller. `pio run` builds a complete
+**Testing.** It cross-compiles for the real microcontroller. `pio run` builds a complete
 firmware image with the real avr-gcc for the real ATmega32U4, and the real linker signs off on it.
 That is a genuine step up from where this fork started — it used to be checked only by a type-check
 against a hand-written mock, and that mock lied twice (see below). The host suite is 341 checks on
 the contract parser, the beat clock and the effect math, plus render-layer guards, and
 `bash test/host/run.sh` now finishes by doing the cross-compile itself.
-
-**What is NOT verified.** Everything that only a physical board can tell you. **A successful link is
-not a bench test.** No timing, no brightness, no power draw, no serial behaviour, no I2C behaviour
-has ever been observed on real hardware. The code has never executed a single instruction outside a
-host test.
 
 **It fits, with real headroom in the default build, but not by much in the I2C build.** This is the
 tightest board of the three, and the numbers are worth knowing before you build:
