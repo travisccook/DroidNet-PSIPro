@@ -1,5 +1,7 @@
 # DroidNet-PSIPro
 
+Part of [DroidNet](https://github.com/travisccook/DroidNetSignalBooster-releases), the Signal Booster for droids. This is one of its board firmwares.
+
 An additive fork of the **PSI Pro** firmware by **Neil Hutchison**, for MaxStang's PSI Pro board.
 
 Nearly everything in this repository is Neil's work (and his contributors'). We added one small
@@ -103,9 +105,9 @@ quietly rot.
 
 ---
 
-## STOP: this has never run on hardware
+## Status
 
-**Nothing in this fork has ever been flashed to a real PSI Pro. Not once.**
+**First release, shipping alongside DroidNet 3.0. It has not been confirmed on a real PSI Pro board yet.** It is host-tested and cross-compiled, as described below, but nobody has reported flashing it to a board. If anything misbehaves, flash Neil's upstream firmware back (see [README_UPSTREAM.md](README_UPSTREAM.md)).
 
 Be precise about what is and is not verified, because the two are easy to blur:
 
