@@ -28,7 +28,8 @@
 #define WDP_FW_MAX   27
 #define WDP_CAPS_MAX 48
 
-// The line buffer: line + NUL. The longest fork line (FlthyHPs with a "-dirty" fw) is 106.
+// The line buffer: line + NUL. The longest fork line (FlthyHPs with a "-dirty" fw) is 107 bytes
+// with its newline.
 #ifndef WDP_LINE_MAX
 #define WDP_LINE_MAX 128
 #endif
