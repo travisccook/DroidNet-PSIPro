@@ -5,6 +5,9 @@
 #
 # Host checks for the PSI Pro contract fork (stages 1-8 need no hardware and no toolchain; stage 9 is the real cross-compile):
 #   1. contract_core.h parser unit tests
+#   1b. wdp_announce_core.h WDP device announce unit tests (shared with the RSeries and Flthy forks)
+#   1c. wdp_fork.h: this fork's real WDP identity builds its line, front and rear
+#   1d. the WDP announce in the firmware: main.cpp + mocks (TX room, the Q ack, the jumper, the seed)
 #   2. psi_vm.h decode-walk test (every VM program: known ops, in-bounds arities, reaches OP_END)
 #   3. ContractPSI.h firmware-layer type-check against a mock of the MaxPSI board API
 #   4. command-buffer width guard (the v1.2 accent keys push a scored line past 63 chars)
@@ -18,6 +21,27 @@ cd "$(dirname "$0")"
 echo "[1/9] contract_core parser unit tests"
 clang++ -std=c++17 -Wall -Wextra -O0 test_contract_core.cpp -o /tmp/psi_contract_test
 /tmp/psi_contract_test
+echo "[1b/9] wdp_announce_core WDP device announce unit tests"
+# Shared byte-identically with the RSeries and Flthy forks (src/wdp/wdp_announce_core.h and this
+# test both). -std=c++11: avr-gcc builds the same header as gnu++11.
+clang++ -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_announce_core.cpp -o /tmp/psi_wdp_test
+/tmp/psi_wdp_test
+echo "[1c/9] wdp_fork PSI Front / PSI Rear identity"
+# Fork-local. The header's own types and caps, with the longest fw git gives a build
+# ("<sha>-dirty"), must build a valid line for both roles in the fork's WDP_LINE_MAX, which is
+# sized to exactly the front line (78 B here) rather than the core's 128.
+clang++ -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_fork.cpp -o /tmp/psi_wdp_fork_test
+/tmp/psi_wdp_fork_test
+echo "[1d/9] WDP announce in the firmware (main.cpp + mocks)"
+# src/main.cpp verbatim against the golden harness's mocks, Serial1 modelled as a 63-byte TX
+# buffer draining at 9600 baud: pieces never exceed the room, a verb-Q ack mid-line waits for the
+# line (ContractPSI.h calls wdpFinish()), the jumper picks the type at each announce, and the seed
+# differs front vs rear. -std=gnu++17: the mocks use inline variables. -Wno-macro-redefined:
+# config.h redefines preamble.h's DEBUG_PRINT/UNUSED/FALL_THROUGH (upstream; stage 6 shows them).
+c++ -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all \
+    -Wno-macro-redefined -I native_mocks -I ../../include '-DWDP_FW="abcdef0-dirty"' \
+    test_wdp_firmware.cpp -o /tmp/psi_wdp_firmware
+/tmp/psi_wdp_firmware
 echo "[2/9] psi_vm.h decode-walk test"
 # Structural check of every VM program (test/host/test_psi_vm.cpp): ops are known,
 # arities consume in-bounds bytes, every program reaches OP_END within its array. Built
@@ -196,11 +220,11 @@ echo "    NOTE: this board's flash budget is the tight one — 28,672 B usable, 
 echo "    stock upstream firmware already used 87.6% of it. The linker enforces the"
 echo "    ceiling, so if this stage passes, both configs FIT — THAT is the invariant this"
 echo "    stage exists to hold, not any specific byte count, which will keep moving as"
-echo "    animations are added. (as of feature/animation-vm: PSIPro 26,760 B / 93.3%,"
-echo "    PSIPro-i2c 28,202 B / 98.4% — re-measure with 'pio run && pio run -e PSIPro-i2c'"
+echo "    animations are added. (as of the WDP device announce: PSIPro 25,320 B / 88.3%,"
+echo "    PSIPro-i2c 26,758 B / 93.3% — re-measure with 'pio run && pio run -e PSIPro-i2c'"
 echo "    rather than trusting this comment.) It fits because of the codegen flags in"
 echo "    platformio.ini and the PSI_NOINLINE outlining in src/contract/ContractPSI.h —"
-echo "    disable either and this stage fails. There used to be a third leg here,"
+echo "    disable both and the I2C build fails. There used to be a third leg here,"
 echo "    CONTRACT_SLIM, that dropped five native modes to make room; those five are"
 echo "    now permanent PROGMEM bytecode (include/psi_vm.h), all 23 upstream modes"
 echo "    ship, and CONTRACT_SLIM is gone."

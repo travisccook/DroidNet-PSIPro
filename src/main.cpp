@@ -358,6 +358,10 @@ CRGB overlayColors[COLUMNS];
 // firstTime/patternRunning/leds/ledMatrix/...) and before ContractPSI.h.
 #include "psi_vm.h"
 
+// WDP device announce: tells the WCB on serialPort what this board is, every 25-30 s. Included
+// after serialPort and BEFORE ContractPSI.h, whose verb-Q ack calls wdpFinish(). Additive.
+#include "wdp/wdp_fork.h"
+
 // Driveable-Animation Contract fork layer. Included HERE (after the global state
 // block above, and after functions.h prototyped the render primitives) so its
 // inline dispatchers see leds[]/level[]/tempGlobalBrightnessValue/firstTime/
@@ -404,6 +408,9 @@ void setup() {
     Serial1.begin(baudrate);
     serialPort=&Serial1;
   #endif
+
+  // WDP device announce: seed and schedule the first line (0.5-3 s from now). Additive.
+  wdpForkSetup();
 
   // READ the default settings from the EEPROM
   byte value;
@@ -483,6 +490,10 @@ void loop()
   // Checked every loop pass (not only inside the 25 ms gate) for crisp, sub-tick
   // pulse-accent expiry. No-op unless a contract P overlay is active.
   contractPulseTick();
+
+  // WDP device announce, every pass and outside the 25 ms gate: writes only what fits in the
+  // serial TX buffer, so it never blocks. No-op between lines.
+  wdpForkTick();
 
 }
 

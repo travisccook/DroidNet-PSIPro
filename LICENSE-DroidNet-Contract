@@ -2,6 +2,9 @@ DroidNet contract layer — src/contract/contract_core.h, src/contract/ContractP
 (Everything else in this tree is the upstream PSI Pro firmware by Neil Hutchison and contributors.)
 contract_core.h is shared byte-identically with the DroidNet RSeries and Flthy forks; its author
 licenses it LGPL-2.1-only in the RSeries fork and MIT here.
+DroidNet WDP device announce — src/wdp/wdp_fork.h, scripts/wdp_fw.py — MIT, as below. The shared
+announce core, src/wdp/wdp_announce_core.h, and its test, test/host/test_wdp_announce_core.cpp, are
+byte-identical across the three forks and LGPL-2.1-only, as their headers say.
 
 MIT License
 

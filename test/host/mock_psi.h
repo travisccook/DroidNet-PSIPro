@@ -107,6 +107,13 @@ static _Stream* serialPort = &_sp;
 
 inline void mock_resetSerial() { mock_serialLen = 0; mock_serialOut[0] = '\0'; }
 
+// wdpFinish() (src/wdp/wdp_fork.h, included before ContractPSI.h in main.cpp) sends the rest of a
+// WDP announce in flight before the ack writes to the same port. Recorded, not modelled: how many
+// calls, and how many ack bytes had already been written at the last one (0 = it came first).
+static int mock_wdpFinishCalls  = 0;
+static int mock_wdpFinishAtLen  = -1;
+inline void wdpFinish() { mock_wdpFinishCalls++; mock_wdpFinishAtLen = mock_serialLen; }
+
 // render primitives + parser targets (exact signatures from src/main.cpp).
 // Bodies model ONLY whether the primitive latches the frame (FastLED.show), which is
 // what the contract layer depends on; pixel layout (ledMatrix) is not simulated.

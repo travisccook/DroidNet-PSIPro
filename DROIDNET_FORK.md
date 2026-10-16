@@ -13,9 +13,10 @@ working exactly as they did.
 
 - **Role:** the PSI board of the three-board Cantina dome light-show family (RSeries Logics, PSI Pro,
   Flthy HPs). This is the tightest of the three and the pacing item.
-- **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), FastLED. `platformio.ini` is checked in and
-  builds out of the box. `pio run` (serial-only, shipped default) links at 26,760 B of 28,672 B
-  (93.3%); `pio run -e PSIPro-i2c` links at 28,202 B (98.4%). Both totals already include mode 22
+- **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), clean-room WS2812 driver (`include/FastLED.h`).
+  `platformio.ini` is checked in and builds out of the box. `pio run` (serial-only, shipped default)
+  links at 25,320 B of 28,672 B (88.3%); `pio run -e PSIPro-i2c` links at 26,758 B (93.3%), WDP
+  device announce included (README, "WDP device announce"). Both totals also include mode 22
   ("processing sweep"), a fork-added demo animation that is not one of the 23 upstream modes — it
   exists to measure the marginal cost of a new one: 94 B, both configs. All 23 upstream modes (0-21
   and 92) ship; every upstream mode's animation except the four deliberate native holdouts

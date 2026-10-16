@@ -698,10 +698,19 @@ int main() {
     for (const QCase& qc : cases) {
       for (int i = 0; i < 3 && qc.setup[i]; i++) parseContract(qc.setup[i]);
       mock_resetSerial();
+      const int finishesBefore = mock_wdpFinishCalls;
       parseContract(qc.query);
       if (strcmp(mock_serialOut, qc.want) != 0) {
         printf("FAIL: verb-Q ack bytes drifted.\n  want: \"%s\"\n  got:  \"%s\"\n",
                qc.want, mock_serialOut);
+        return 1;
+      }
+      // The ack shares serialPort with the WDP announce: it must call wdpFinish() once, BEFORE
+      // its first byte, or it can land inside a half-sent "@WDP1 ..." line and garble both.
+      if (mock_wdpFinishCalls != finishesBefore + 1 || mock_wdpFinishAtLen != 0) {
+        printf("FAIL: the verb-Q ack did not call wdpFinish() exactly once before writing "
+               "(calls %d, ack bytes already written at the call: %d)\n",
+               mock_wdpFinishCalls - finishesBefore, mock_wdpFinishAtLen);
         return 1;
       }
     }
@@ -776,7 +785,7 @@ int main() {
 
   printf("ContractPSI.h type-check [%s] + score-native/latch/score-clear/build-ramp/scale "
          "+ v1.2 accent-overlay guards (A1-A9: A7 flash strobes, A8 strobe cap unbypassable, "
-         "A9 a resend replaces the show) + A10 verb-Q ack bytes%s OK\n",
+         "A9 a resend replaces the show) + A10 verb-Q ack bytes, after wdpFinish()%s OK\n",
 #ifdef PSI_ENABLE_I2C
          "I2C build", " + A11 the I2C ISR only queues (never parses, never renders)"
 #else

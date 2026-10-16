@@ -20,7 +20,8 @@
 // primitives it still calls (allON/allOFF/VUMeter/runPattern/brightness), and AFTER
 // include/psi_vm.h (main.cpp ~line 359) — whose vmContractScan/vmContractSparkle
 // shims replaced the native scanCol()/DiscoBall() this layer used to call directly;
-// see psi_vm.h's own "Contract-layer shims" comment. It is included BEFORE
+// see psi_vm.h's own "Contract-layer shims" comment, and AFTER src/wdp/wdp_fork.h, whose
+// wdpFinish() the verb-Q ack calls. It is included BEFORE
 // loop()/serialEvent()/receiveEvent() so those can call the contract entry points.
 //
 // DESIGN (verified against src/main.cpp + include/config.h; re-verified 2026-07-14
@@ -509,6 +510,7 @@ inline void applyContract(const ParsedContract& p) {
         w = _fmtU16(w, g_clock.bpm);
         *w++ = '\r';
         *w   = '\0';
+        wdpFinish();                                   // a WDP announce in flight goes out whole first
         serialPort->print(buf);
       }
       break;

@@ -60,6 +60,8 @@ inline long map(long x, long in_min, long in_max, long out_min, long out_max) {
 }
 inline void sei() {}
 inline void cli() {}
+// The status register, as <avr/io.h> provides it: the WDP seed saves it around cli().
+inline uint8_t SREG = 0x80;
 
 // ---- PROGMEM ----
 #define PROGMEM
@@ -88,6 +90,19 @@ class Stream {
   void print(char c) { if (txLen < (int)sizeof txLog - 1) { txLog[txLen++] = c; txLog[txLen] = 0; } }
   void println(const char* s) { print(s); print('\n'); }
   void println() { print('\n'); }
+  // Print's buffer write and availableForWrite(), for the WDP announce (src/wdp/wdp_fork.h).
+  // txRoom is what availableForWrite() reports: 63, an idle AVR HardwareSerial's free TX room,
+  // unless a test models the buffer filling and draining. txWrites/txBiggest count the writes.
+  int txRoom = 63;
+  int txWrites = 0, txBiggest = 0;
+  int availableForWrite() { return txRoom; }
+  size_t write(const uint8_t* p, size_t n) {
+    for (size_t i = 0; i < n && txLen < (int)sizeof txLog - 1; i++) txLog[txLen++] = (char)p[i];
+    txLog[txLen] = 0;
+    txWrites++;
+    if ((int)n > txBiggest) txBiggest = (int)n;
+    return n;
+  }
 };
 using HardwareSerial = Stream;
 inline Stream Serial;

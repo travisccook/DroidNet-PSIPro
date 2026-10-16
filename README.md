@@ -62,8 +62,8 @@ JawaLite master on the bus at address 22 — **you want the I2C build**. It is o
 ```
 
 ```bash
-pio run                  # serial-only (default)   26,760 B  93.3% flash
-pio run -e PSIPro-i2c    # + I2C intake            28,202 B  98.4% flash
+pio run                  # serial-only (default)   25,320 B  88.3% flash
+pio run -e PSIPro-i2c    # + I2C intake            26,758 B  93.3% flash
 ```
 
 Be aware of the failure mode if you get this wrong: with I2C compiled out, the board does not
@@ -76,7 +76,9 @@ Arduino's `twi.c` re-arms the I2C slave *before* invoking the callback. So a ren
 interrupt turns interrupts back on with the slave live, and further I2C traffic during the render
 window **re-enters the same interrupt** on top of the frame already on the stack. An AVR stack
 overflow does not trap: it walks down into `.bss` and silently corrupts globals. This board has only
-~1 KB of stack to give.
+~1 KB of stack to give. (That was stock FastLED. The clean-room driver that has since replaced it,
+`include/FastLED.h`, masks its frame with an SREG save/restore instead of ending in `sei`, which
+closes the re-entry route — see "SRAM and the stack", below. Serial-only stays the default.)
 
 Our own contract path is already deferred out of that interrupt (see below). This switch is about
 *upstream's* native path — `receiveEvent → parseCommand → runPattern → allOFF → FastLED.show` — which
@@ -87,9 +89,9 @@ What it buys, measured:
 
 | | serial-only (default) | with I2C |
 | --- | --- | --- |
-| flash | 26,760 B (93.3%) | 28,202 B (98.4%) |
-| SRAM | 1,309 B (51.1%) | 1,590 B (62.1%) |
-| worst-case stack | 371 B of 1,251 B (30%) | 441 B of 970 B (45%) |
+| flash | 25,320 B (88.3%) | 26,758 B (93.3%) |
+| SRAM | 1,564 B (61.1%) | 1,845 B (72.1%) |
+| worst-case stack | 360 B of 996 B (36%) | 485 B of 715 B (68%) |
 | can an interrupt reach a render? | **no** | yes (upstream's native path) |
 
 Both configurations ship all 23 upstream modes (0-21 and 92) — there is no "drop modes to fit" trade here (see
@@ -125,10 +127,11 @@ tightest board of the three, and the numbers are worth knowing before you build:
 | Build | Flash | of 28,672 B |
 | --- | --- | --- |
 | Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
-| **This fork, as shipped (serial-only)** | **26,760 B** | **93.3%** |
-| This fork with the I2C intake (`-e PSIPro-i2c`) | 28,202 B | 98.4% |
-| …I2C, with the codegen flags removed | 30,070 B | 104.9% — **will not link** |
-| …I2C, with `PSI_NOINLINE` removed | 29,650 B | 103.4% — **will not link** |
+| **This fork, as shipped (serial-only)** | **25,320 B** | **88.3%** |
+| This fork with the I2C intake (`-e PSIPro-i2c`) | 26,758 B | 93.3% |
+| …I2C, with the codegen flags removed | 28,572 B | 99.7% |
+| …I2C, with `PSI_NOINLINE` removed | 28,300 B | 98.7% |
+| …I2C, with both removed | 30,114 B | 105.0% — **will not link** |
 
 Neil's firmware already used 87.6% of this chip. All 23 upstream modes (0-21 and 92) ship, and every
 upstream mode's animation except the four deliberate native holdouts
@@ -136,50 +139,53 @@ upstream mode's animation except the four deliberate native holdouts
 one small interpreter (`include/psi_vm.h`) — the contract effects remain parametric C++ renderers —
 which is *why* there is headroom at all: it replaced the hand-written per-mode state machines with
 one. That headroom is not evenly spread, though.
-The **serial-only default has real margin** (1,912 B spare) — either the AVR codegen flags in
+The **serial-only default has real margin** (3,352 B spare) — either the AVR codegen flags in
 `platformio.ini` or the `PSI_NOINLINE` outlining in `src/contract/ContractPSI.h` could be dropped on
-their own and it would still fit, if barely (99.5% / 98.8%). The **I2C build has almost none** (470 B
-spare) — it genuinely needs both: drop either one and it overflows, per the last two rows above. (For
+its own and it would still fit (94.3% / 94.1%). The **I2C build has less** (1,914 B spare): it
+survives losing either one, barely (99.7% / 98.7%), but not both, per the last three rows above. (For
 scale: as originally published, before any of the flash or VM work, this fork linked at 38,790 B —
 135.3%. There used to be a third leg here too, `CONTRACT_SLIM`, an escape hatch that dropped five
 native novelty modes to claw back room. It is gone — see "What this fork adds", below — because the
 VM made it unnecessary.)
 
 The design target going into the VM conversion was roughly 26.3-26.4 KB serial / 27.7-27.8 KB I2C —
-the probe's own byte-cost estimate plus about 100 B of slack. The shipped totals above land about
-0.4 KB over that in both environments: the measured price of byte-exactness (a handful of ops and
-program shapes the probe's seeds got wrong, forced by the golden captures) plus the +94 B mode-22
-demo — both configurations still fit, but only because the linker enforces the ceiling on every run.
+the probe's own byte-cost estimate plus about 100 B of slack. The VM-era totals (26,760 B / 28,202 B)
+landed about 0.4 KB over that in both environments: the measured price of byte-exactness (a handful of
+ops and program shapes the probe's seeds got wrong, forced by the golden captures) plus the +94 B
+mode-22 demo. Since then the clean-room WS2812 driver that replaced FastLED gave back 2,162 B
+(`docs/FASTLED_DRIVER_VERIFICATION.md`), collapsing `displayMatrixColor`'s per-row switches another
+748 B, and the WDP device announce (below) costs about 1.47 KB of flash and 172 B of SRAM. The
+linker enforces the ceiling on every run.
 
 ### SRAM and the stack
 
-SRAM sits at 1,309 B of 2,560 B (51.1%), leaving **1,251 B for the stack** in the default
+SRAM sits at 1,564 B of 2,560 B (61.1%), leaving **996 B for the stack** in the default
 serial-only build. That used to be an open question here. It has now been analysed statically
 (`test/host/stack_report.py` computes the bound directly from the linked ELF — see the tool's own
 `--help` for why `-fstack-usage` can't be trusted under `-flto`), and in the shipped configuration
 the answer is good:
 
-- **Worst-case stack: 371 B of 1,251 B (30%), and the bound is SOUND** — with the TWI vector gone,
-  **no interrupt in the image can reach a render at all**, so there is no nesting to worry about.
-  (`stack_report.py` still prints a nesting warning against the USB interrupt; that is its
-  conservative model of indirect calls charging a FastLED vtable entry to PluggableUSB's dispatch
-  loop, which never executes because no PluggableUSB module is ever registered. Verified in the
-  disassembly.)
+- **Worst-case stack: 360 B of 996 B (36%), and the bound is SOUND** — with the TWI vector gone,
+  **no interrupt in the image can reach a render at all**, and no interrupt can nest.
 
-- **In the I2C build (`-e PSIPro-i2c`) the picture is the one described below**, and the bound there
-  is *not* sound. Worst case 441 B of 970 B (45%). Deepest path is
-  `main → serialEventRun → parseContract (138 B — the largest frame in the image) → allOFF →
-  FastLED::show → showPixels`, plus the worst single interrupt. No recursion anywhere, no
-  `alloca`/VLA (every frame is a compile-time constant), and **no heap at all** — nothing links
-  `malloc`, so the whole 970 B really is stack and the margin is real.
+- **In the I2C build (`-e PSIPro-i2c`) the worst case is 485 B of 715 B (68%), 230 B spare, and that
+  bound is SOUND too** — 299 B of synchronous stack plus the worst single interrupt, 186 B. (That is
+  a conservative charge: the tool bounds the USB interrupt's indirect calls by the largest
+  address-taken function, the I2C `receiveEvent`. The I2C interrupt itself, which runs Neil's native
+  parser and a render, is 143 B.) No recursion anywhere, no `alloca`/VLA
+  (every frame is a compile-time constant), and **no heap at all** — nothing links `malloc`, so the
+  whole 715 B really is stack. It is the tightest margin on the board: the WDP announce's 172 B of
+  SRAM came out of it (it was 402 B spare before).
 
-- **But that bound is still not sound, and you should know why.** FastLED's `showPixels()` executes
-  an unconditional `sei` (it disables interrupts to bit-bang the WS2812 data, patches
-  `timer0_millis`, then re-enables them). The PSI is an **I2C slave**, and its I2C interrupt runs the
-  command parser and a full LED render — so interrupts come back on *while still inside the I2C ISR*,
-  with the slave already re-armed. A second I2C message arriving during the render window re-enters
-  that ISR on top of the frame already there. On AVR a stack overflow does not trap; it walks down
-  into `.bss` and silently corrupts globals.
+- **It used to be unsound, and you should know why.** Stock FastLED's `showPixels()` executes an
+  unconditional `sei` (it disables interrupts to bit-bang the WS2812 data, then re-enables them).
+  The PSI is an **I2C slave**, and its I2C interrupt runs the command parser and a full LED render —
+  so with FastLED, interrupts came back on *while still inside the I2C ISR*, with the slave already
+  re-armed, and a second I2C message during the render window could re-enter that ISR on top of the
+  frame already there. On AVR a stack overflow does not trap; it walks down into `.bss` and silently
+  corrupts globals. The clean-room driver in `include/FastLED.h` masks the frame with an SREG
+  save/restore instead, so the I-bit stays clear inside the ISR and it cannot re-enter
+  (`docs/FASTLED_DRIVER_VERIFICATION.md` §6).
 
 **This hazard is inherited, not introduced — and this fork no longer contributes to it.** Stock
 upstream reaches that `sei` by its own route (`receiveEvent → parseCommand → runPattern → allOFF →
@@ -192,15 +198,15 @@ That is now fixed. The contract path is **deferred out of interrupt context**: `
 `contractServicePending()`, which does the parsing and rendering in main context. Neil's native
 command path is left exactly as it was. The results, all from `test/host/stack_report.py`:
 
-| | before the deferral | right after it (historical) | current (`feature/animation-vm`) |
+| | before the deferral | right after it (historical) | `feature/animation-vm` (FastLED, historical) |
 | --- | --- | --- | --- |
-| worst-case stack | 596 B of 1,076 B | 478 B of 979 B (49%) | **441 B of 970 B (45%)** |
-| I2C ISR frame | 188 B | 129 B | **112 B** |
-| one level of ISR nesting | 827 B | 650 B (329 B spare) | **596 B (374 B spare)** |
+| worst-case stack | 596 B of 1,076 B | 478 B of 979 B (49%) | 441 B of 970 B (45%) |
+| I2C ISR frame | 188 B | 129 B | 112 B |
+| one level of ISR nesting | 827 B | 650 B (329 B spare) | 596 B (374 B spare) |
 
-(979 B was lower than the original 1,076 B because the deferral queue costs 96 B of SRAM. The
-further drop to 970 B since is unrelated to the deferral — it's SRAM drift from the animation-VM
-work in between, not a second stack fix. Re-derive any of this yourself with
+(979 B was lower than the original 1,076 B because the deferral queue costs 96 B of SRAM; the drop
+to 970 B was SRAM drift from the animation-VM work. Nesting no longer applies since the clean-room
+driver — today's figures are in the bullets above. Re-derive any of this yourself with
 `python3 test/host/stack_report.py --elf .pio/build/PSIPro-i2c/firmware.elf` rather than trusting
 this table as it ages.)
 
@@ -209,14 +215,13 @@ not render or apply anything) and a **static** one in `run.sh`, because the beha
 cannot catch someone "simplifying" `receiveEvent()` back to a direct `parseContract()` call — the
 queue would still pass its own test while the hazard quietly returned.
 
-**What remains is upstream's, and we have not touched it.** `parseCommand → runPattern → FastLED.show`
-still re-enables interrupts inside that ISR, so nesting is still *possible* on the native path. Fixing
-that means changing Neil's design in a fork that carries his name, and it is not ours to do. Whether
-re-entry actually happens depends on I2C traffic timing, which **cannot be determined without
-hardware** — the static fact is proven, the frequency is not.
+**What remains is upstream's design, and we have not touched it.** `parseCommand → runPattern →
+FastLED.show` still parses and renders inside that ISR; it just can no longer re-enable interrupts
+there, so it cannot nest. Moving that work out of the ISR means changing Neil's design in a fork that
+carries his name, and it is not ours to do.
 
-If you are bench-testing this, that is still the thing to watch for: unexplained corruption of
-unrelated globals under heavy I2C traffic.
+If you are bench-testing the I2C build, that is still the thing to watch: a render inside the I2C ISR
+holds every other interrupt (serial receive included) off for the length of the frame.
 
 This fork used to have a `CONTRACT_SLIM` escape hatch that dropped five native novelty modes — 7
 (i_heart_u), 9 (red_heart, front half), 11 (Imperial March), 19 (lightsaberBattle) and 20
@@ -311,6 +316,41 @@ why we read it closely enough to find this.
 
 ---
 
+## WDP device announce
+
+The PSI tells the WCB it is wired to what it is. Greg Hulette's Wireless Communication Board
+firmware (7.0.1 and later) learns each serial port's devices from a one-line announcement, and this
+fork sends one 0.5-3 s after power-up and then every 25-30 s, on the serial header (`Serial1`, the
+WCB's port, 9600 baud):
+
+```text
+@WDP1 {"type":"PSI Front","fw":"1a2b3c4","caps":["droidnet.contract"]}
+```
+
+- **`type`** comes from the front/rear jumper, read at each announce with the contract's own test
+  (the one that decides whether `!PF` or `!PR` addresses this board): jumper open (pin 14 high) is
+  `PSI Front`, jumper fitted is `PSI Rear`. Front and rear PSIs may share one WCB port; the WCB keeps
+  one record per port and type, which is why the role is part of the type.
+- **`fw`** is the commit the firmware was built from: `git rev-parse --short=7 HEAD`, with `-dirty`
+  for a tree with uncommitted changes, or `unknown` built without git. `scripts/wdp_fw.py` sets it
+  at build time; the images in `firmware/` carry their source commit.
+- **`caps`**: `droidnet.contract`, the Driveable-Animation Contract above.
+
+The WCB consumes the line; it is never forwarded to another port or board. The line goes out in
+pieces no bigger than the free room in the serial TX buffer, so the render loop never waits on it,
+and the verb-Q ack finishes a line in flight before writing its own, so the two never interleave.
+Each board's timing is jittered from the chip's factory serial number and the jumper, so PSIs that
+power up together, front and rear included, do not announce in step.
+
+The WCB only hears it if the PSI's TX is wired to the WCB's RX. The Pro Micro is a 5 V part and the
+WCB's serial pins are 3.3 V, and two PSIs on one WCB port need their TX lines combined in hardware;
+both are wiring questions, outside this firmware (see "Wiring & baud" and "Questions" in Greg's
+`docs/WDP_DEVICE_ANNOUNCE.md`). The line-building core, `src/wdp/wdp_announce_core.h`, is shared
+byte-identically with the RSeries and Flthy forks; `src/wdp/wdp_fork.h` is the PSI's identity and
+its three hooks.
+
+---
+
 ## What is theirs, and what is ours
 
 Their code is around 3,200 lines of carefully-tuned firmware. Ours is about 775 lines of new code
@@ -349,6 +389,17 @@ credit him for it; not part of the contract layer either:
   `receiveEvent()`, the `buildCommand()` bounds fix, and two `g_contractArmed` guards in `VUMeter()`.
 - `include/functions.h` — prototypes for the native primitives the contract layer calls.
 
+**Ours, the WDP device announce** (see "WDP device announce", above):
+
+| Path | What it is |
+| --- | --- |
+| `src/wdp/wdp_announce_core.h` | Pure C++: builds, checks and paces the `@WDP1` line. Byte-identical across all three DroidNet forks (LGPL-2.1-only, as its header says). |
+| `src/wdp/wdp_fork.h` | The PSI's identity (type from the jumper, `fw`, caps), its seed, and `wdpForkSetup()` / `wdpForkTick()` / `wdpFinish()`. |
+| `scripts/wdp_fw.py` | PlatformIO `pre:` script: defines `WDP_FW` from git. |
+
+Its hooks: in `src/main.cpp`, one `#include`, `wdpForkSetup()` in `setup()` and `wdpForkTick()` in
+`loop()`; in `src/contract/ContractPSI.h`, `wdpFinish()` before the verb-Q ack.
+
 Not part of the contract layer, but ours in the same "additive layer" sense: `include/psi_vm.h`, the
 animation bytecode interpreter the upstream modes now play through (all but the four native
 holdouts), plus the hand-written `vmContractScan`/`vmContractSparkle` shims the contract's scan and
@@ -371,16 +422,18 @@ layout — `src/` + `include/` — came from the droid-side working collection t
 from Neil, whose upstream is a flat Arduino sketch. The project file stayed behind in that collection
 when this board was vendored out. It has now been written and used.)
 
-Dependencies are derived from what `src/main.cpp` actually includes: FastLED, plus EEPROM and Wire,
-which ship with the Arduino AVR core.
+Dependencies are derived from what `src/main.cpp` actually includes: EEPROM and Wire, which ship with
+the Arduino AVR core. `<FastLED.h>` is served by the in-tree clean-room driver `include/FastLED.h`,
+not the FastLED package. `scripts/wdp_fw.py` runs `git` at build time for the WDP announce's `fw`.
 
 **The build flags in `platformio.ini` are load-bearing, not decoration.** `-mcall-prologues`,
 `-mrelax`, `-fno-inline-small-functions`, `-fno-move-loop-invariants` and
-`--param=max-inline-insns-auto=2` are worth ~1.5 KB together, and the `PSI_NOINLINE` outlining in
-`src/contract/ContractPSI.h` is worth another ~1.4 KB. None of them change behaviour — they only
-change where GCC emits code — but without them this firmware does not fit. If you rebuild these
-sources in the Arduino IDE, or in your own project file, **you will not get those flags and the image
-will overflow.** Use this project file.
+`--param=max-inline-insns-auto=2` are worth about 1.7-1.8 KB together, and the `PSI_NOINLINE`
+outlining in `src/contract/ContractPSI.h` is worth another 1.5-1.65 KB. None of them change behaviour — they only
+change where GCC emits code — but without both, the I2C build does not fit (30,114 B, 105.0%) and the
+serial-only build sits at the very ceiling. If you rebuild these sources in the Arduino IDE, or in
+your own project file, **you will not get those flags**, and the I2C build is left with about 100 B
+to spare. Use this project file.
 
 Both the flags and the `PSI_NOINLINE` block carry comments explaining what was measured, and what was
 tried and rejected (e.g. `-funsigned-char` saves 32 B and is a trap: `char` is signed on this target,
@@ -415,4 +468,5 @@ The chain, honestly:
   testing.
 - **Skelmir** — bug fixes and Mini support.
 - The FastLED project, on which the firmware depends.
-- **Travis Cook** — the contract layer in `src/contract/` and `test/host/`, and nothing else.
+- **Travis Cook** — the contract layer in `src/contract/`, the WDP device announce in `src/wdp/` and
+  `scripts/wdp_fw.py`, and `test/host/`.

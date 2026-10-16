@@ -79,7 +79,9 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 // top of the frame already on the stack. An AVR stack overflow does not trap: it walks
 // down into .bss and silently corrupts globals. That is a genuinely nasty bug to chase
 // on a bench, and it is worse on this board than on its siblings because the ATmega32U4
-// has only ~1 KB of stack to give.
+// has only ~1 KB of stack to give. (That was stock FastLED. The clean-room driver that
+// replaced it, include/FastLED.h, masks its frame with an SREG save/restore instead of
+// ending in `sei`, which closes the re-entry route; serial-only stays the default.)
 //
 // The contract layer's own path is already deferred out of that ISR (see the I2C
 // DEFERRAL note in src/contract/ContractPSI.h), so this switch is NOT about our code —
@@ -88,14 +90,14 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 // Compiling I2C out removes the TWI vector from the image entirely, and with it the last
 // interrupt that can reach a render at all.
 //
-// WHAT IT BUYS (measured, not estimated; as of feature/animation-vm — re-measure with
+// WHAT IT BUYS (measured, not estimated; as of the WDP device announce — re-measure with
 // `pio run && pio run -e PSIPro-i2c` and test/host/stack_report.py rather than trusting
 // this comment as it ages):
 //                                serial-only      + I2C
-//     flash                  26,760 B (93.3%)   28,202 B (98.4%)
-//     SRAM                    1,309 B (51.1%)    1,590 B (62.1%)
-//     stack budget                    1,251 B            970 B
-//     worst-case stack           371 B (30%)       441 B (45%)
+//     flash                  25,320 B (88.3%)   26,758 B (93.3%)
+//     SRAM                    1,564 B (61.1%)    1,845 B (72.1%)
+//     stack budget                      996 B            715 B
+//     worst-case stack           360 B (36%)       485 B (68%)
 //     can an ISR reach a render?          NO      yes (native path)
 //
 // WHAT IT DOES NOT COST: all 23 upstream modes ship in BOTH configurations — there is
