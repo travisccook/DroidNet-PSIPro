@@ -56,17 +56,20 @@ the one place it is *less* capable than the firmware it forked, and it is a deli
 than an oversight, so it belongs up here rather than in a footnote.
 
 If anything on your droid talks to the PSI over I2C — a MarcDuino, a Teeces or STEALTH setup, any
-JawaLite master on the bus at address 22 — **you want the I2C build**. It is one line:
-
-```c
-// include/config.h
-#define PSI_ENABLE_I2C        // uncomment this
-```
+JawaLite master on the bus at address 22 — **you want the I2C build**. It is its own environment:
 
 ```bash
-pio run                  # serial-only (default)   25,320 B  88.3% flash
-pio run -e PSIPro-i2c    # + I2C intake            26,758 B  93.3% flash
+pio run                  # serial-only (default)
+pio run -e PSIPro-i2c    # + I2C intake
 ```
+
+**The I2C build has six fewer contract looks.** With the I2C intake linked, the whole contract does
+not fit the board, so `PSIPro-i2c` also sets `PSI_NO_STRIP_LOOKS` and leaves out comet, chase, wipe,
+gradient, colorcycle and twinkle. A show that names one still plays: comet, chase and wipe draw as
+scan, twinkle as sparkle, gradient and colorcycle as a solid in the line's colour (as an accent, all
+six draw as a solid). Every native mode and every other contract look is the same in both builds.
+Uncommenting `PSI_ENABLE_I2C` in `include/config.h` instead of using the environment builds I2C
+with every look, which is not a supported build. The six come back in the second firmware release.
 
 Be aware of the failure mode if you get this wrong: with I2C compiled out, the board does not
 complain, it simply **never answers** an I2C master. No error, no blink — it just sits there.

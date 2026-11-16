@@ -220,6 +220,26 @@ inline bool contractAddressed(char cls, char unit) {
   return false;                                        // 'T' (HP) never matches PSI
 }
 
+// ---- the looks this build has ----------------------------------------------------
+// PSI_NO_STRIP_LOOKS (set only in the PSIPro-i2c environment) builds R1 without the six strip and
+// hue looks: with Wire and the I2C intake linked, they do not fit the part. A line that names one
+// is not dropped and still counts for verb V; it draws the nearest look this build has:
+//   comet, chase, wipe -> scan       twinkle -> sparkle       gradient, colorcycle -> solid in c=
+// As an accent overlay all six become solid: scan and sparkle keep state between frames, which is
+// why the core refuses them as accents. R2's fixed-point clock is what brings the six back.
+#ifdef PSI_NO_STRIP_LOOKS
+static PSI_NOINLINE ContractEffect _lookHere(ContractEffect e, bool overlay) {
+  switch (e) {
+    case CE_COMET: case CE_CHASE: case CE_WIPE: return overlay ? CE_SOLID : CE_SCAN;
+    case CE_TWINKLE:                            return overlay ? CE_SOLID : CE_SPARKLE;
+    case CE_GRADIENT: case CE_COLORCYCLE:       return CE_SOLID;
+    default:                                    return e;
+  }
+}
+#else
+static inline ContractEffect _lookHere(ContractEffect e, bool) { return e; }
+#endif
+
 // ---- rainbow (newly authored; ignores color per contract §6) ----------------
 static uint8_t g_rainbowHue = 0;
 static inline void _renderRainbow(uint16_t delayMs) {
@@ -243,6 +263,7 @@ static inline void _renderRainbow(uint16_t delayMs) {
 // g_pulseStartMs) through the SAME switch. The overlay owns its own timeline (t0), so a
 // 180 ms ae=comet accent starts its head at position 0 instead of joining the base look's
 // phase mid-flight — and the base look's own timeline is never disturbed by the accent.
+#ifndef PSI_NO_STRIP_LOOKS
 inline void _renderComet(const CRGB& col, uint32_t t0) {
   uint32_t elapsed = millis() - t0;
   int head = fxHead(elapsed, g_speed, COLUMNS);
@@ -301,6 +322,7 @@ inline void _renderTwinkle(const CRGB& col) {
   }
   FastLED.show(brightness());
 }
+#endif  // PSI_NO_STRIP_LOOKS
 
 // ---- strobe-capped flash toggle (reuses allON/allOFF; enforces < ~3 Hz) -----
 static inline void _renderFlash(const CRGB& c, uint16_t delayMs, uint32_t t0) {
@@ -325,12 +347,14 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
     case CE_PULSE:   allON(col, true, 0);                           break;  // envelope pumps brightness
     case CE_RAINBOW: _renderRainbow(d);                             break;
     case CE_SCAN:    vmContractScan(d, col);                        break;
+#ifndef PSI_NO_STRIP_LOOKS                               // else _lookHere() never lets one reach here
     case CE_COMET:   _renderComet(col, t0);                         break;
     case CE_CHASE:   _renderChase(col, t0);                         break;
     case CE_WIPE:    _renderWipe(col, t0);                          break;
     case CE_GRADIENT:_renderGradient(t0);                           break;
     case CE_COLORCYCLE: _renderColorcycle(t0);                      break;
     case CE_TWINKLE: _renderTwinkle(col);                           break;
+#endif
     case CE_SPARKLE: vmContractSparkle(d, col);                     break;
     case CE_METER:   VUMeter(d, 0, 0);                              break;  // level[] fed by verb L
     case CE_NATIVE:  runPattern(g_nativeCode);                      break;
@@ -371,7 +395,7 @@ static inline bool _fireAccent(ContractEffect fx, const CRGB& c, uint32_t durMs,
   if (!strobeCoolDownExpired(g_pulseStartMs, now, 2 * STROBE_MIN_STATE_MS)) return false;
   if (durMs < STROBE_MIN_STATE_MS) durMs = STROBE_MIN_STATE_MS;
   if (durMs > 2550u) durMs = 2550u;
-  g_pulseFx       = fx;
+  g_pulseFx       = _lookHere(fx, true);
   g_pulseColor    = c;
   g_pulseStartMs  = now;
   g_pulseDeadline = now + durMs;
@@ -389,7 +413,7 @@ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
   if (pr.hasAt) {
     ScoreEntry e;
     e.atBeat     = pr.atBeat;
-    e.effect     = pr.hasEffect ? pr.effect : CE_SOLID;
+    e.effect     = pr.hasEffect ? _lookHere(pr.effect, false) : CE_SOLID;
     e.color      = pr.hasColor ? pr.color : ContractRGB{ g_contractColor.r, g_contractColor.g, g_contractColor.b };
     e.speed      = pr.hasSpeed ? pr.speed : g_speed;
     e.beatMod    = pr.hasBeatMod ? pr.beatMod : g_beatMod;
@@ -413,7 +437,7 @@ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
   if (pr.hasBeatMod) g_beatMod = pr.beatMod;
   if (pr.hasAm)      g_activeAccentMode = pr.accentMode;
   if (pr.hasEffect) {
-    g_effect = pr.effect;
+    g_effect = _lookHere(pr.effect, false);
     if (pr.effect == CE_NATIVE && pr.nativeCode >= 0) g_nativeCode = pr.nativeCode;
     g_lastEffect = CE_NONE;                            // force retrigger on next tick
   }

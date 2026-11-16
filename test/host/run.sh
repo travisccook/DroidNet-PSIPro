@@ -17,6 +17,7 @@
 #   4. command-buffer width guard (the v1.2 accent keys push a scored line past 63 chars)
 #   5. parser fuzz + differential (ASan/UBSan)
 #   6. golden-frame parity against the committed captures (test/host/golden/)
+#   6d. the I2C build's six stand-in looks draw scan, sparkle and solid, frame for frame
 #   7. scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock
 #   8. HSV oracle: CE_RAINBOW (CHSV->CRGB) == FastLED 3.5.0 hsv2rgb_rainbow (full cube)
 #   9. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
@@ -213,6 +214,31 @@ if [ "$matrix_names" != "$golden_names" ]; then
   diff <(echo "$matrix_names") <(echo "$golden_names") || true
   exit 1
 fi
+
+echo "[6d] the I2C build's stand-in looks"
+# The PSIPro-i2c environment builds without the six strip and hue looks (PSI_NO_STRIP_LOOKS). A
+# line naming one must draw the nearest look that build has, frame for frame: comet, chase and wipe
+# are the scan golden, twinkle is the sparkle golden, gradient and colorcycle are solid in c=.
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -w -DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS \
+    -I native_mocks -I "$BUILD/config_full" -I ../../include -o "$BUILD/golden_i2c" golden_native.cpp
+frames() { python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); sys.stdout.buffer.write(d[d.index(b"\nFRAMES\n"):])' "$1"; }
+standin() {  # <look named on the wire> <look drawn> [committed golden of the look drawn]
+  "$BUILD/golden_i2c" --cmd "!P*A:i=$1,c=ff0000" --ms 12000 --jumper front --eeprom 00,01,14 --pot 512 \
+      --out "$GOLD/i2c_$1.psig" 2>/dev/null
+  if [ -n "${3:-}" ]; then want="golden/$3.psig"; else
+    want="$GOLD/i2c_$2.psig"
+    "$BUILD/golden_i2c" --cmd "!P*A:i=$2,c=ff0000" --ms 12000 --jumper front --eeprom 00,01,14 --pot 512 \
+        --out "$want" 2>/dev/null
+  fi
+  cmp -s <(frames "$want") <(frames "$GOLD/i2c_$1.psig") || { echo "FAIL: on the I2C build i=$1 is not i=$2"; exit 1; }
+}
+standin comet scan contract_scan; standin chase scan contract_scan; standin wipe scan contract_scan
+standin twinkle sparkle contract_sparkle
+standin gradient solid; standin colorcycle solid
+# ...and the build still has the looks it keeps: rainbow is not solid there.
+standin rainbow rainbow
+if cmp -s <(frames "$GOLD/i2c_rainbow.psig") <(frames "$GOLD/i2c_solid.psig"); then echo "FAIL: rainbow drew as solid"; exit 1; fi
+echo "      6 stand-ins identical to the looks they draw."
 
 echo "[6b] upstream differential: Neil's PSIPro v1.7 and the fork on the same mocks"
 # 77 scripted timelines (mode after mode, |timing, alwaysOn, rear jumper, brightness commands)
