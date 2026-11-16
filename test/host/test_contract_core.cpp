@@ -9,6 +9,19 @@ static int g_fail = 0, g_total = 0;
 #define CHECK(cond) do { g_total++; if(!(cond)){ g_fail++; \
   printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);} } while(0)
 
+// v1.3 (S2): the accent predicates take the beat position and the clock. These shims keep the
+// v1.1/v1.2 vectors below exactly as they were written: 120 BPM in 4/4, where both rate
+// divisors are 1 and the predicate is the v1.2 one. The rate floor itself is tested in
+// test_contract_v13.cpp.
+static BeatClock tc120() { BeatClock bc; bc.running = true; bc.bpm = 120; bc.bpb = 4; return bc; }
+static bool fires(uint8_t am, uint8_t barPos) {
+  BeatPos bp; bp.barPos = barPos; bp.beatIndex = barPos;
+  return beatAccentFires(am, bp, tc120());
+}
+static uint8_t amount(uint8_t am, const BeatPos& bp, uint8_t mod, float prog) {
+  return beatAccentAmount(am, bp, mod, prog, tc120());
+}
+
 static void test_scope_and_verb() {
   ParsedContract p;
   CHECK(contractParse("LFA:i=solid,c=0080FF,d=0", p));
@@ -108,21 +121,21 @@ static void test_accent_envelope() {
   BeatPos down; down.barPos = 0; down.phase = 0.0f;    // on the downbeat, phase 0 -> env 1
   BeatPos offbeat; offbeat.barPos = 1; offbeat.phase = 0.0f;
   BeatPos mid; mid.barPos = 0; mid.phase = 0.5f;       // decayed
-  CHECK(beatAccentAmount(0, down, 255, 0) == 0);       // am=0 none
-  CHECK(beatAccentAmount(1, down, 0, 0) == 0);         // beatMod=0 -> none
-  CHECK(beatAccentAmount(1, down, 255, 0) > 200);      // am=1 fires strong on downbeat
-  CHECK(beatAccentAmount(1, offbeat, 255, 0) == 0);    // am=1 silent off the downbeat
-  CHECK(beatAccentAmount(2, offbeat, 255, 0) > 0);     // am=2 fires every beat
-  CHECK(beatAccentAmount(2, mid, 255, 0) < beatAccentAmount(2, offbeat, 255, 0)); // decays with phase
-  CHECK(beatAccentAmount(3, down, 255, 0.0f) == 0);    // build at 0 progress -> 0
-  CHECK(beatAccentAmount(3, down, 255, 1.0f) > 200);   // build at full progress -> strong
+  CHECK(amount(0, down, 255, 0) == 0);       // am=0 none
+  CHECK(amount(1, down, 0, 0) == 0);         // beatMod=0 -> none
+  CHECK(amount(1, down, 255, 0) > 200);      // am=1 fires strong on downbeat
+  CHECK(amount(1, offbeat, 255, 0) == 0);    // am=1 silent off the downbeat
+  CHECK(amount(2, offbeat, 255, 0) > 0);     // am=2 fires every beat
+  CHECK(amount(2, mid, 255, 0) < amount(2, offbeat, 255, 0)); // decays with phase
+  CHECK(amount(3, down, 255, 0.0f) == 0);    // build at 0 progress -> 0
+  CHECK(amount(3, down, 255, 1.0f) > 200);   // build at full progress -> strong
 }
 
 // ===================== v1.2: the accent-effect overlay =====================
-// The v1.1 fire predicate, TRANSCRIBED VERBATIM from the body of beatAccentAmount()
+// The v1.1 fire predicate, TRANSCRIBED VERBATIM from the body of amount()
 // as it stood BEFORE the v1.2 refactor extracted it:
 //     bool fire = (am == 2) || ((am == 1 || am == 4) && bp.barPos == 0) || (am == 3);
-// beatAccentFires() must agree with this on every reachable input, or the extraction
+// fires() must agree with this on every reachable input, or the extraction
 // changed behaviour for an existing show. This is the "unchanged by construction" proof,
 // mechanised.
 static bool v11_fire_reference(uint8_t am, uint8_t barPos) {
@@ -134,7 +147,7 @@ static void test_beat_accent_fires() {
   int mismatches = 0, fired = 0, silent = 0;
   for (int am = 0; am <= 4; am++) {
     for (int bp = 0; bp < 8; bp++) {
-      bool got = beatAccentFires((uint8_t)am, (uint8_t)bp);
+      bool got = fires((uint8_t)am, (uint8_t)bp);
       if (got != v11_fire_reference((uint8_t)am, (uint8_t)bp)) mismatches++;
       if (got) fired++; else silent++;
     }
@@ -143,20 +156,20 @@ static void test_beat_accent_fires() {
   CHECK(fired > 0 && silent > 0);   // not vacuous: both outcomes really occur in the grid
 
   // Spot pins, so a predicate broken the SAME way in both places can't quietly agree.
-  CHECK(beatAccentFires(0, 0) == false);   // am=0: never
-  CHECK(beatAccentFires(1, 0) == true);    // am=1: downbeat only
-  CHECK(beatAccentFires(1, 1) == false);
-  CHECK(beatAccentFires(1, 3) == false);
-  CHECK(beatAccentFires(2, 0) == true);    // am=2: every beat
-  CHECK(beatAccentFires(2, 3) == true);
-  CHECK(beatAccentFires(3, 0) == true);    // am=3: build — every beat (progress-scaled)
-  CHECK(beatAccentFires(3, 5) == true);
-  CHECK(beatAccentFires(4, 0) == true);    // am=4: drop -> downbeat only
-  CHECK(beatAccentFires(4, 2) == false);
-  CHECK(beatAccentFires(9, 0) == false);   // unknown mode: silent, never a surprise strobe
+  CHECK(fires(0, 0) == false);   // am=0: never
+  CHECK(fires(1, 0) == true);    // am=1: downbeat only
+  CHECK(fires(1, 1) == false);
+  CHECK(fires(1, 3) == false);
+  CHECK(fires(2, 0) == true);    // am=2: every beat
+  CHECK(fires(2, 3) == true);
+  CHECK(fires(3, 0) == true);    // am=3: build — every beat (progress-scaled)
+  CHECK(fires(3, 5) == true);
+  CHECK(fires(4, 0) == true);    // am=4: drop -> downbeat only
+  CHECK(fires(4, 2) == false);
+  CHECK(fires(9, 0) == false);   // unknown mode: silent, never a surprise strobe
 
   // NON-DIVERGENCE: the brightness pump and the (firmware) effect-swap accent must never
-  // disagree about WHICH beats carry an accent. beatAccentAmount() > 0 implies the predicate
+  // disagree about WHICH beats carry an accent. amount() > 0 implies the predicate
   // fires; the predicate not firing implies a zero envelope. (One-directional: am=3 at
   // progress 0 fires the predicate yet yields amount 0 — that is the build ramping in.)
   int divergences = 0, sawPositive = 0, sawFiringZero = 0;
@@ -166,8 +179,8 @@ static void test_beat_accent_fires() {
         for (int ph = 0; ph < 10; ph++) {
           for (int pg = 0; pg <= 2; pg++) {
             BeatPos bp; bp.barPos = (uint8_t)bpos; bp.phase = (float)ph / 10.0f;
-            uint8_t amt = beatAccentAmount((uint8_t)am, bp, (uint8_t)mod, (float)pg * 0.5f);
-            bool f = beatAccentFires((uint8_t)am, (uint8_t)bpos);
+            uint8_t amt = amount((uint8_t)am, bp, (uint8_t)mod, (float)pg * 0.5f);
+            bool f = fires((uint8_t)am, (uint8_t)bpos);
             if (amt > 0 && !f) divergences++;      // pump fired on a beat the accent skips
             if (!f && amt != 0) divergences++;
             if (amt > 0) sawPositive++;

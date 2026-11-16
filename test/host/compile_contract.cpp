@@ -689,8 +689,13 @@ int main() {
         "!PFq:ver=1.2,phase=2,i=2,c=0080ff,bpm=128\r" },
       // TWO-DIGIT effect index (colorcycle=14) + every colour byte < 0x10 => the zero-pad
       // is load-bearing: without it "0a0b0c" collapses to "abc" and Studio mis-parses.
-      { {"!P*A:i=colorcycle,c=0A0B0C,d=0", "!**C:bpm=7,ph=0,bpb=4,beat=0", nullptr}, "!PFQ",
-        "!PFq:ver=1.2,phase=2,i=14,c=0a0b0c,bpm=7\r" },
+      // The tempo is 30, the slowest the contract takes since v1.3 (S1).
+      { {"!P*A:i=colorcycle,c=0A0B0C,d=0", "!**C:bpm=30,ph=0,bpb=4,beat=0", nullptr}, "!PFQ",
+        "!PFq:ver=1.2,phase=2,i=14,c=0a0b0c,bpm=30\r" },
+      // S1: a tempo outside 30..300 is ignored whole, so the clock still reads 30. (Until the core
+      // moved to v1.3 this case sent bpm=7 and expected 7 back.)
+      { {"!**C:bpm=7,ph=0,bpb=4,beat=0", nullptr, nullptr}, "!PFQ",
+        "!PFq:ver=1.2,phase=2,i=14,c=0a0b0c,bpm=30\r" },
       // bpm=0 (clock stopped) must render as a literal "0", not an empty field.
       { {"!P*A:i=flash,c=ffffff,d=0", "!**C:bpm=0,beat=0", nullptr}, "!PFQ",
         "!PFq:ver=1.2,phase=2,i=3,c=ffffff,bpm=0\r" },

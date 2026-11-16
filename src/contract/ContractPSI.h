@@ -53,6 +53,13 @@
 // ~1.3 KB of a 28 KB image — to emit one status line. The stock upstream firmware links
 // none of it. The ack is now built by the _fmtStr/_fmtU16/_fmtHex8 helpers below, whose
 // output is byte-identical (pinned by host guard A10). Do not re-add this include.
+// The core's keyword tables and reply literals live in flash on the AVR (its two optional hooks):
+// without them every one of those strings is copied into SRAM at boot.
+#if defined(__AVR__)
+  #include <avr/pgmspace.h>
+  #define CONTRACT_PSTR(s)      PSTR(s)
+  #define CONTRACT_READ_BYTE(p) pgm_read_byte(p)
+#endif
 #include "contract_core.h"
 
 // ---- forward declaration: fill_column ---------------------------------------
@@ -103,7 +110,8 @@ void fill_column(uint8_t column, CRGB color, uint8_t scale_brightness);
 
 // ---- safety caps (fork spec §11) --------------------------------------------
 static const uint8_t  SAFE_MAX_BRIGHTNESS = 200;   // USB-power/heat clamp (config: cap 200)
-static const uint32_t STROBE_MIN_STATE_MS = 170;   // >=170 ms/state => < ~3 Hz (photosensitive-safe)
+// STROBE_MIN_STATE_MS (170 ms a state, under 3 Hz) is the core's since contract v1.3 (S3): one
+// constant for every fork.
 
 // ---- contract animation state -----------------------------------------------
 static ContractEffect g_effect        = CE_SOLID;
@@ -137,9 +145,9 @@ static BeatClock  g_clock;
 // default 2 = pump on every beat (downbeat-emphasized) so a live A with m>0 but no
 // am= still breathes; an explicit am= (incl. a section's am=0 calm) overrides it.
 static uint8_t    g_activeAccentMode = 2;
-// Raw .bss storage, not `ScoreEntry g_score[N]`: ScoreEntry carries default member initialisers, so
-// an array of it is constant-initialised and its image is stored in flash to be copied to SRAM at
-// boot. Entries are only read below g_scoreCount and scoreInsert() writes a whole entry.
+// Raw .bss storage, not `ScoreEntry g_score[N]`: an array of ScoreEntry runs the type's constructor
+// over every entry at boot, and that start-up loop is 192 B of flash here (measured, both builds).
+// Entries are only read below g_scoreCount and scoreInsert() writes a whole entry.
 static uint8_t    g_scoreMem[sizeof(ScoreEntry) * 8];
 static ScoreEntry* const g_score = (ScoreEntry*)(void*)g_scoreMem;
 static int        g_scoreCount = 0;
@@ -511,7 +519,9 @@ inline void applyContract(const ParsedContract& p) {
         w = _fmtHex8(w, g_contractColor.g);
         w = _fmtHex8(w, g_contractColor.b);
         w = _fmtStr(w, ",bpm=");
-        w = _fmtU16(w, g_clock.bpm);
+        // A held clock (C:bpm=0, C6) keeps its tempo for the resume; the wire still says 0, as it
+        // did when bpm=0 overwrote the tempo.
+        w = _fmtU16(w, g_clock.running ? g_clock.bpm : 0);
         *w++ = '\r';
         *w   = '\0';
         wdpFinish();                                   // a WDP announce in flight goes out whole first
@@ -568,9 +578,13 @@ inline bool contractLoopTick() {
     return false;
   }
 
+  // One beat position for the whole tick: the score, the accent edge and the pump all read it
+  // (beatPosAt() is float maths, about 107 us on the 32U4, and used to run twice a frame).
+  BeatPos bp;
+  if (g_clock.running) bp = beatPosAt(g_clock, now);
+
   // Phase-2 score: switch looks on beat boundaries (shared-core scoreActiveIndex)
   if (g_clock.running && g_scoreCount > 0) {
-    BeatPos bp = beatPosAt(g_clock, now);
     int idx = scoreActiveIndex(g_score, g_scoreCount, bp.beatIndex);
     if (idx >= 0 && idx != g_scoreIndex) {
       g_scoreIndex = idx;
@@ -602,7 +616,7 @@ inline bool contractLoopTick() {
     // independent knobs (an m=0 section can still punch an effect accent).
     if (beatEdge(g_lastAccentBeat, bp.beatIndex) && g_scoreIndex >= 0) {
       const ScoreEntry& e = g_score[g_scoreIndex];
-      if (e.accentFx != CE_NONE && beatAccentFires(e.accentMode, bp.barPos)) {
+      if (e.accentFx != CE_NONE && beatAccentFires(e.accentMode, bp, g_clock, e.accentEvery)) {
         _fireAccent(e.accentFx, _scaled(e.accentColor),
                     e.accentDur10 ? (uint32_t)e.accentDur10 * 10u : 180u, now);
       }
@@ -620,7 +634,6 @@ inline bool contractLoopTick() {
   // board that did this), and a scored accent must land at the same level on all three.
   uint8_t effBright = g_bright;
   if (!g_pulseActive && g_clock.running && g_beatMod && g_activeAccentMode) {
-    BeatPos bp = beatPosAt(g_clock, now);
     // am=3 ("build") scales the accent by progress THROUGH THE SECTION. Passing a
     // constant 0 here made every build section return an accent of exactly 0 — i.e. the
     // board parked at the envelope floor for the section's whole length (fully black at
@@ -629,7 +642,9 @@ inline bool contractLoopTick() {
     float prog = 0.0f;
     if (g_scoreIndex >= 0 && g_sectionEnd > g_sectionStart)
       prog = (float)(bp.beatIndex - g_sectionStart) / (float)(g_sectionEnd - g_sectionStart);
-    uint8_t env = beatAccentAmount(g_activeAccentMode, bp, g_beatMod, prog);
+    // The clock goes in since v1.3: above 176 BPM the core pumps every 2nd (or 3rd, 4th) beat,
+    // so the level never peaks more often than every 340 ms (S2).
+    uint8_t env = beatAccentAmount(g_activeAccentMode, bp, g_beatMod, prog, g_clock);
     effBright = envBright(g_bright, g_beatMod, env);
   }
   useTempInternalBrightness = true;                    // 3P volatile path only

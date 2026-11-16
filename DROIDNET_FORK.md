@@ -15,8 +15,11 @@ working exactly as they did.
   Flthy HPs). This is the tightest of the three and the pacing item.
 - **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), clean-room WS2812 driver (`include/FastLED.h`).
   `platformio.ini` is checked in and builds out of the box. `pio run` (serial-only, shipped default)
-  links at 25,320 B of 28,672 B (88.3%); `pio run -e PSIPro-i2c` links at 26,758 B (93.3%), WDP
-  device announce included (README, "WDP device announce"). Both totals also include mode 22
+  links at 25,442 B of 28,672 B (88.7%); `pio run -e PSIPro-i2c` links at 27,128 B (94.6%), WDP
+  device announce and the contract v1.3 core (`src/contract/CORE_PIN`) included. The v1.3 core cost
+  548 B (serial-only) and 644 B (I2C) of flash over the v1.2 one and returned 104 B of SRAM, because
+  its keyword tables stay in flash. `run.sh` stage 9b fails a build over 28,416 B (serial-only) or
+  28,160 B (I2C). Both totals also include mode 22
   ("processing sweep"), a fork-added demo animation that is not one of the 23 upstream modes — it
   exists to measure the marginal cost of a new one: 94 B, both configs. All 23 upstream modes (0-21
   and 92) ship; every upstream mode's animation except the four deliberate native holdouts

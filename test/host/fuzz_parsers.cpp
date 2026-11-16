@@ -411,22 +411,24 @@ struct Model {
   bool hasAccentFx = false;    ContractEffect accentFx = CE_NONE;
   bool hasAccentColor = false; ContractRGB accentColor{0,0,0};
   bool hasAccentDur = false;   uint16_t accentDurMs = 0;
+  bool hasWd = false;          uint8_t wd = 0;        // v1.3
+  bool hasN = false;           uint8_t n = 0;
+  bool hasK = false;           uint16_t k = 0;
+  bool hasAn = false;          uint8_t an = 1;
+  bool hasAp = false;          uint8_t ap = 0;
+  bool hasRoute = false;       uint8_t route = 0;
 };
 
-// contract_core.h still uses atoi() for the uint8_t/uint16_t params (s/b/m/am/v/bpm/bpb and
-// the native:<n> code). atoi() is NOT the 32-bit oracle -- it is `(int)strtol(s,NULL,10)`,
-// which on THIS 64-bit host converts in 64 bits (saturating at LONG_MAX/LONG_MIN only past
-// 2^63) and then TRUNCATES to a 32-bit int. So atoi("4294967296") == 0, not INT_MAX.
-// Restated here from that rule, independently of libc, and cross-checked against the real
-// host atoi() in section A.
+// HISTORY: up to contract v1.2, contract_core.h used atoi() for the uint8_t/uint16_t params
+// (s/b/m/am/v/bpm/bpb). atoi() is NOT the 32-bit oracle -- it is `(int)strtol(s,NULL,10)`,
+// which on THIS 64-bit host converts in 64 bits and then TRUNCATES to a 32-bit int, while
+// avr-libc's atoi() accumulates in a 16-BIT int and wraps. The two agreed on the low 8/16 bits
+// except past 2^63, a host-vs-target gap no host test could close.
 //
-// !!! THE HOST CANNOT SEE WHAT THE BOARD DOES HERE. avr-libc's atoi() accumulates in a
-// 16-BIT int and wraps; this host accumulates in 64 and truncates to 32. For every param
-// that is immediately cast to uint8_t/uint16_t the two agree (a mod-2^32 truncation and a
-// mod-2^16 wrap have the same low 8/16 bits) -- EXCEPT when the host saturates, i.e. for
-// magnitudes >= 2^63. That gap is analysed in the report; it is exactly the class of
-// host-vs-target width divergence that _parseU32/_parseI32 were introduced to kill for the
-// 32-bit fields, and it is still live for these. No host test can close it.
+// v1.3 CLOSED IT: those params now go through _parseSatU8/_parseSatU16, which sit on the same
+// width-pinned digit reader as _parseU32 and saturate (see model_sat below). No parameter is
+// parsed by atoi() any more. This model of the host's atoi() stays only for section A's
+// self-check of the oracle machinery against libc.
 static int model_atoi_str(const char* s) {
   Scanned r = scan_with_libc(s);
   if (!r.any) return 0;
@@ -437,6 +439,36 @@ static int model_atoi_str(const char* s) {
   return (int)(int32_t)(uint32_t)(unsigned long long)v64;   // ...then truncate to int
 }
 static int model_atoi(const std::string& v) { return model_atoi_str(v.c_str()); }
+
+// v1.3 S5: the small integers SATURATE. Written independently of _parseSatU16 (std::string and
+// a 64-bit accumulator): optional isspace run, optional sign, digits; a negative is 0, a value
+// past maxV is maxV. No wrap at any width, so the host and a 16-bit-int AVR agree -- which is
+// what atoi() could not promise (see the note above model_atoi_str).
+static unsigned model_sat(const std::string& v, unsigned maxV) {
+  size_t i = 0;
+  while (i < v.size() && (v[i] == ' ' || (v[i] >= '\t' && v[i] <= '\r'))) i++;
+  bool neg = false;
+  if (i < v.size() && (v[i] == '-' || v[i] == '+')) { neg = (v[i] == '-'); i++; }
+  unsigned long long acc = 0;
+  for (; i < v.size() && v[i] >= '0' && v[i] <= '9'; i++) {
+    acc = acc * 10ull + (unsigned long long)(v[i] - '0');
+    if (acc > 0xFFFFFFFFull) acc = 0xFFFFFFFFull;
+  }
+  if (neg) return 0;
+  return acc > maxV ? maxV : (unsigned)acc;
+}
+// k=<hhhh>: exactly four hex digits, either case.
+static bool model_hex4(const std::string& v, uint16_t& out) {
+  if (v.size() != 4) return false;
+  unsigned x = 0;
+  for (char c : v) {
+    int d = (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+          : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+    if (d < 0) return false;
+    x = x * 16u + (unsigned)d;
+  }
+  out = (uint16_t)x; return true;
+}
 
 static bool model_hex6(const std::string& v, ContractRGB& out) {
   if (v.size() < 6) return false;              // QUIRK (pinned): >= 6, not == 6
@@ -510,19 +542,20 @@ static Model model_parse_params(const std::string& s) {
     } else if (k == "c") {
       ContractRGB c; if (model_hex6(v, c)) { m.hasColor = true; m.color = c; }
     }
-    else if (k == "s")    { m.hasSpeed = true;   m.speed = (uint8_t)model_atoi(v); }
+    else if (k == "s")    { m.hasSpeed = true;   m.speed = (uint8_t)model_sat(v, 255); }
     else if (k == "d")    { m.hasDur = true;     m.durMs = impl_spec_u32(v.c_str()); }
-    else if (k == "b")    { m.hasBright = true;  m.bright = (uint8_t)model_atoi(v); }
-    else if (k == "m")    { m.hasBeatMod = true; m.beatMod = (uint8_t)model_atoi(v); }
+    else if (k == "b")    { m.hasBright = true;  m.bright = (uint8_t)model_sat(v, 255); }
+    else if (k == "m")    { m.hasBeatMod = true; m.beatMod = (uint8_t)model_sat(v, 255); }
     else if (k == "at")   { m.hasAt = true;      m.atBeat = oracle_i32(v.c_str()); }
-    else if (k == "am")   { m.hasAm = true;      m.accentMode = (uint8_t)model_atoi(v); }
-    else if (k == "v")    { m.hasLevel = true;   m.level = (uint8_t)model_atoi(v);
-                            // QUIRK (pinned): the mode sniff looks at v[0] with NO leading-
-                            // whitespace skip, unlike every numeric parse on the same line.
-                            if (!v.empty() && (v[0] == 's' || v[0] == 'i')) m.mode = v[0]; }
-    else if (k == "bpm")  { m.hasBpm = true;     m.bpm = (uint16_t)model_atoi(v); }
+    else if (k == "am")   { m.hasAm = true;      { unsigned a = model_sat(v, 255);          // v1.3: a mode above 4 is
+                              m.accentMode = (uint8_t)(a > 4 ? 0 : a); } }         // no accent, never a wrap
+    else if (k == "v")    { m.hasLevel = true;   m.level = (uint8_t)model_sat(v, 255);
+                            // v1.3 S5: exactly "show" or "idle" -- no prefix match, no
+                            // whitespace skip. (It used to sniff v[0], so "stop" meant show.)
+                            if (v == "show") m.mode = 's'; else if (v == "idle") m.mode = 'i'; }
+    else if (k == "bpm")  { m.hasBpm = true;     m.bpm = (uint16_t)model_sat(v, 65535); }
     else if (k == "ph")   { m.hasPh = true;      m.phMs = impl_spec_u32(v.c_str()); }
-    else if (k == "bpb")  { m.hasBpb = true;     m.bpb = (uint8_t)model_atoi(v); }
+    else if (k == "bpb")  { m.hasBpb = true;     m.bpb = (uint8_t)model_sat(v, 255); }
     else if (k == "beat") { m.hasBeat = true;    m.beatAnchor = oracle_i32(v.c_str()); }
     else if (k == "ae")   { int nc; ContractEffect e = model_effect(v, nc);
                             if (e != CE_NONE && accentEffectAllowed(e)) {
@@ -532,6 +565,12 @@ static Model model_parse_params(const std::string& s) {
     else if (k == "ad")   { uint32_t d = impl_spec_u32(v.c_str());
                             if (d > 2550u) d = 2550u;
                             m.hasAccentDur = true; m.accentDurMs = (uint16_t)d; }
+    else if (k == "wd")   { m.hasWd = true;    m.wd = (uint8_t)model_sat(v, 255); }
+    else if (k == "n")    { m.hasN = true;     m.n = (uint8_t)model_sat(v, 255); }
+    else if (k == "k")    { uint16_t x; if (model_hex4(v, x)) { m.hasK = true; m.k = x; } }
+    else if (k == "an")   { m.hasAn = true;    m.an = (uint8_t)model_sat(v, 255); }
+    else if (k == "ap")   { m.hasAp = true;    m.ap = (uint8_t)model_sat(v, 255); }
+    else if (k == "r")    { m.hasRoute = true; m.route = (uint8_t)model_sat(v, 99); }
     // every other key (including "sw") is parsed and ignored -- forward-compatible
   }
   return m;
@@ -543,6 +582,7 @@ static bool model_eq(const Model& m, const ContractParams& p, std::string& why) 
   F(hasAt) F(atBeat) F(hasAm) F(accentMode) F(hasBpm) F(bpm) F(hasPh) F(phMs)
   F(hasBpb) F(bpb) F(hasBeat) F(beatAnchor) F(hasLevel) F(level) F(mode)
   F(hasAccentFx) F(accentFx) F(hasAccentColor) F(hasAccentDur) F(accentDurMs)
+  F(hasWd) F(wd) F(hasN) F(n) F(hasK) F(k) F(hasAn) F(an) F(hasAp) F(ap) F(hasRoute) F(route)
 #undef F
   if (m.color.r != p.color.r || m.color.g != p.color.g || m.color.b != p.color.b) {
     why = "color"; return false;
@@ -560,7 +600,7 @@ static void diff_line(const std::string& body) {
   const bool m_ok = body.size() >= 3 &&
                     (body[0]=='L' || body[0]=='P' || body[0]=='H' || body[0]=='*') &&
                     (body[1]=='F' || body[1]=='R' || body[1]=='T' || body[1]=='*') &&
-                    (body[2] && strchr("APCBLXMQ", body[2]) != nullptr);
+                    (body[2] && strchr("APCBLXMQV", body[2]) != nullptr);
   CHECK_MSG(ok == m_ok, "line-accept", body.c_str(), "impl=%d model=%d", (int)ok, (int)m_ok);
   if (!ok) {
     // a rejected line must leave the out-param completely inert (no half-applied state)
@@ -584,6 +624,7 @@ static void section_F_lines() {
   static const char* keys[] = {
     "i", "c", "s", "d", "b", "m", "at", "am", "v", "bpm", "ph", "bpb", "beat",
     "ae", "ac", "ad", "sw", "a", "t", "e", "bp", "ata", "ii", "", "I", "AT", "D",
+    "wd", "n", "k", "an", "ap", "r", "w", "kk", "anp",
   };
   static const char* vals[] = {
     "", "0", "1", "255", "256", "-1", "-0", "+5", " 7", "\t8", "99999999999",
@@ -655,12 +696,12 @@ static void section_F_random_lines(long iters) {
   // "c=ff0000,c=zz" -- the near-miss neighbourhood where a tokenizer bug actually lives --
   // so this generator builds those on purpose and then perturbs them.
   static const char* K[] = { "i","c","s","d","b","m","at","am","v","bpm","ph","bpb","beat",
-                             "ae","ac","ad","sw","a","b","at","","x" };
+                             "ae","ac","ad","sw","a","b","at","","x","wd","n","k","an","ap","r" };
   static const char* V[] = { "solid","comet","scan","native:5","native:","off","twinkle",
                              "ff0000","0080ff","ffff","zz","0","1","255","-1","-99999999999",
                              "4294967296","2147483648"," 7","show","idle","","=","solid=x",
                              "ff0000=1","2550","2551" };
-  static const char CLS[] = "LPH*", UN[] = "FRT*", VB[] = "APCBLXMQ";
+  static const char CLS[] = "LPH*", UN[] = "FRT*", VB[] = "APCBLXMQV";
   static const char JUNK[] = ",=: \t\r\n!*x0-";
   for (long i = 0; i < iters / 2; i++) {
     s.clear();
@@ -809,7 +850,7 @@ static void section_G_hostile() {
   // ...and random bytes forced to start with a VALID header, so the tokenizer (not the
   // header check) is what actually gets hammered
   for (long i = 0; i < 60000; i++) {
-    static const char cls[] = "LPH*", un[] = "FRT*", vb[] = "APCBLXMQ";
+    static const char cls[] = "LPH*", un[] = "FRT*", vb[] = "APCBLXMQV";
     std::string s;
     s += cls[rnd_n(4)]; s += un[rnd_n(4)]; s += vb[rnd_n(8)]; s += ':';
     uint32_t len = rnd_n(60);

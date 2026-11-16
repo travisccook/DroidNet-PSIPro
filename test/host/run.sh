@@ -6,6 +6,9 @@
 # Host checks for the PSI Pro contract fork (stages 1-8 need no hardware and no toolchain; stage 9 is the real cross-compile,
 # stage 10 runs AVR code in simavr):
 #   1. contract_core.h parser unit tests
+#   1f. contract_core.h v1.3 unit tests (safety limits, clock rules, lifecycle, score, query)
+#   1g. the same, built with stand-ins for this fork's flash-string hooks (PSTR / pgm_read_byte)
+#   1h. the shared core files are the commit in src/contract/CORE_PIN (when that checkout is here)
 #   1b. wdp_announce_core.h WDP device announce unit tests (shared with the RSeries and Flthy forks)
 #   1c. wdp_fork.h: this fork's real WDP identity builds its line, front and rear
 #   1d. the WDP announce in the firmware: main.cpp + mocks (TX room, the Q ack, the jumper, the seed)
@@ -40,6 +43,30 @@ echo "host compiler: $CXX_HOST   sanitizer compiler: $CXX_SAN   temp: $T"
 echo "[1/9] contract_core parser unit tests"
 "$CXX_HOST" -std=c++17 -Wall -Wextra -O0 test_contract_core.cpp -o "$T/psi_contract_test"
 "$T/psi_contract_test"
+echo "[1f] contract_core v1.3 unit tests"
+# Shared with the RSeries and Flthy forks, like stage 1. -std=c++11: avr-gcc builds the core as gnu++11.
+"$CXX_HOST" -std=c++11 -Wall -Wextra -O0 test_contract_v13.cpp -o "$T/psi_contract_v13"
+"$T/psi_contract_v13"
+echo "[1g] contract_core v1.3 unit tests, flash-string hooks on"
+# ContractPSI.h defines CONTRACT_PSTR / CONTRACT_READ_BYTE as PSTR() / pgm_read_byte() on the AVR.
+# This build stands in for that: every read of a name table must go through CONTRACT_READ_BYTE, or
+# it faults here instead of reading garbage from RAM on the board.
+"$CXX_HOST" -std=c++11 -Wall -Wextra -O0 -DCONTRACT_TEST_FLASH_HOOKS test_contract_v13.cpp -o "$T/psi_contract_v13_hooks"
+"$T/psi_contract_v13_hooks"
+echo "[1h] shared core files match src/contract/CORE_PIN"
+# The core lives in the RSeries fork; this repo carries a byte-identical copy of every file in that
+# repo's test/host/core-files.txt at the pinned commit. Checked when that checkout is on this
+# machine (CORE_REPO, default ../DroidNet-RSeriesLogics beside this repo) and has the commit.
+CORE_REPO="${CORE_REPO:-../../../DroidNet-RSeriesLogics}"
+CORE_PIN="$(cat ../../src/contract/CORE_PIN)"
+if git -C "$CORE_REPO" cat-file -e "$CORE_PIN^{commit}" 2>/dev/null; then
+  for f in $(git -C "$CORE_REPO" show "$CORE_PIN:test/host/core-files.txt"); do
+    git -C "$CORE_REPO" show "$CORE_PIN:$f" | cmp -s - "../../$f" || { echo "FAIL: $f differs from $CORE_PIN"; exit 1; }
+  done
+  echo "    identical to ${CORE_PIN:0:7}"
+else
+  echo "    (skipped: no core checkout with $CORE_PIN at $CORE_REPO)"
+fi
 echo "[1b/9] wdp_announce_core WDP device announce unit tests"
 # Shared byte-identically with the RSeries and Flthy forks (src/wdp/wdp_announce_core.h and this
 # test both). -std=c++11: avr-gcc builds the same header as gnu++11.
