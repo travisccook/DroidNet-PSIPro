@@ -5,6 +5,7 @@
 // SRAM but 15 bytes of state. Build with board_upload.maximum_size = 32256: simavr has no bootloader.
 #include <Arduino.h>
 #include <EEPROM.h>
+#include <avr/sleep.h>
 #define setup fw_setup
 #define loop fw_loop
 #include "../../../../src/main.cpp"
@@ -70,6 +71,6 @@ void loop() {
   Serial1.flush();
   while (pgm_read_byte(gRow) != '\n') gRow++;
   gRow++;
-  if (pgm_read_byte(gRow) == 0) { Serial1.println(F("fwprobe done")); Serial1.flush(); for (;;) {} }
+  if (pgm_read_byte(gRow) == 0) { Serial1.println(F("fwprobe done")); Serial1.flush(); cli(); set_sleep_mode(SLEEP_MODE_PWR_DOWN); sleep_enable(); sleep_cpu(); }   // asleep with interrupts off: simavr exits
   startRow();
 }

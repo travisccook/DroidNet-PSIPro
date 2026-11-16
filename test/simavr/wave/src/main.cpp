@@ -1,5 +1,6 @@
 // WS2812 waveform probe: one show() of a known frame; simavr traces PD4 to a VCD.
 #include <Arduino.h>
+#include <avr/sleep.h>
 #include <FastLED.h>
 CRGB leds[48];
 void setup() {
@@ -12,5 +13,6 @@ void setup() {
   FastLED.show(255);          // and a third with no delay at all: the same-tick double show the VM
                               // programs do (OP_SHOWNOW then OP_SHOW). Its gap is the staging loop.
   Serial1.begin(9600); Serial1.println(F("wave done")); Serial1.flush();
+  cli(); set_sleep_mode(SLEEP_MODE_PWR_DOWN); sleep_enable(); sleep_cpu();   // asleep with interrupts off: simavr exits
 }
 void loop() {}

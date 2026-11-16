@@ -7,7 +7,8 @@
 // latched (time, master scale, pixels) and the bytes written to Serial1. They do not read contract
 // globals, so they hold across refactors of the layer under test.
 #include "native_mocks/Arduino.h"
-#include "native_mocks/FastLED.h"
+// (native_mocks/FastLED.h is not included here: main.cpp names the S9 frame gate and then includes
+// <FastLED.h> itself. ContractPSI.h refuses to build if the mock was compiled without the gate.)
 #include "native_mocks/EEPROM.h"
 #include <stdio.h>
 #include <string.h>

@@ -93,10 +93,12 @@ static void b_is_cleared_by_a_reset() {
 }
 // S9: b= on P belongs to that pulse. It does not become the base look's level.
 static void a_pulse_b_does_not_stick() {
-  boot();
+  boot(0x00, 0x01, 200);
   at(1000, "!P*A:i=solid,c=00ff00"); at(2000, "!P*P:c=ffffff,d=200,b=64");
   runTo(3000);
-  CHECK(shown(2900).allAre(GREEN) && shown(2900).scale == 20, "after P:b=64 the look is back at 20, saw %u",
+  CHECK(shown(2100).allAre(WHITE) && shown(2100).scale == 50, "the pulse draws at its own b=64 (50 of 200), saw %u",
+        shown(2100).scale);
+  CHECK(shown(2900).allAre(GREEN) && shown(2900).scale == 200, "after P:b=64 the look is back at 200, saw %u",
         shown(2900).scale);
 }
 static void scored_b_is_carried() {
@@ -520,19 +522,25 @@ static void flash_speed_is_the_shared_timing() {
   }
   CHECK(states >= 8, "flash at s=0 changes state about every 425 ms (%u states in 5 s)", states);
 }
-// pulse: with nothing pumping the look it breathes on fxPulseBright(): 340 ms a cycle at s=255,
-// never faster (S8), 2 s a cycle at s=0. Under the beat pump the envelope is the breathe.
+// pulse: with nothing pumping the look it breathes on fxPulseBright(): 2 s a cycle at s=0, 340 ms
+// at s=255 and never faster (S8). Under the beat pump the envelope is the breathe.
+// At s=0 the panel is the core's breathe exactly. At s=255 the S9 field gate squares the rise off
+// (a fast pulse rises in a step, not a ramp), so there the panel is never ABOVE the breathe.
 static void pulse_breathes_on_the_shared_timing() {
   boot(0x00, 0x01, 200);
-  at(1000, "!P*A:i=pulse,c=ffffff,s=255"); at(6000, "!P*A:i=pulse,c=ffffff,s=0");
+  at(1000, "!P*A:i=pulse,c=ffffff,s=0"); at(8000, "!P*A:i=pulse,c=ffffff,s=255");
   runTo(13000);
-  for (const Frame& f : between(1100, 5900)) {
-    const uint8_t want = (uint8_t)(((uint16_t)200 * fxPulseBright(f.t - 1000, 255)) / 255u);
+  for (const Frame& f : between(1100, 7900)) {
+    const uint8_t want = (uint8_t)(((uint16_t)200 * fxPulseBright(f.t - 1000, 0)) / 255u);
     if (f.scale != want) { CHECK(false, "t=%u: the breathe is %u, the core says %u", f.t, f.scale, want); break; }
   }
-  const unsigned fast = pumpPeaks(1100, 5900), slow = pumpPeaks(6500, 12500);
-  CHECK(fast >= 12 && fast <= 14, "s=255 is a 340 ms cycle: 14 peaks in 4.8 s, never more; saw %u", fast);
+  for (const Frame& f : between(8100, 12900)) {
+    const uint8_t most = (uint8_t)(((uint16_t)200 * fxPulseBright(f.t - 8000, 255)) / 255u);
+    if (f.scale > most) { CHECK(false, "t=%u: the panel is at %u, above the core's breathe (%u)", f.t, f.scale, most); break; }
+  }
+  const unsigned slow = pumpPeaks(1500, 7500), fast = pumpPeaks(8100, 12900);
   CHECK(slow == 3, "s=0 is a 2 s cycle: 3 peaks in 6 s, saw %u", slow);
+  CHECK(fast >= 12 && fast <= 14, "s=255 is a 340 ms cycle: 14 peaks in 4.8 s, never more; saw %u", fast);
 }
 static void a_pumped_pulse_follows_the_beat() {
   boot(0x00, 0x01, 200);
@@ -571,6 +579,67 @@ static void a_native_vu_mode_walks_after_a_show() {
   CHECK(kinds >= 3, "the native VU meter moves again 2 s after the show's last L (saw %u shapes)", kinds);
 }
 
+
+// ---- S9: one limit for every path (the field gate, at the place every frame leaves) --------------
+// The hostile streams are test_property.cpp's. These four show the rule itself.
+// A relight right after a blackout: the dark is immediate, the light waits until 340 ms after the
+// panel last lit, and until then the frame is held under a quarter of the ceiling.
+static void a_relight_right_after_x_is_held() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=ffffff");
+  at(2200, "!P*X"); at(2250, "!P*A:i=solid,c=ffffff");
+  runTo(3000);
+  uint32_t lit = 0;
+  for (const Frame& f : between(2000, 2100)) if (f.scale == 200 && f.lit == 48) { lit = f.t; break; }
+  CHECK(lit != 0, "the first light, after a long dark, is not held");
+  CHECK(shown(2240).lit == 0, "X is dark at once");
+  for (const Frame& f : between(2250, lit + 339))
+    if (f.lit && f.scale > 50) { CHECK(false, "t=%u: relit at %u only %u ms after the panel last lit (t=%u)", f.t, f.scale, f.t - lit, lit); break; }
+  CHECK(shown(lit + 380).allAre(WHITE) && shown(lit + 380).scale == 200, "340 ms after it last lit the look is at its level");
+}
+// The native look the panel is given back to is held the same way: X, then M:v=idle, again and again.
+static void the_swipe_after_idle_is_held_too() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!P*A:i=off");
+  for (uint32_t t = 2000; t < 5000; t += 100) { at(t, "!P*X"); at(t + 50, "!**M:v=idle"); }
+  runTo(6000);
+  std::vector<uint32_t> on; bool was = false;
+  for (const Frame& f : between(2000, 5000)) {
+    const bool is = f.lit >= 24 && f.scale >= 100;       // half the field at half the ceiling, or more
+    if (is && !was) on.push_back(f.t);
+    was = is;
+  }
+  CHECK(on.size() >= 3, "the swipe does come back between blackouts (%u times in 3 s)", (unsigned)on.size());
+  for (size_t k = 1; k < on.size(); k++) CHECK(on[k] - on[k - 1] >= 340, "two relights %u ms apart (t=%u)", on[k] - on[k - 1], on[k]);
+  CHECK(shown(5900).lit == 48 && shown(5900).scale == 200, "when the stream ends the swipe is back at the owner's 200");
+}
+// Nothing the contract holds is ever brighter than the ceiling, whatever the primitive asked for
+// (upstream's bare show() latches a brightness stored at boot, not the owner's current one). Boot
+// at 200, then the owner turns it down to 20, then a show runs every native mode it may select.
+// (This held before the gate's clamp too; it is here so that it keeps holding.)
+static void a_show_never_exceeds_the_ceiling() {
+  static const int modes[] = {0, 1, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 92};
+  const int n = (int)(sizeof modes / sizeof modes[0]);
+  char line[21][32];
+  boot(0x00, 0x01, 200);
+  at(500, "3P20"); at(1000, "!**M:v=show");
+  for (int k = 0; k < n; k++) { snprintf(line[k], sizeof line[k], "!P*A:i=native:%d", modes[k]); at(1500 + 1500 * k, line[k]); }
+  runTo(1500 + 1500 * n);
+  unsigned frames = 0;
+  for (const Frame& f : between(1530, 1500 + 1500 * n)) {
+    frames++;
+    if (f.scale > 20) { CHECK(false, "t=%u (native:%d): a frame at %u, above the ceiling 20", f.t, modes[(f.t - 1500) / 1500], f.scale); break; }
+  }
+  CHECK(frames > 300, "the native modes draw (%u frames)", frames);
+}
+// R1: no overlay on a native:<n> look, scored or live, so an accent never restarts a native sequence.
+static void no_pulse_over_a_contract_native_look() {
+  boot();
+  at(1000, "!P*A:i=native:15"); at(2500, "!P*P:c=ffffff,d=300");
+  runTo(4000);
+  CHECK(onsets(2500, 4000, WHITE).empty(), "a P over native:15 draws nothing");
+  CHECK(mostLit(2500, 4000) > 0 && mostLit(2500, 4000) <= 6, "Knight Rider runs on");
+}
 
 // ---- core revision CA1.2: what a line may and may not do ---------------------------------------
 // A scored line delivered twice (a mesh retry) changes nothing: the section that is playing does
@@ -681,6 +750,10 @@ static const Scenario kScenarios[] = {
   {"no_accent_on_a_native_section", no_accent_on_a_native_section},
   {"a_meter_with_no_level_feed_walks", a_meter_with_no_level_feed_walks},
   {"a_native_vu_mode_walks_after_a_show", a_native_vu_mode_walks_after_a_show},
+  {"a_relight_right_after_x_is_held", a_relight_right_after_x_is_held},
+  {"the_swipe_after_idle_is_held_too", the_swipe_after_idle_is_held_too},
+  {"a_show_never_exceeds_the_ceiling", a_show_never_exceeds_the_ceiling},
+  {"no_pulse_over_a_contract_native_look", no_pulse_over_a_contract_native_look},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},
   {"a_bpm_that_is_not_a_number_is_ignored", a_bpm_that_is_not_a_number_is_ignored},
 #ifdef PSI_ENABLE_I2C

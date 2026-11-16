@@ -13,6 +13,7 @@
 // check_lifecycle.py holds the expectations. The table is in flash: the firmware leaves little SRAM.
 #include <Arduino.h>
 #include <EEPROM.h>
+#include <avr/sleep.h>
 #define setup fw_setup
 #define loop fw_loop
 #include "../../../../src/main.cpp"
@@ -70,5 +71,5 @@ void loop() {
   buf[n] = 0;
   gRow = p + 1;
   if (n) { if (buf[0] == '!') parseContract(buf); else parseCommand(buf); }
-  if (pgm_read_byte(gRow) == 0) { Serial1.println(F("lifecycle done")); Serial1.flush(); }
+  if (pgm_read_byte(gRow) == 0) { Serial1.println(F("lifecycle done")); Serial1.flush(); cli(); set_sleep_mode(SLEEP_MODE_PWR_DOWN); sleep_enable(); sleep_cpu(); }   // simavr exits
 }

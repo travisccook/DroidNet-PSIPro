@@ -18,6 +18,7 @@
 #   5. parser fuzz + differential (ASan/UBSan)
 #   6. golden-frame parity against the committed captures (test/host/golden/)
 #   6d. the I2C build's six stand-in looks draw scan, sparkle and solid, frame for frame
+#   6e. contract S9 as a property of the firmware: hostile and random line streams, frames measured
 #   7. scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock
 #   8. HSV oracle: CE_RAINBOW (CHSV->CRGB) == FastLED 3.5.0 hsv2rgb_rainbow (full cube)
 #   9. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
@@ -260,6 +261,20 @@ for bin in psi_timeline psi_timeline_i2c; do
   echo "      $bin: $n scenarios ok"
 done
 
+echo "[6e] contract S9 as a property: hostile and random line streams, the frames measured"
+# test_property.cpp: 14 hostile profiles x 8 rounds and 1500 random streams, each in a fresh copy
+# of the firmware, on both builds. Dark-to-lit onsets (at most 3 a second, never two inside
+# 340 ms), nothing above the owner's brightness, dark after X, native after idle, and a native
+# command keeps the panel.
+for cfg in "" "-DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS"; do
+  # shellcheck disable=SC2086
+  "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w $cfg \
+      -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_property.cpp -o "$T/psi_property"
+  echo "      ${cfg:-serial-only}"
+  "$T/psi_property" > "$T/property.out" 2>&1 || { cat "$T/property.out"; echo "FAIL: the S9 property does not hold"; exit 1; }
+  sed 's/^/      /' "$T/property.out"
+done
+
 echo "[7/9] scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock"
 # include/FastLED.h replaced FastLED with a from-scratch WS2812 driver. The 31 goldens
 # gate the firmware's STAGING against native_mocks/FastLED.h, NOT against that driver, so
@@ -342,12 +357,15 @@ gate PSIPro 28416 256
 gate PSIPro-i2c 28160 128
 fi   # PlatformIO present
 
-echo "[10] simavr: millis() rate per look, the show lifecycle, WS2812 waveform, CPU cost -- optional"
-# The host mocks have an ideal clock and a free show(). These four probes run real AVR code in
+echo "[10] simavr: millis() rate per look, the show lifecycle, S9 on the wire, WS2812 waveform, CPU cost -- optional"
+# The host mocks have an ideal clock and a free show(). These five probes run real AVR code in
 # simavr (test/simavr/README.md): the firmware's millis() against Timer1 for each contract look,
 # the firmware through a show, X, idle, a native take-over and a pulse (what the panel returns to
 # depends on when upstream's loop samples its pattern state, so it is checked on the real timer
-# too), the WS2812 waveform on PD4, and the cost of the per-frame math.
+# too), the firmware under two hostile line streams with every frame decoded off the LED pin and
+# its dark-to-lit onsets counted (the S9 gate sits in the real driver's show(), which the host
+# suite only has a mock of), the WS2812 waveform on PD4, and the cost of the per-frame math.
+# Each probe halts the simulated CPU when it is done; the timeouts are only an upper bound.
 SIMAVR="${SIMAVR:-$HOME/.platformio/packages/tool-simavr/bin/simavr}"
 if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
   simrun() {  # <project> <seconds> <log> [simavr args...]: build, run until the timeout, clean the log
@@ -362,6 +380,8 @@ if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
   python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 1000
   simrun lifecycle 45 "$T/lifecycle.txt"
   python3 ../simavr/check_lifecycle.py "$T/lifecycle.txt"
+  simrun gate 60 "$T/gate.txt" -o "$T/gate.vcd" -at "led=trace@0x2b/0x10"
+  python3 ../simavr/check_gate.py "$T/gate.vcd" "$T/gate.txt"
   simrun wave 8 "$T/wave.txt" -o "$T/wave.vcd" -at "led=trace@0x2b/0x10"
   python3 ../simavr/check_wave.py "$T/wave.vcd" --min-gap-us 50
   simrun bench 30 "$T/bench.txt"

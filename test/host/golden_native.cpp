@@ -3,7 +3,8 @@
 // The golden contract: 1 kHz ideal millis, zero-cost show, cold-boot state,
 // one process per capture (no cross-mode state leakage).
 #include "native_mocks/Arduino.h"
-#include "native_mocks/FastLED.h"
+// (native_mocks/FastLED.h is not included here: main.cpp names the S9 frame gate and then includes
+// <FastLED.h> itself. ContractPSI.h refuses to build if the mock was compiled without the gate.)
 #include "native_mocks/EEPROM.h"
 #include <stdio.h>
 #include <string.h>

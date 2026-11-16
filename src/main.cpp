@@ -283,6 +283,10 @@
 */
 
 // Include the various libraries that we need.
+// DroidNet: every frame passes the contract's S9 field gate on its way out (ContractPSI.h,
+// contractFrameScale). With no contract activity the gate only watches: the scale is unchanged.
+// Named BEFORE preamble.h, whose functions.h is the first to include <FastLED.h>.
+#define PSI_FRAME_GATE contractFrameScale
 #include "preamble.h"
 #include <FastLED.h>
 #include <EEPROM.h>

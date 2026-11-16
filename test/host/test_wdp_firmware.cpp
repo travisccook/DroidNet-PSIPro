@@ -9,7 +9,8 @@
 //   * the seed differs between the front and rear PSI, and between chips.
 // Part of the DroidNet PSI Pro fork. Copyright (c) 2026 Travis Cook. SPDX-License-Identifier: MIT
 #include "native_mocks/Arduino.h"
-#include "native_mocks/FastLED.h"
+// (native_mocks/FastLED.h is not included here: main.cpp names the S9 frame gate and then includes
+// <FastLED.h> itself. ContractPSI.h refuses to build if the mock was compiled without the gate.)
 #include "native_mocks/EEPROM.h"
 #include <stdio.h>
 #include <string.h>

@@ -260,6 +260,11 @@ enum EOrder { RGB = 0012, RBG = 0021, GRB = 0102, GBR = 0120, BRG = 0201, BGR = 
 struct WS2812 {};
 
 #if defined(__AVR__)  // WS2812 controller: AVR-only (pin access + cycle-exact bit-bang + timer)
+#ifdef PSI_FRAME_GATE
+#define PSI_FRAME_GATE_WIRED 1             // ContractPSI.h refuses to build without it
+uint8_t PSI_FRAME_GATE(const CRGB* leds, uint8_t n, uint8_t scale);   // src/contract/ContractPSI.h
+#endif
+
 class CFastLED {
 public:
   // Compile-time pin binding, like FastLED's. This firmware only ever drives
@@ -296,6 +301,11 @@ public:
   // scale oracle over all 256*256 (channel, scale) pairs.
   void show(uint8_t scale) {
     if (!m_leds || m_n <= 0) return;
+#ifdef PSI_FRAME_GATE
+    // DroidNet contract v1.3 S9: the one place every frame leaves the board. The gate may lower
+    // the master scale of this frame; it never raises it and never touches the pixels.
+    scale = PSI_FRAME_GATE(m_leds, (uint8_t)m_n, scale);
+#endif
     // Stage the frame: per-channel scale8 into GRB wire order, interrupts still on.
     uint8_t *w = sWire;
     for (int i = 0; i < m_n; ++i) {

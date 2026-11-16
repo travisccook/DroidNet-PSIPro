@@ -1,5 +1,6 @@
 // CPU cost of the contract_core.h per-frame math and of one show() on the ATmega32U4, in simavr.
 #include <Arduino.h>
+#include <avr/sleep.h>
 #include <FastLED.h>
 #include "contract_core.h"
 static inline uint16_t t1() { return TCNT1; }   // 0.5 us/tick at prescaler 8
@@ -22,5 +23,6 @@ void setup() {
   FastLED.addLeds<WS2812, 4, GRB>(leds, 48);
   a = t1(); FastLED.show(200); b = t1(); rep(F("show48"), b - a);
   Serial1.println(F("bench done")); Serial1.flush();
+  cli(); set_sleep_mode(SLEEP_MODE_PWR_DOWN); sleep_enable(); sleep_cpu();   // asleep with interrupts off: simavr exits
 }
 void loop() {}

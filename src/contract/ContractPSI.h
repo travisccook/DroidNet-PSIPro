@@ -133,6 +133,9 @@ static bool    g_owned        = false;
 static bool    g_tookLook     = false;             // more than a pulse was shown: give-back returns to the swipe
 static bool    g_ownerTempOn  = false;
 static uint8_t g_ownerTempVal = 0;
+// S9: the native look the contract just handed the panel back to is still the contract's doing.
+// Its first frames go through the field gate like the contract's own (contractFrameScale).
+static bool    g_gateNative   = false;
 
 // ---- small local helpers -----------------------------------------------------------
 // contract speed (0..255, higher=faster) -> primitive time_delay ms (inverse map).
@@ -231,6 +234,7 @@ static PSI_NOINLINE void _givePanelBack() {
     timingReceived = false;
   }
   g_owned = false;
+  g_gateNative = true;                                 // S9: the native look's return is gated too
 }
 static inline void _holdPanel() { _takePanel(); g_tookLook = true; }
 
@@ -255,9 +259,11 @@ static inline void _showBegin() { if (contractShowBegin(g_u)) _holdPanel(); }
 // there the yield is only a flag, and loop() runs it before it draws or parses anything else
 // (_serviceYield(), first thing in contractLoopTick() and in contractServicePending()).
 static PSI_NOINLINE void _yieldNow() {
-  if (!g_owned && !g_u.inShow) return;
+  // Always the whole reset, held panel or not: a score that is loaded with the clock running
+  // would otherwise take the panel back at its next section, by itself.
   g_tookLook = false;                                  // the native command chose the pattern
   _boundary('i', 0);
+  g_gateNative = false;                                // the owner's own light is never held back
 }
 #ifdef PSI_ENABLE_I2C
 static volatile bool g_yieldPending = false;
@@ -276,6 +282,53 @@ static uint32_t g_levelMs  = 0;
 inline bool contractHoldsLevels() {
   if (g_levelFed && (uint32_t)(millis() - g_levelMs) >= 2000u) g_levelFed = false;
   return g_levelFed;
+}
+
+// ---- S9: one limit for every path --------------------------------------------------------
+// Called by FastLED.show() for EVERY frame, as the last thing before it goes out (the hook is
+// PSI_FRAME_GATE, set in main.cpp). It measures the frame's field level (the mean over the LEDs
+// of each LED's brightest channel, times the master scale) and returns the scale to send.
+//   * A frame the contract owns (its looks, a native:<n> it selected, the overlay, X's dark) and
+//     the native look right after a give-back go through the core's field gate: a dark-to-lit
+//     swing across the field is let through only 340 ms after the last one, and until then the
+//     frame is scaled down. They are also never brighter than the ceiling, whatever scale the
+//     primitive asked for (upstream's bare show() latches the brightness the board booted with).
+//   * Any other frame is the owner's own light. It is never changed; the gate is only told about
+//     it, so that what the contract does next keeps its distance.
+// The level is computed exactly, floor(sum * scale / (n * 255)): at a low brightness a unit of
+// level is several percent of the ceiling, and a measure that rounded twice would miss a rise
+// an observer can see. The measuring is 48 compares and two divides; nothing here blocks.
+#ifndef PSI_FRAME_GATE_WIRED
+#error "FastLED.h was included before main.cpp named PSI_FRAME_GATE: frames would skip the S9 gate"
+#endif
+uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
+  uint16_t sum = 0;                                    // 48 * 255 fits
+  for (uint8_t i = 0; i < n; i++) {
+    uint8_t m = l[i].r;
+    if (l[i].g > m) m = l[i].g;
+    if (l[i].b > m) m = l[i].b;
+    sum += m;
+  }
+  const uint32_t now = millis();
+#ifdef PSI_ENABLE_I2C
+  const uint8_t sreg = SREG;                           // a native frame can be drawn from the TWI
+  cli();                                               // interrupt: keep the gate's state whole
+#endif
+  if (g_gateNative && (g_owned || strobeCoolDownExpired(g_u.fieldOnsetMs, now, 2 * STROBE_MIN_STATE_MS)))
+    g_gateNative = false;                              // nothing can be held any more
+  if (g_owned && scale > g_u.ceil) scale = g_u.ceil;
+  const uint8_t level = (uint8_t)((uint16_t)(((uint32_t)sum * scale) / 255u) / n);
+  if (g_owned || g_gateNative) {
+    const uint8_t allowed = contractFieldGate(g_u, level, now);
+    if (allowed < level) scale = (uint8_t)(((uint16_t)scale * allowed) / level);   // rounds down
+  } else {
+    if (!g_u.inShow) g_u.ceil = scale;                 // no show armed: the step follows the owner's level
+    contractFieldForced(g_u, level, now);
+  }
+#ifdef PSI_ENABLE_I2C
+  SREG = sreg;
+#endif
+  return scale;
 }
 
 // ---- the looks this build has ----------------------------------------------------
@@ -404,11 +457,14 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
 // Returns false when the strobe cool-down coalesces this accent away: an accent may not START
 // more often than every 2 * STROBE_MIN_STATE_MS. pulseLastMs survives every reset (the core keeps
 // it), so a reset cannot open the cap.
-static PSI_NOINLINE bool _fireAccent(ContractEffect fx, const ContractRGB& c, uint32_t durMs, uint32_t now) {
+static PSI_NOINLINE bool _fireAccent(ContractEffect fx, const ContractRGB& c, uint32_t durMs, uint8_t bright,
+                                     uint32_t now) {
+  if (g_u.base == CB_NATIVE) return false;             // R1: no overlay on a native:<n> look, scored or live
   if (!strobeCoolDownExpired(g_u.pulseLastMs, now, 2 * STROBE_MIN_STATE_MS)) return false;
   _takePanel();                                        // L3: a pulse may overlay the native look
   g_u.pulseFx      = _lookHere(fx, true);
   g_u.pulseColor   = c;
+  g_u.pulseBright  = bright;                           // the overlay's own level; never the base look's
   g_u.pulseDurMs   = accentDurClamp(durMs);
   g_u.pulseStartMs = now;
   g_u.pulseLastMs  = now;
@@ -474,8 +530,9 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
     case CV_PULSE: {                                   // one-shot accent; outside a show it overlays the native look (L3)
       _showBegin();
       ContractEffect fx = (pr.hasEffect && accentEffectAllowed(pr.effect)) ? pr.effect : CE_SOLID;
-      // b= on P does not stick to the base look (S9): the overlay draws at the unit's level.
-      _fireAccent(fx, pr.hasColor ? pr.color : ContractRGB{255, 255, 255}, pr.hasDur ? pr.durMs : 120, now);
+      // b= on P is the overlay's alone (S9): it never becomes the base look's level.
+      _fireAccent(fx, pr.hasColor ? pr.color : ContractRGB{255, 255, 255}, pr.hasDur ? pr.durMs : 120,
+                  pr.hasBright ? pr.bright : g_u.bright, now);
       break;
     }
 
@@ -550,12 +607,9 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
 // ---- loop hooks -------------------------------------------------------------
 // Called every loop pass: crisp pulse expiry (wrap-safe elapsed compare).
 inline void contractPulseTick() {
-  if (g_u.pulseActive && (uint32_t)(millis() - g_u.pulseStartMs) >= g_u.pulseDurMs) {
-    g_u.pulseActive = false;
+  if (g_u.pulseActive && !contractOverlayUp(g_u, millis())) {   // the core's one expiry rule
     if (!_owns()) { _givePanelBack(); return; }        // L3: the native look returns
-    // Re-init the state machines the base look uses (sparkle, the meter). Not a native:<n> look:
-    // it carries on where it was, as the board's own native look does under a pulse.
-    if (g_u.base != CB_NATIVE) firstTime = true;
+    firstTime = true;                                  // re-init the state machines the base look uses
   }
 }
 
@@ -585,12 +639,11 @@ inline bool contractLoopTick() {
       }
       // The scored accent. Consume the edge first, always (or a beat that does not fire is tested
       // again on every frame); then the SAME predicate the pump uses (S2). A native:<n> section
-      // takes no overlay in R1 (section 6): an accent must never restart or replace a native sequence.
+      // takes no overlay in R1 (section 6; _fireAccent refuses it).
       if (beatEdge(g_u.lastAccentBeat, bp.beatIndex) && g_u.curSection >= 0) {
         const ScoreEntry& e = g_score[g_u.curSection];
-        if (e.accentFx != CE_NONE && e.effect != CE_NATIVE &&
-            beatAccentFires(e.accentMode, bp, g_clock, e.accentEvery)) {
-          _fireAccent(e.accentFx, e.accentColor, (uint32_t)e.accentDur10 * 10u, now);
+        if (e.accentFx != CE_NONE && beatAccentFires(e.accentMode, bp, g_clock, e.accentEvery)) {
+          _fireAccent(e.accentFx, e.accentColor, (uint32_t)e.accentDur10 * 10u, g_u.bright, now);   // it rides the look's level
         }
       }
     }
@@ -598,9 +651,9 @@ inline bool contractLoopTick() {
 
   if (!_owns()) { _givePanelBack(); return false; }    // nothing of ours on the panel: native runs
 
-  // S6: b= and B are fractions of the owner's ceiling. The pump rides under that level; the
-  // overlay renders at it, un-pumped.
-  const uint8_t lvl = contractLevel(g_u.ceil, g_u.bright);
+  // S6: b= and B are fractions of the owner's ceiling. The pump rides under that level. The
+  // overlay has its own fraction (a P's b=, or the look's level for a scored accent), un-pumped.
+  const uint8_t lvl = contractLevel(g_u.ceil, g_u.pulseActive ? g_u.pulseBright : g_u.bright);
   uint8_t effBright = lvl;
   if (!g_u.pulseActive && g_clock.running && g_u.beatMod && g_u.accentMode) {
     float prog = (g_u.curSection >= 0) ? beatSectionProgress(bp.beatIndex, g_u.sectionStart, g_u.sectionEnd) : 0.0f;
@@ -631,6 +684,7 @@ inline bool contractLoopTick() {
 // ---- serial intake dispatch (called from serialEvent/receiveEvent) ----------
 // cmdString already assembled with the leading '!'.
 inline void parseContract(const char* cmd) {
+  _serviceYield();                                     // a native command that came first is applied first
   ParsedContract p;
   if (!contractParse(cmd + 1, p)) return;              // +1 skips the leading '!'
   if (!contractAddressed(p.cls, p.unit)) return;       // fail-silent for other boards and units

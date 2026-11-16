@@ -68,6 +68,10 @@ template <uint8_t DATA_PIN, EOrder RGB_ORDER = RGB> class WS2812 {};
 // golden driver; every show() (with or without explicit scale) emits a frame.
 inline void (*g_frame_hook)(const CRGB* leds, int n, uint8_t scale) = nullptr;
 
+#ifdef PSI_FRAME_GATE
+#define PSI_FRAME_GATE_WIRED 1             // ContractPSI.h refuses to build without it
+uint8_t PSI_FRAME_GATE(const CRGB* leds, uint8_t n, uint8_t scale);   // src/contract/ContractPSI.h
+#endif
 struct CFastLED {
   CRGB* m_leds = nullptr;
   int m_n = 0;
@@ -76,7 +80,12 @@ struct CFastLED {
   void addLeds(CRGB* l, int n) { m_leds = l; m_n = n; }
   void setBrightness(uint8_t s) { m_Scale = s; }
   void clear() { if (m_leds) memset((void*)m_leds, 0, (size_t)m_n * sizeof(CRGB)); }
-  void show(uint8_t scale) { if (g_frame_hook) g_frame_hook(m_leds, m_n, scale); }
+  void show(uint8_t scale) {
+#ifdef PSI_FRAME_GATE                      // the same hook, at the same place, as include/FastLED.h
+    if (m_leds && m_n > 0) scale = PSI_FRAME_GATE(m_leds, (uint8_t)m_n, scale);
+#endif
+    if (g_frame_hook) g_frame_hook(m_leds, m_n, scale);
+  }
   void show() { show(m_Scale); }  // no-arg show latches at the STORED scale (FastLED.h:502 semantics)
 };
 inline CFastLED FastLED;

@@ -2,7 +2,8 @@
 // v1.7 (-DUPSTREAM) or (b) the fork's src/main.cpp, on the fork's own host mocks. Dumps every show()
 // frame as "<ms> <scale> <48 pixels in hex>". diff_upstream.sh builds both and compares.
 #include "native_mocks/Arduino.h"
-#include "native_mocks/FastLED.h"
+// (native_mocks/FastLED.h is not included here: main.cpp names the S9 frame gate and then includes
+// <FastLED.h> itself. ContractPSI.h refuses to build if the mock was compiled without the gate.)
 #include "native_mocks/EEPROM.h"
 #include <stdio.h>
 #include <string.h>
