@@ -380,7 +380,7 @@ CRGB overlayColors[COLUMNS];
 // upstream, and the hooks below are empty. What is left of the fork in that build: the exact
 // millis() credit and the latch gap (include/FastLED.h), the bounded command buffer
 // (buildCommand), the animation VM, and the WDP announce with no contract tag. The contract with
-// the I2C intake does not fit this part in R1 (contract v1.3 with core CA1.4: 29,110 B of 28,672).
+// the I2C intake does not fit this part in R1 (29,536 B of 28,672).
 #ifndef PSI_NO_CONTRACT
 #include "contract/ContractPSI.h"
 #else

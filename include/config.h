@@ -90,19 +90,20 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 // Compiling I2C out removes the TWI vector from the image entirely, and with it the last
 // interrupt that can reach a render at all.
 //
-// WHAT IT BUYS (measured, not estimated; as of the WDP device announce — re-measure with
-// `pio run && pio run -e PSIPro-i2c` and test/host/stack_report.py rather than trusting
-// this comment as it ages):
-//                                serial-only      + I2C
-//     flash                  25,320 B (88.3%)   26,758 B (93.3%)
-//     SRAM                    1,564 B (61.1%)    1,845 B (72.1%)
-//     stack budget                      996 B            715 B
-//     worst-case stack           360 B (36%)       485 B (68%)
+// WHAT IT BUYS (measured, not estimated; as of contract v1.3, first release — re-measure
+// with `pio run && pio run -e PSIPro-i2c` and test/host/stack_report.py rather than
+// trusting this comment as it ages):
+//                                serial-only      + I2C (no contract layer)
+//     flash                  27,866 B (97.2%)   16,888 B (58.9%)
+//     SRAM                    1,618 B (63.2%)    1,216 B (47.5%)
+//     stack budget                      942 B          1,344 B
+//     worst-case stack           463 B (49%)       312 B (23%)
 //     can an ISR reach a render?          NO      yes (native path)
 //
 // WHAT IT DOES NOT COST: all 23 upstream modes ship in BOTH configurations — there is
 // no longer a "drop modes to make room" trade here (see the ANIMATIONS ARE DATA note
-// above). The only difference between the two columns is the I2C intake itself.
+// above). WHAT IT DOES COST, in this release: the contract layer (the light show). It
+// and the I2C intake do not fit this part together; see the note under the switch.
 //
 // WHEN YOU NEED TO TURN IT BACK ON: if anything on your droid addresses this board over
 // I2C (a MarcDuino, a Teeces/STEALTH setup, any JawaLite master on the bus at address
@@ -113,7 +114,7 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 //#define PSI_ENABLE_I2C
 
 // DroidNet, contract v1.3 (R1): the contract layer and the I2C intake do not fit this part
-// together (29,110 B of 28,672). The I2C build is therefore built WITHOUT the contract layer:
+// together (29,536 B of 28,672). The I2C build is therefore built WITHOUT the contract layer:
 // `pio run -e PSIPro-i2c` sets PSI_ENABLE_I2C and PSI_NO_CONTRACT (platformio.ini). That build is
 // upstream's firmware with this fork's fixes; it has no '!' path and runs no show. If you
 // uncomment the line above instead, define PSI_NO_CONTRACT with it.
