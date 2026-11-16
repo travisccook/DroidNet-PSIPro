@@ -18,47 +18,65 @@
 #   9. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
 set -e
 cd "$(dirname "$0")"
+
+# Where the build products go, and which compilers build them. Nothing is written to a fixed path:
+# PSI_TMP overrides the directory, CXX_SAN the sanitizer compiler.
+T="${PSI_TMP:-$(mktemp -d "${TMPDIR:-/tmp}/psi-host.XXXXXX")}"
+mkdir -p "$T"
+# A compiler that can LINK the sanitizers: clang++ where its runtime is installed, else g++.
+pick_san_cxx() {
+  for c in ${CXX_SAN:-} clang++ g++ c++; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    echo 'int main(){return 0;}' > "$T/san.cpp"
+    if "$c" -fsanitize=address,undefined "$T/san.cpp" -o "$T/san" >/dev/null 2>&1; then echo "$c"; return 0; fi
+  done
+  return 1
+}
+CXX_SAN="$(pick_san_cxx)" || { echo "FAIL: no compiler here links -fsanitize=address,undefined"; exit 1; }
+export CXX_SAN
+CXX_HOST="$(command -v clang++ || command -v g++)"
+echo "host compiler: $CXX_HOST   sanitizer compiler: $CXX_SAN   temp: $T"
 echo "[1/9] contract_core parser unit tests"
-clang++ -std=c++17 -Wall -Wextra -O0 test_contract_core.cpp -o /tmp/psi_contract_test
-/tmp/psi_contract_test
+"$CXX_HOST" -std=c++17 -Wall -Wextra -O0 test_contract_core.cpp -o "$T/psi_contract_test"
+"$T/psi_contract_test"
 echo "[1b/9] wdp_announce_core WDP device announce unit tests"
 # Shared byte-identically with the RSeries and Flthy forks (src/wdp/wdp_announce_core.h and this
 # test both). -std=c++11: avr-gcc builds the same header as gnu++11.
-clang++ -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_announce_core.cpp -o /tmp/psi_wdp_test
-/tmp/psi_wdp_test
+"$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_announce_core.cpp -o "$T/psi_wdp_test"
+"$T/psi_wdp_test"
 echo "[1c/9] wdp_fork PSI Front / PSI Rear identity"
 # Fork-local. The header's own types and caps, with the longest fw git gives a build
 # ("<sha>-dirty"), must build a valid line for both roles in the fork's WDP_LINE_MAX, which is
 # sized to exactly the front line (78 B here) rather than the core's 128.
-clang++ -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_fork.cpp -o /tmp/psi_wdp_fork_test
-/tmp/psi_wdp_fork_test
+"$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_fork.cpp -o "$T/psi_wdp_fork_test"
+"$T/psi_wdp_fork_test"
 echo "[1d/9] WDP announce in the firmware (main.cpp + mocks)"
 # src/main.cpp verbatim against the golden harness's mocks, Serial1 modelled as a 63-byte TX
 # buffer draining at 9600 baud: pieces never exceed the room, a verb-Q ack mid-line waits for the
 # line (ContractPSI.h calls wdpFinish()), the jumper picks the type at each announce, and the seed
 # differs front vs rear. -std=gnu++17: the mocks use inline variables. -Wno-macro-redefined:
 # config.h redefines preamble.h's DEBUG_PRINT/UNUSED/FALL_THROUGH (upstream; stage 6 shows them).
-c++ -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all \
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all \
     -Wno-macro-redefined -I native_mocks -I ../../include '-DWDP_FW="abcdef0-dirty"' \
-    test_wdp_firmware.cpp -o /tmp/psi_wdp_firmware
-/tmp/psi_wdp_firmware
+    test_wdp_firmware.cpp -o "$T/psi_wdp_firmware"
+"$T/psi_wdp_firmware"
 echo "[2/9] psi_vm.h decode-walk test"
 # Structural check of every VM program (test/host/test_psi_vm.cpp): ops are known,
 # arities consume in-bounds bytes, every program reaches OP_END within its array. Built
 # in PSI_VM_TABLES_ONLY mode (defined by the test file itself) — no firmware globals, no
 # dispatch, so this passes independent of whether vmPlay() is wired into runPattern() yet.
-clang++ -std=c++17 -O1 -fsigned-char -fsanitize=address,undefined \
-        -I . -I native_mocks test_psi_vm.cpp -o /tmp/psi_vm_decode
-/tmp/psi_vm_decode
+"$CXX_SAN" -std=c++17 -O1 -fsigned-char -fsanitize=address,undefined \
+        -I . -I native_mocks test_psi_vm.cpp -o "$T/psi_vm_decode"
+"$T/psi_vm_decode"
 echo "[3/9] ContractPSI.h firmware type-check"
 # BOTH configurations. This fork is serial-only by default (include/config.h, I2C INTAKE),
 # and I2C is an opt-in -D. An option nobody compiles is an option that rots, so check both:
 # the serial-only build is what ships, and the I2C build is what anyone with a MarcDuino on
 # the bus will flash. Guard A11 (the ISR deferral) only exists in the I2C config.
-clang++ -std=c++17 -Wall -Wextra compile_contract.cpp -o /tmp/psi_fw_syntax
-/tmp/psi_fw_syntax
-clang++ -std=c++17 -Wall -Wextra -D PSI_ENABLE_I2C compile_contract.cpp -o /tmp/psi_fw_syntax_i2c
-/tmp/psi_fw_syntax_i2c
+"$CXX_HOST" -std=c++17 -Wall -Wextra compile_contract.cpp -o "$T/psi_fw_syntax"
+"$T/psi_fw_syntax"
+"$CXX_HOST" -std=c++17 -Wall -Wextra -D PSI_ENABLE_I2C compile_contract.cpp -o "$T/psi_fw_syntax_i2c"
+"$T/psi_fw_syntax_i2c"
 
 echo "[4/9] command-buffer width guard"
 # buildCommand() (src/main.cpp) DROPS every byte past CMD_MAX_LENGTH-1 and terminates
@@ -115,9 +133,9 @@ echo "[5/9] parser fuzz + differential (ASan/UBSan, deterministic)"
 # overflow -- which is the whole trap), plus hostile/whole-byte-range lines through
 # contractParse() under AddressSanitizer + UndefinedBehaviorSanitizer.
 # Fixed seed: deterministic and reproducible, not a slot machine.
-clang++ -std=c++17 -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
-        fuzz_parsers.cpp -o /tmp/psipro_fuzz
-/tmp/psipro_fuzz
+"$CXX_SAN" -std=c++17 -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \
+        fuzz_parsers.cpp -o "$T/psipro_fuzz"
+"$T/psipro_fuzz"
 
 echo "[6/9] golden-frame parity: mocks + Neil's animation code must reproduce"
 echo "      the committed goldens bit-for-bit (test/host/golden/)."
@@ -136,7 +154,7 @@ echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # Matrix columns: <name> <cmd> <ms> <jumper> <eeprom> <pot> [at_ms] — the optional
 # 7th column delays the command feed so buffer-transforming modes (FadeOut) get a
 # painted default-swipe buffer to work on instead of dimming an all-black one.
-BUILD="/tmp/psi-host"
+BUILD="$T/psi-host"
 GOLD="$BUILD/golden"
 mkdir -p "$GOLD"
 ./mk_full_config.sh "$BUILD"
@@ -173,16 +191,16 @@ echo "[7/9] scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 
 # driver's scale8 / scale8_video / nscale8x3_video / qmul8 to BOTH references over all
 # 256*256 inputs -- equal to the mock means every golden transfers to the driver, equal
 # to FastLED 3.5.0 means the panel sees what stock FastLED drew. Self-contained.
-clang++ -std=c++17 -O1 -fsigned-char -Wall -Wextra test_scale_oracle.cpp -o /tmp/psi_scale_oracle
-/tmp/psi_scale_oracle
+"$CXX_HOST" -std=c++17 -O1 -fsigned-char -Wall -Wextra test_scale_oracle.cpp -o "$T/psi_scale_oracle"
+"$T/psi_scale_oracle"
 
 echo "[8/9] HSV oracle: CE_RAINBOW (CHSV->CRGB) == FastLED 3.5.0 hsv2rgb_rainbow"
 # The firmware's one CHSV call site (CE_RAINBOW, ContractPSI.h:216) is covered by no
 # golden. If the driver's rainbow drifted from FastLED's, CE_RAINBOW's hue mapping -- and
 # the Studio visualiser's JS parity vectors -- would drift with it. Full 256^3 cube plus
 # the s=v=255 call-site sweep; a nonzero diff fails the suite (set -e).
-clang++ -std=c++17 -O2 -fsigned-char -Wall -Wextra test_hsv_oracle.cpp -o /tmp/psi_hsv_oracle
-/tmp/psi_hsv_oracle
+"$CXX_HOST" -std=c++17 -O2 -fsigned-char -Wall -Wextra test_hsv_oracle.cpp -o "$T/psi_hsv_oracle"
+"$T/psi_hsv_oracle"
 
 echo "[9/9] REAL cross-compile (ATmega32U4 (SparkFun Pro Micro)) -- optional"
 # THIS is the stage that makes "it compiles" a claim about the FIRMWARE rather than a claim
