@@ -9,6 +9,7 @@
 #   1f. contract_core.h v1.3 unit tests (safety limits, clock rules, lifecycle, score, query)
 #   1g. the same, built with stand-ins for this fork's flash-string hooks (PSTR / pgm_read_byte)
 #   1h. the shared core files are the commit in src/contract/CORE_PIN (when that checkout is here)
+#   1i. no floating point in the core or in the contract layer (and, stage 9b, none in the linked image)
 #   1b. wdp_announce_core.h WDP device announce unit tests (shared with the RSeries and Flthy forks)
 #   1c. wdp_fork.h: this fork's real WDP identity builds its line, front and rear
 #   1d. the WDP announce in the firmware: main.cpp + mocks (TX room, the Q ack, the jumper, the seed)
@@ -69,6 +70,17 @@ if git -C "$CORE_REPO" cat-file -e "$CORE_PIN^{commit}" 2>/dev/null; then
 else
   echo "    (skipped: no core checkout with $CORE_PIN at $CORE_REPO)"
 fi
+echo "[1i] no float in the core or the layer"
+# Core CA1.3: no float in the shared core, nor in the layer that calls it every frame. On this board
+# one float expression links the compiler's soft-float library, about 1.3 KB of a 28 KB part, and
+# a float in the beat maths is a rounding Studio's mirror cannot reproduce to the bit. Comments are
+# stripped first; the word is fine in prose. Stage 9b checks the linked image as well.
+for f in ../../src/contract/contract_core.h ../../src/contract/ContractPSI.h; do
+  if sed 's://.*::' "$f" | grep -nE '\b(float|double)\b|[0-9]\.[0-9]+f\b|<math\.h>|<cmath>|\b(floorf?|ceilf?|roundf?|fabsf?|sqrtf?|powf?)[[:space:]]*\('; then
+    echo "FAIL: $f uses floating point (the lines above). The core and the per-frame path are integer only."; exit 1
+  fi
+done
+echo "OK  contract_core.h and ContractPSI.h are integer only"
 echo "[1b/9] wdp_announce_core WDP device announce unit tests"
 # Shared byte-identically with the RSeries and Flthy forks (src/wdp/wdp_announce_core.h and this
 # test both). -std=c++11: avr-gcc builds the same header as gnu++11.
@@ -352,6 +364,11 @@ gate() {  # <env> <max flash B> <min stack headroom B>
          | sed -n 's/^ *HEADROOM *\(-\{0,1\}[0-9]*\) B.*/\1/p')
   echo "    $1: flash $flash B (limit $2), sound stack headroom ${head:-none} B (floor $3)"
   if [ "$flash" -gt "$2" ] || [ -z "$head" ] || [ "$head" -lt "$3" ]; then echo "FAIL: $1 is over a gate"; exit 1; fi
+  # No soft-float in the image (core CA1.3). One float expression anywhere in the firmware links
+  # about 1.3 KB of it; this is the check on what was actually linked.
+  if "$AVR_BIN/avr-nm" "$elf" | grep -E ' (__(add|sub|mul|div|cmp|ge|le|gt|lt|eq|ne|unord)[sd]f[23]x?|__float(un)?[sd]i[sd]f|__fix(uns)?[sd]f[sd]i|__fp_[a-zA-Z0-9]+|floorf?|ceilf?)$'; then
+    echo "FAIL: $1 links soft-float routines (above): something in the firmware uses floating point"; exit 1
+  fi
 }
 gate PSIPro 28416 256
 gate PSIPro-i2c 28160 128

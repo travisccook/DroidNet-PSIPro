@@ -13,7 +13,7 @@ void setup() {
   BeatClock bc; bc.running = true; bc.bpm = 120; bc.anchorMs = 1000; bc.bpb = 4; bc.beatOffset = 0;
   uint16_t a, b;
   a = t1(); BeatPos bp = beatPosAt(bc, vnow); b = t1(); sink = bp.barPos; rep(F("beatPosAt"), b - a);
-  a = t1(); uint8_t amt = beatAccentAmount(2, bp, 200, 0.5f, bc); b = t1(); sink = amt; rep(F("beatAccentAmount"), b - a);
+  a = t1(); uint8_t amt = beatAccentAmount(2, bp, 200, 32768u, bc); b = t1(); sink = amt; rep(F("beatAccentAmount"), b - a);
   a = t1(); uint8_t e = envBright(200, 200, amt); b = t1(); sink = e; rep(F("envBright"), b - a);
   a = t1(); for (int i = 0; i < 48; i++) { uint8_t tb = fxTwinkleBright(i, vnow, vspeed); leds[i] = CRGB((uint16_t)255 * tb / 255, (uint16_t)128 * tb / 255, (uint16_t)64 * tb / 255); } b = t1(); sink = leds[3].r; rep(F("twinkle48"), b - a);
   a = t1(); int head = fxHead(vnow, vspeed, 10); for (int p = 0; p < 10; p++) sink = fxCometBright(p, head, 10); b = t1(); rep(F("comet10"), b - a);

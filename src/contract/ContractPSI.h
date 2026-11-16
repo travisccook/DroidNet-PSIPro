@@ -659,7 +659,9 @@ inline bool contractLoopTick() {
   const uint8_t lvl = contractLevel(g_u.ceil, g_u.pulseActive ? g_u.pulseBright : g_u.bright);
   uint8_t effBright = lvl;
   if (!g_u.pulseActive && g_clock.running && g_u.beatMod && g_u.accentMode) {
-    float prog = (g_u.curSection >= 0) ? beatSectionProgress(bp.beatIndex, g_u.sectionStart, g_u.sectionEnd) : 0.0f;
+    // Progress through the section in Q16 (0..65536), for am=3. No float anywhere in this layer or
+    // in the core: one float expression links 1.3 KB of soft-float library.
+    const uint32_t prog = (g_u.curSection >= 0) ? beatSectionProgress16(bp.beatIndex, g_u.sectionStart, g_u.sectionEnd) : 0;
     uint8_t env = beatAccentAmount(g_u.accentMode, bp, g_u.beatMod, prog, g_clock, g_u.accentEvery);
     effBright = envBright(lvl, g_u.beatMod, env);
   } else if (g_u.pulseActive ? g_u.pulseFx == CE_PULSE : (g_u.base == CB_LOOK && g_u.effect == CE_PULSE)) {

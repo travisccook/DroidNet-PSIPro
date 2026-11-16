@@ -7,7 +7,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-#include <math.h>
 
 // NOT named `RGB`. FastLED (which the PSI and the RSeries Logics both pull in ahead of
 // this header) declares `RGB` as an ENUMERATOR of fl::EOrder — `enum EOrder { RGB=0012,
@@ -407,9 +406,18 @@ inline bool contractParse(const char* afterBang, ParsedContract& out) {
 // ===== END PARSE IMPL =====
 
 // ===== BEAT-CLOCK + SCORE (Plan 2, board-agnostic, host-tested) =====
-// Seeded by verb C; drives a per-beat accent envelope and the Phase-2 section
-// schedule. Pure math (float is fine at frame rate, even on AVR). All firmware
-// forks share this exact logic so on-board playback is identical across boards.
+// Seeded by verb C; drives a per-beat accent envelope and the Phase-2 section schedule. All
+// firmware forks share this exact logic so on-board playback is identical across boards.
+//
+// INTEGERS ONLY (core revision CA1.3). There is no float in this file. Until CA1.2 the beat
+// position and the accent envelope were float; on the 8-bit forks that linked the compiler's
+// soft-float library (about 1.3 KB) for a handful of lines. Everything is now 32-bit integer
+// arithmetic with stated rounding, so the three boards agree to the bit, a mirror of it can be
+// tested with no tolerance, and a beat falls on the exact millisecond for as long as the clock runs.
+//
+// THE UNIT. A beat at b BPM lasts 60000 / b ms, which is not a whole number. But ms * bpm is:
+// one beat is exactly 60000 of those "units" at every tempo. All beat arithmetic is done in units.
+static const uint16_t BEAT_UNITS = 60000;
 
 struct BeatClock {
   bool     running = false;
@@ -420,22 +428,47 @@ struct BeatClock {
 };
 
 struct BeatPos {
-  int32_t beatIndex = 0;    // absolute beat ordinal (may be < 0 before the anchor)
-  float   phase = 0.0f;     // 0..1 within the current beat
-  uint8_t barPos = 0;       // 0 == downbeat
+  int32_t  beatIndex = 0;   // absolute beat ordinal (may be < 0 before the anchor)
+  uint16_t phase16 = 0;     // how far into the current beat, Q16: 0 at the beat, 65535 just before the next
+  uint8_t  barPos = 0;      // 0 == downbeat
 };
 
-// Beat position at time nowMs (drift-free between re-seeds; computed from millis).
+// Floor division and modulus for a positive divisor (beat indices go negative before the anchor).
+inline int32_t _floorDiv(int32_t a, int32_t b) { const int32_t q = a / b; return ((a % b) < 0) ? q - 1 : q; }
+inline int32_t _floorMod(int32_t a, int32_t b) { const int32_t r = a % b; return r < 0 ? r + b : r; }
+
+// Whole beats since the anchor (negative before it), and in `unitsInto` the units into the
+// current beat, 0..59999. EXACT: no rounding anywhere, for any nowMs within 2^31 ms (24.8 days)
+// of the anchor either way, across the millis() wrap. In integers:
+//     delta   = (int32)(nowMs - anchorMs)                 the uint32 difference, read as signed
+//     minutes = floor(delta / 60000)
+//     ms      = delta - minutes * 60000                   0..59999
+//     t       = ms * bpm                                  at most 17,999,700 at 300 BPM
+//     beats   = minutes * bpm + floor(t / 60000)
+//     units   = t mod 60000
+// (delta * bpm would be the direct form; it leaves 32 bits after two hours at 300 BPM. Splitting
+// off whole minutes first keeps every product small, and a whole minute is exactly bpm beats.)
+inline int32_t _beatSplit(const BeatClock& bc, uint32_t nowMs, uint16_t& unitsInto) {
+  const int32_t delta = (int32_t)(nowMs - bc.anchorMs);
+  int32_t minutes = delta / 60000L;
+  int32_t ms = delta % 60000L;                            // (C++ rounds towards zero: put the remainder back in 0..59999)
+  if (ms < 0) { ms += 60000L; minutes--; }
+  const uint32_t t = (uint32_t)ms * bc.bpm;
+  unitsInto = (uint16_t)(t % BEAT_UNITS);
+  return (int32_t)((uint32_t)minutes * bc.bpm + t / BEAT_UNITS);      // (unsigned: no overflow to be undefined about)
+}
+
+// Beat position at time nowMs. Drift-free: computed from millis and the anchor every time.
+//     beatIndex = beatOffset + beats
+//     phase16   = floor(units * 65536 / 60000)            0..65535
+//     barPos    = beatIndex mod bpb, floored              0..bpb-1
 inline BeatPos beatPosAt(const BeatClock& bc, uint32_t nowMs) {
   BeatPos out;
   if (!bc.running || bc.bpm == 0) return out;
-  int32_t delta = (int32_t)(nowMs - bc.anchorMs);     // signed ms since the anchor downbeat
-  float beats = (float)delta * (float)bc.bpm / 60000.0f;
-  float fl = floorf(beats);
-  out.beatIndex = bc.beatOffset + (int32_t)fl;
-  out.phase = beats - fl;                             // 0..1
-  int bpb = bc.bpb ? bc.bpb : 4;
-  out.barPos = (uint8_t)(((out.beatIndex % bpb) + bpb) % bpb);
+  uint16_t units;
+  out.beatIndex = (int32_t)((uint32_t)bc.beatOffset + (uint32_t)_beatSplit(bc, nowMs, units));
+  out.phase16 = (uint16_t)(((uint32_t)units << 16) / BEAT_UNITS);
+  out.barPos = (uint8_t)_floorMod(out.beatIndex, bc.bpb ? bc.bpb : 4);
   return out;
 }
 
@@ -463,9 +496,13 @@ inline ContractSeed beatClockSeed(BeatClock& bc, const ContractParams& pr, uint3
   if (pr.hasBeat) bc.beatOffset = pr.beatAnchor;         // re-anchor (drift correction)
   bc.running = true;
   if (pr.hasBpm || !old.running) return CS_SEEK;
-  const BeatPos a = beatPosAt(old, nowMs), b = beatPosAt(bc, nowMs);
-  const float shift = (float)(b.beatIndex - a.beatIndex) + (b.phase - a.phase);
-  return (shift > -1.0f && shift < 1.0f) ? CS_NUDGE : CS_SEEK;
+  // How far did the position move at this instant? By less than one beat either way: a nudge.
+  // Exactly: the same beat; or the next one but not as far into it; or the one before but further in.
+  uint16_t ua, ub;
+  const uint32_t ia = (uint32_t)old.beatOffset + (uint32_t)_beatSplit(old, nowMs, ua);
+  const uint32_t ib = (uint32_t)bc.beatOffset + (uint32_t)_beatSplit(bc, nowMs, ub);
+  const int32_t d = (int32_t)(ib - ia);
+  return (d == 0 || (d == 1 && ub < ua) || (d == -1 && ub > ua)) ? CS_NUDGE : CS_SEEK;
 }
 
 // Sentinel for "this unit has not accented any beat yet". A show must never inherit a
@@ -482,9 +519,11 @@ static const int32_t BEAT_NONE = (int32_t)0x80000000;
 // a seek that lands on a beat still accents it. (The strobe cool-down still applies on top.)
 inline int32_t accentEdgeAfterSeed(const BeatClock& bc, uint32_t nowMs) {
   if (!bc.running || bc.bpm == 0) return BEAT_NONE;
-  const BeatPos bp = beatPosAt(bc, nowMs);
-  const uint32_t intoMs = (uint32_t)(bp.phase * (60000.0f / (float)bc.bpm));
-  return intoMs > ACCENT_EDGE_LATE_MS ? bp.beatIndex : BEAT_NONE;
+  uint16_t units;
+  const int32_t beat = (int32_t)((uint32_t)bc.beatOffset + (uint32_t)_beatSplit(bc, nowMs, units));
+  // units / bpm is the time into the beat in ms, so "more than 60 whole ms into it" is
+  // units >= 61 * bpm. No division, and no rounding to argue about.
+  return units >= (uint32_t)(ACCENT_EDGE_LATE_MS + 1u) * bc.bpm ? beat : BEAT_NONE;
 }
 
 // C2: the section cursor after a tick. After a nudge (pinForward) it never moves backwards;
@@ -503,9 +542,6 @@ inline uint8_t barRateDivisor(uint16_t bpm, uint8_t bpb) {
   return k < 1 ? 1 : (uint8_t)k;
 }
 inline uint8_t beatRateDivisor(uint16_t bpm) { return barRateDivisor(bpm, 1); }
-// Floor division and modulus for a positive divisor (beat indices go negative before the anchor).
-inline int32_t _floorDiv(int32_t a, int32_t b) { const int32_t q = a / b; return ((a % b) < 0) ? q - 1 : q; }
-inline int32_t _floorMod(int32_t a, int32_t b) { const int32_t r = a % b; return r < 0 ? r + b : r; }
 
 // Every-N accents (am=2 with an=<n>, ap=<phase>): accent the beats where beatIndex % n == ap.
 // Packed in ONE byte: high nibble n-1 (n 1..16), low nibble the phase. 0 == every beat, which is
@@ -533,25 +569,43 @@ inline uint8_t accentEveryFrom(const ContractParams& pr) {
 // an accent, and BOTH are under the S2 rate floor: at 240 BPM am=2 fires on every second beat.
 // Up to 176 BPM (and for any downbeat mode in 2 beats a bar or more) it is the v1.2 predicate.
 inline bool beatAccentFires(uint8_t am, const BeatPos& bp, const BeatClock& bc, uint8_t every = 0) {
-  if (am == 2) {
-    const int32_t n = accentEveryN(every);
+  // Each mode picks a GROUP of n beats and asks which group this beat begins; the rate floor then
+  // keeps every k-th group, k = barRateDivisor(bpm, n). (One tail for the three modes: on an 8-bit
+  // MCU three copies of the divisor arithmetic were the largest function in this file.)
+  int32_t group;                                          // which group of n beats this one begins
+  uint8_t n;
+  if (am == 2) {                                          // every beat, or every n-th from a phase
+    n = accentEveryN(every);
     const int32_t rel = bp.beatIndex - (int32_t)accentEveryPhase(every);
     if (_floorMod(rel, n) != 0) return false;
-    return (_floorDiv(rel, n) % (int32_t)barRateDivisor(bc.bpm, (uint8_t)n)) == 0;
-  }
-  if (am == 3) return (bp.beatIndex % (int32_t)beatRateDivisor(bc.bpm)) == 0;
-  if (am == 1 || am == 4) {
+    group = _floorDiv(rel, n);
+  } else if (am == 3) {                                   // build: every beat
+    n = 1;
+    group = bp.beatIndex;
+  } else if (am == 1 || am == 4) {                        // downbeat (and drop): every bar
     if (bp.barPos != 0) return false;
-    const uint8_t bpb = bc.bpb ? bc.bpb : 4;
-    return (_floorDiv(bp.beatIndex, bpb) % (int32_t)barRateDivisor(bc.bpm, bpb)) == 0;
+    n = bc.bpb ? bc.bpb : 4;
+    group = _floorDiv(bp.beatIndex, n);
+  } else {
+    return false;
   }
-  return false;
+  return (group % (int32_t)barRateDivisor(bc.bpm, n)) == 0;
 }
 
-// How far through its section a beat is, 0..1 (drives am=3, build). 0 when the section has no length.
-inline float beatSectionProgress(int32_t beatIndex, int32_t sectionStart, int32_t sectionEnd) {
-  if (sectionEnd <= sectionStart) return 0.0f;
-  return (float)(beatIndex - sectionStart) / (float)(sectionEnd - sectionStart);
+// How far through its section a beat is (drives am=3, build), Q16 and already clamped: 0 at the
+// section's first beat or before it, 65536 at its end or past it, 0 when the section has no length.
+//     n = beatIndex - sectionStart,  d = sectionEnd - sectionStart        (0 < n < d here)
+//     while d > 65535:  n = floor(n / 2), d = floor(d / 2)                (only a section over 65535 beats long)
+//     progress16 = floor(n * 65536 / d)
+// (Named ...16, and beatAccentAmount() takes it as an integer: a fork that still holds the old
+// float in a variable does not compile, instead of quietly keeping soft-float linked.)
+inline uint32_t beatSectionProgress16(int32_t beatIndex, int32_t sectionStart, int32_t sectionEnd) {
+  if (sectionEnd <= sectionStart || beatIndex <= sectionStart) return 0;
+  if (beatIndex >= sectionEnd) return 65536UL;
+  uint32_t n = (uint32_t)beatIndex - (uint32_t)sectionStart;
+  uint32_t d = (uint32_t)sectionEnd - (uint32_t)sectionStart;
+  while (d > 65535UL) { n >>= 1; d >>= 1; }
+  return (n << 16) / d;
 }
 
 // Consume a beat edge. Returns true EXACTLY ONCE per new beat index.
@@ -586,21 +640,27 @@ inline bool strobeCoolDownExpired(uint32_t lastFireMs, uint32_t nowMs, uint32_t 
 }
 
 // Accent envelope amount 0..255 for the current beat, per accent mode + depth.
-// am: 0 none, 1 downbeat, 2 every-beat, 3 build (uses sectionProgress 0..1), 4 drop (->downbeat).
-inline uint8_t beatAccentAmount(uint8_t am, const BeatPos& bp, uint8_t beatMod, float sectionProgress,
+// am: 0 none, 1 downbeat, 2 every-beat, 3 build (uses sectionProgress16), 4 drop (->downbeat).
+// The envelope is (1 - phase)^2: full at the beat, a fast fall, a slow tail. In Q16, with p the
+// beat's phase16 (every product fits 32 bits; ">> 16" is floor(x / 65536)):
+//     env = 65536 + ((p * p) >> 16) - 2 * p               exactly floor((65536 - p)^2 / 65536): 65536 .. 0
+//     on a downbeat:  env = min(65536, env + ((env * 19661) >> 16))        x 1.3 (19661 / 65536 = 0.30000)
+//     am == 3 and sectionProgress16 < 65536:  env = (env * sectionProgress16) >> 16
+//     amount = (env * beatMod) >> 16
+// Q16 for the phase, not Q8: the amount has 8 bits, and a squared 8-bit phase would lose the
+// bottom two of them at the top of the envelope, where the fall is steepest (a step of 2 or 3 in
+// the amount between neighbouring phases). With 16 bits the amount is the float version's to
+// within 1, everywhere.
+inline uint8_t beatAccentAmount(uint8_t am, const BeatPos& bp, uint8_t beatMod, uint32_t sectionProgress16,
                                 const BeatClock& bc, uint8_t every = 0) {
   if (am == 0 || beatMod == 0) return 0;   // (the am==0 half is redundant with the predicate;
                                            // the beatMod==0 half is NOT)
   if (!beatAccentFires(am, bp, bc, every)) return 0;
-  float env = (1.0f - bp.phase) * (1.0f - bp.phase);  // fast attack, slow decay
-  if (bp.barPos == 0) { env *= 1.3f; if (env > 1.0f) env = 1.0f; }   // downbeat emphasis
-  if (am == 3) {                                       // build: scale by section progress
-    float s = sectionProgress < 0 ? 0.0f : (sectionProgress > 1 ? 1.0f : sectionProgress);
-    env *= s;
-  }
-  float amt = env * (float)beatMod;
-  if (amt < 0) amt = 0; if (amt > 255) amt = 255;
-  return (uint8_t)amt;
+  const uint32_t p = bp.phase16;
+  uint32_t env = 65536UL + ((p * p) >> 16) - 2UL * p;  // fast attack, slow decay
+  if (bp.barPos == 0) { env += (env * 19661UL) >> 16; if (env > 65536UL) env = 65536UL; }   // downbeat emphasis
+  if (am == 3 && sectionProgress16 < 65536UL) env = (env * sectionProgress16) >> 16;        // build: scale by section progress
+  return (uint8_t)((env * beatMod) >> 16);
 }
 
 // Beat-pumped brightness — THE shared envelope. All three forks (Logics/PSI/HPs)

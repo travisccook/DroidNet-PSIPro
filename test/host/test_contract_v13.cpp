@@ -225,8 +225,182 @@ static void test_rate_floor_and_every_n() {
     CHECK(beatAccentFires(2, bp, bc, accentEveryPack(2, 1)) == (((beat % 2) + 2) % 2 == 1));   // 400 ms apart: all kept
     CHECK(beatAccentFires(2, bp, bc, accentEveryPack(1, 0)) == (beat % 2 == 0));               // 200 ms apart: every other
   }
-  CHECK(beatSectionProgress(8, 0, 16) == 0.5f && beatSectionProgress(8, 16, 16) == 0.0f);
-  CHECK(beatSectionProgress(4, 8, 4) == 0.0f);
+  CHECK(beatSectionProgress16(8, 0, 16) == 32768UL && beatSectionProgress16(8, 16, 16) == 0);
+  CHECK(beatSectionProgress16(4, 8, 4) == 0);
+}
+
+// ---- CA1.3: the beat clock and the envelope in integers ----
+// The references here are written with 64-bit integers (and, for the envelope, with the float code
+// the core had until CA1.2), which the core itself may not use: it has to fit an 8-bit MCU.
+static uint32_t g_clkRng = 0x6C8E9CF5u;
+static uint32_t clkRnd() { g_clkRng = g_clkRng * 1664525u + 1013904223u; return g_clkRng >> 4; }
+static int64_t floorDiv64(int64_t a, int64_t b) { int64_t q = a / b; return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q; }
+// What beatPosAt() must return, from first principles: beats = delta * bpm / 60000, exactly.
+static void refPos(const BeatClock& bc, uint32_t nowMs, int32_t& beatIndex, uint32_t& units, uint16_t& phase16, uint8_t& barPos) {
+  const int64_t d = (int64_t)(int32_t)(nowMs - bc.anchorMs) * (int64_t)bc.bpm;
+  const int64_t beats = floorDiv64(d, 60000);
+  units = (uint32_t)(d - beats * 60000);
+  beatIndex = (int32_t)((int64_t)bc.beatOffset + beats);
+  phase16 = (uint16_t)(((uint64_t)units * 65536u) / 60000u);
+  const int bpb = bc.bpb ? bc.bpb : 4;
+  barPos = (uint8_t)((((int64_t)beatIndex % bpb) + bpb) % bpb);
+}
+static bool posIs(const BeatClock& bc, uint32_t nowMs) {
+  int32_t bi; uint32_t units; uint16_t ph; uint8_t bar;
+  refPos(bc, nowMs, bi, units, ph, bar);
+  const BeatPos p = beatPosAt(bc, nowMs);
+  uint16_t u2; const int32_t whole = _beatSplit(bc, nowMs, u2);
+  return p.beatIndex == bi && p.phase16 == ph && p.barPos == bar && u2 == units && (int32_t)((uint32_t)bc.beatOffset + (uint32_t)whole) == bi;
+}
+// The accent envelope as it was computed until CA1.2, in float, from a Q16 phase and progress.
+static uint8_t refAmountFloat(uint8_t am, uint16_t phase16, uint8_t barPos, uint8_t beatMod, uint32_t progress16) {
+  const float phase = (float)phase16 / 65536.0f;
+  float env = (1.0f - phase) * (1.0f - phase);
+  if (barPos == 0) { env *= 1.3f; if (env > 1.0f) env = 1.0f; }
+  if (am == 3) env *= (float)progress16 / 65536.0f;
+  float amt = env * (float)beatMod;
+  if (amt < 0) amt = 0;
+  if (amt > 255) amt = 255;
+  return (uint8_t)amt;
+}
+static void test_integer_clock() {
+  // 1. EXACT, everywhere: every tempo, at offsets from a millisecond to the ends of the 24.8 days
+  //    either side of the anchor, with the anchor on both sides of the millis() wrap.
+  static const uint32_t kAnchor[] = { 0u, 1000u, 0x7FFFFFF0u, 0x80000000u, 0xFFFFFF00u, 0xFFFFFFFFu };
+  static const int32_t kDelta[] = { 0, 1, 2, 199, 200, 201, 499, 500, 59999, 60000, 60001, 600000, 3600000, 86400000,
+                                    2147483647, -1, -2, -200, -201, -59999, -60000, -60001, -3600000, -2147483647 - 1 };
+  for (int bpm = CONTRACT_BPM_MIN; bpm <= CONTRACT_BPM_MAX; bpm++)
+    for (uint32_t anchor : kAnchor) for (int32_t delta : kDelta) for (int32_t off : { 0, -5, 1000000000 }) {
+      BeatClock bc; bc.running = true; bc.bpm = (uint16_t)bpm; bc.bpb = (uint8_t)(1 + (bpm % 12)); bc.anchorMs = anchor; bc.beatOffset = off;
+      CHECK(posIs(bc, anchor + (uint32_t)delta));
+    }
+  for (int i = 0; i < 300000; i++) {
+    BeatClock bc; bc.running = true; bc.bpm = (uint16_t)(CONTRACT_BPM_MIN + clkRnd() % 271u); bc.bpb = (uint8_t)(1 + clkRnd() % 12u);
+    bc.anchorMs = clkRnd() * 16u + clkRnd() % 16u; bc.beatOffset = (int32_t)(clkRnd() % 2000001u) - 1000000;
+    const uint32_t span = (i % 3 == 0) ? 0xFFFFFFFFu : (i % 3 == 1 ? 7200000u : 4000u);
+    CHECK(posIs(bc, bc.anchorMs + (clkRnd() * 16u + clkRnd() % 16u) % span - span / 2u));
+  }
+
+  // 2. NO DRIFT. Beat k begins at the first whole millisecond at or after its true instant
+  //    (k * 60000 / bpm ms after the anchor): never early, and under a millisecond late, whether k is
+  //    the first beat, the one at ten minutes, at one hour, or at 24 days. (The float clock this
+  //    replaced was up to 0.06 ms off at ten minutes and 0.35 ms at an hour, growing with time.)
+  for (int bpm = CONTRACT_BPM_MIN; bpm <= CONTRACT_BPM_MAX; bpm++) {
+    for (uint32_t anchor : { 5000u, 0xFFFFF000u }) {
+      BeatClock bc; bc.running = true; bc.bpm = (uint16_t)bpm; bc.bpb = 4; bc.anchorMs = anchor;
+      const int64_t perMin = bpm;
+      for (int64_t k : { (int64_t)1, (int64_t)2, (int64_t)3, perMin, perMin * 10 - 1, perMin * 10, perMin * 10 + 1, perMin * 60 - 1, perMin * 60,
+                         perMin * 60 + 1, perMin * 60 * 24, perMin * 35000 + 7 }) {
+        const uint32_t at = (uint32_t)((k * 60000 + bpm - 1) / bpm);        // ceil(k * 60000 / bpm)
+        CHECK(beatPosAt(bc, anchor + at).beatIndex == (int32_t)k);
+        CHECK(beatPosAt(bc, anchor + at - 1u).beatIndex == (int32_t)k - 1);
+        if ((k * 60000) % bpm == 0) CHECK(beatPosAt(bc, anchor + at).phase16 == 0);   // on the millisecond: phase exactly 0
+        CHECK(beatPosAt(bc, anchor + at - 1u).phase16 > beatPosAt(bc, anchor + at).phase16);
+      }
+      CHECK(beatPosAt(bc, anchor - 1u).beatIndex == -1 && beatPosAt(bc, anchor).beatIndex == 0);   // before the anchor: negative, floored
+    }
+  }
+  // the phase rises through a beat and never reaches the next one
+  { BeatClock bc; bc.running = true; bc.bpm = 97; bc.bpb = 4; bc.anchorMs = 0xFFFFFE00u;
+    uint16_t prev = 0; int32_t beat = 0;
+    for (uint32_t t = 0; t < 5000; t++) {
+      const BeatPos p = beatPosAt(bc, bc.anchorMs + t);
+      if (p.beatIndex == beat) CHECK(p.phase16 >= prev); else { CHECK(p.beatIndex == beat + 1 && p.phase16 < 200); beat = p.beatIndex; }
+      prev = p.phase16;
+    }
+  }
+  // a stopped clock, and a tempo no line can set, are still well defined (nothing undefined to trip on)
+  { BeatClock bc; CHECK(beatPosAt(bc, 12345).beatIndex == 0 && beatPosAt(bc, 12345).phase16 == 0);
+    bc.running = true; bc.bpm = 65535; bc.bpb = 0; bc.anchorMs = 7; bc.beatOffset = 2147483647;
+    (void)beatPosAt(bc, 0x80000007u); (void)beatPosAt(bc, 6u); CHECK(beatPosAt(bc, 7).phase16 == 0 && beatPosAt(bc, 7).barPos == 3); }
+
+  // 3. NUDGE OR SEEK, exactly: a bare re-anchor that moves the position by less than one beat
+  //    either way is a nudge. The reference compares the two positions in units, in 64 bits.
+  for (int i = 0; i < 200000; i++) {
+    BeatClock bc; bc.running = true; bc.bpm = (uint16_t)(CONTRACT_BPM_MIN + clkRnd() % 271u); bc.bpb = 4;
+    bc.anchorMs = clkRnd() * 16u; bc.beatOffset = (int32_t)(clkRnd() % 4001u) - 2000;
+    const uint32_t now = bc.anchorMs + clkRnd() % 600000u;
+    int32_t bi; uint32_t ua; uint16_t ph; uint8_t bar;
+    refPos(bc, now, bi, ua, ph, bar);
+    ContractParams pr; pr.hasPh = true; pr.phMs = clkRnd() % 2500u; pr.hasBeat = true;
+    pr.beatAnchor = bi + (int32_t)(clkRnd() % 9u) - 4;                 // the host's idea of the next beat: near, or a seek
+    BeatClock nb = bc;
+    const ContractSeed k = beatClockSeed(nb, pr, now);
+    int32_t bj; uint32_t ub;
+    refPos(nb, now, bj, ub, ph, bar);
+    const int64_t shift = ((int64_t)bj * 60000 + ub) - ((int64_t)bi * 60000 + ua);
+    CHECK(k == ((shift > -60000 && shift < 60000) ? CS_NUDGE : CS_SEEK));
+  }
+  // 4. C1's edge guard, exactly: more than 60 whole milliseconds into the beat, or not.
+  for (int bpm = CONTRACT_BPM_MIN; bpm <= CONTRACT_BPM_MAX; bpm += 7) {
+    BeatClock bc; bc.running = true; bc.bpm = (uint16_t)bpm; bc.bpb = 4; bc.anchorMs = 0xFFFFFFC0u; bc.beatOffset = -3;
+    for (uint32_t t = 0; t < 6000; t++) {
+      int32_t bi; uint32_t units; uint16_t ph; uint8_t bar;
+      refPos(bc, bc.anchorMs + t, bi, units, ph, bar);
+      CHECK(accentEdgeAfterSeed(bc, bc.anchorMs + t) == ((units / (uint32_t)bpm > ACCENT_EDGE_LATE_MS) ? bi : BEAT_NONE));
+    }
+  }
+
+  // 5. The section progress, Q16 and clamped.
+  CHECK(beatSectionProgress16(0, 0, 16) == 0 && beatSectionProgress16(-3, 0, 16) == 0);
+  CHECK(beatSectionProgress16(4, 0, 16) == 16384UL && beatSectionProgress16(15, 0, 16) == 61440UL);
+  CHECK(beatSectionProgress16(16, 0, 16) == 65536UL && beatSectionProgress16(99, 0, 16) == 65536UL);
+  CHECK(beatSectionProgress16(1, 0, 3) == 21845UL && beatSectionProgress16(2, 0, 3) == 43690UL);     // floor(n * 65536 / d)
+  CHECK(beatSectionProgress16(-7, -8, 8) == 4096UL);
+  for (int i = 0; i < 100000; i++) {
+    const int32_t start = (int32_t)(clkRnd() % 2000001u) - 1000000, len = 1 + (int32_t)(clkRnd() % 65535u);
+    const int32_t beat = start + (int32_t)(clkRnd() % (uint32_t)(len + 20)) - 10;
+    const int64_t n = (int64_t)beat - start;
+    const uint32_t want = n <= 0 ? 0 : (n >= len ? 65536u : (uint32_t)((n * 65536) / len));
+    CHECK(beatSectionProgress16(beat, start, start + len) == want);                    // exact up to 65535 beats
+  }
+  // a section longer than 65535 beats (only the ends of the range can make one): still monotonic,
+  // still 0 .. 65536, and within a part in sixteen thousand of the exact ratio
+  { const int32_t lo = -CONTRACT_BEAT_MAX, hi = CONTRACT_BEAT_MAX; uint32_t prev = 0;
+    for (int64_t b = lo; b <= hi; b += 12345677) {
+      const uint32_t got = beatSectionProgress16((int32_t)b, lo, hi);
+      const int64_t exact = ((b - lo) * 65536) / ((int64_t)hi - lo);
+      CHECK(got >= prev && got <= 65536UL && (int64_t)got - exact <= 4 && exact - (int64_t)got <= 4);
+      prev = got;
+    }
+    CHECK(beatSectionProgress16(hi, lo, hi) == 65536UL && beatSectionProgress16(lo, lo, hi) == 0);
+    CHECK(beatSectionProgress16(CONTRACT_BEAT_MAX, CONTRACT_BEAT_MAX, CONTRACT_BEAT_MAX + 9999) == 0); }
+
+  // 6. THE ENVELOPE. Its ends, its shape, and how far it is from the float one it replaced:
+  //    never more than 1 in the amount, over every phase.
+  BeatClock bc; bc.running = true; bc.bpm = 120; bc.bpb = 4;
+  BeatPos bp; bp.beatIndex = 1; bp.barPos = 1;
+  bp.phase16 = 0;     CHECK(beatAccentAmount(2, bp, 255, 0, bc) == 255 && beatAccentAmount(2, bp, 200, 0, bc) == 200);   // full at the beat
+  bp.phase16 = 32768; CHECK(beatAccentAmount(2, bp, 255, 0, bc) == 63 && beatAccentAmount(2, bp, 200, 0, bc) == 50);     // a quarter at half way
+  bp.phase16 = 65535; CHECK(beatAccentAmount(2, bp, 255, 0, bc) == 0);                                                    // gone by the next
+  bp.beatIndex = 4; bp.barPos = 0;                                                                                         // a downbeat: x 1.3, capped
+  bp.phase16 = 0;     CHECK(beatAccentAmount(1, bp, 255, 0, bc) == 255);
+  bp.phase16 = 8192;  CHECK(beatAccentAmount(1, bp, 255, 0, bc) == 253);      // 0.875^2 * 1.3 = 0.9953
+  bp.phase16 = 32768; CHECK(beatAccentAmount(1, bp, 255, 0, bc) == 82);       // 0.25 * 1.3 = 0.325
+  bp.phase16 = 0;                                                             // build: scaled by the section progress
+  CHECK(beatAccentAmount(3, bp, 255, 0, bc) == 0 && beatAccentAmount(3, bp, 255, 32768UL, bc) == 127);
+  CHECK(beatAccentAmount(3, bp, 255, 65536UL, bc) == 255 && beatAccentAmount(3, bp, 255, 0xFFFFFFFFUL, bc) == 255);
+  int maxDiff = 0; long differ = 0, total = 0;
+  for (int am = 1; am <= 3; am++) for (int bar = 0; bar <= 1; bar++)
+    for (int mod : { 1, 17, 64, 128, 200, 254, 255 }) for (uint32_t prog : { 0u, 1u, 9000u, 32768u, 65535u, 65536u }) {
+      if (am != 3 && prog != 0u) continue;
+      if (am == 1 && bar != 0) continue;
+      uint8_t prev = 255;
+      for (uint32_t ph = 0; ph < 65536u; ph++) {
+        BeatPos q; q.beatIndex = bar; q.barPos = (uint8_t)bar; q.phase16 = (uint16_t)ph;
+        const int got = beatAccentAmount((uint8_t)am, q, (uint8_t)mod, prog, bc);
+        const int ref = refAmountFloat((uint8_t)am, (uint16_t)ph, (uint8_t)bar, (uint8_t)mod, prog);
+        const int d = got > ref ? got - ref : ref - got;
+        if (d > maxDiff) maxDiff = d;
+        if (d) differ++;
+        total++;
+        if (got > prev) { CHECK(got <= prev); }                               // it only ever falls through a beat
+        prev = (uint8_t)got;
+      }
+    }
+  CHECK(maxDiff <= 1);
+  CHECK(differ * 50 < total);                                                 // and it is the same value 98 times in 100
+  if (maxDiff > 1 || differ * 50 >= total) printf("     (integer envelope against the float one: max difference %d, %ld of %ld values differ)\n", maxDiff, differ, total);
 }
 
 // ---- L1 / L2 / L5: one reset, what survives it, armed-but-not-begun, the watchdog ----
@@ -708,6 +882,7 @@ static void test_overlay_helpers() {
 }
 
 int main() {
+  test_integer_clock();
   test_field_gate();
   test_overlay_helpers();
   test_saturating_params();

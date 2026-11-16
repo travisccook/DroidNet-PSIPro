@@ -1111,8 +1111,9 @@ static void section_K_beat_limits() {
       const BeatPos bp = beatPosAt(bc, now);
       const uint8_t every = accentEveryFrom(a.params);
       const int32_t end = a.params.atBeat + 9999;                    // what a fork writes for "no next section"
-      const float prog = beatSectionProgress(bp.beatIndex, a.params.atBeat, end);
-      (void)beatSectionProgress(bp.beatIndex, -CONTRACT_BEAT_MAX, CONTRACT_BEAT_MAX);
+      const uint32_t prog = beatSectionProgress16(bp.beatIndex, a.params.atBeat, end);
+      CHECK(prog <= 65536UL);
+      CHECK(beatSectionProgress16(bp.beatIndex, -CONTRACT_BEAT_MAX, CONTRACT_BEAT_MAX) <= 65536UL);
       for (uint8_t am = 0; am <= 4; am++) {
         (void)beatAccentFires(am, bp, bc, every);
         (void)beatAccentAmount(am, bp, 200, prog, bc, every);
