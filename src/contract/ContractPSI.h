@@ -21,7 +21,7 @@
 // include/psi_vm.h (main.cpp ~line 359) — whose vmContractSparkle
 // shims replaced the native scanCol()/DiscoBall() this layer used to call directly;
 // see psi_vm.h's own "Contract-layer shims" comment, and AFTER src/wdp/wdp_fork.h, whose
-// wdpFinish() the verb-Q ack calls. It is included BEFORE
+// announcer the Q reply waits for. It is included BEFORE
 // loop()/serialEvent()/receiveEvent() so those can call the contract entry points.
 //
 // DESIGN:
@@ -136,6 +136,10 @@ static ScoreEntry* const g_score = (ScoreEntry*)(void*)g_scoreMem;
 
 static ContractEffect g_lastEffect = CE_NONE;      // forces firstTime when the rendered look changes
 static uint32_t       g_lastLineMs = 0;            // L2: the last well-formed line addressed to this board
+// Section 10: a reply to Q is owed. It is written from loop() (contractReplyTick), never from the
+// parser: nothing here may wait on the serial port, or a burst of lines would overrun it.
+static char    g_replyUnit  = 0;                   // 'F' or 'R' while a reply is owed
+static uint8_t g_replyRoute = 0;
 // S6 and the give-back. g_owned: the contract holds the panel (a look, a dark baseline or a pulse),
 // so the owner's own 3P state below is saved and is put back when the panel is given back.
 static bool    g_owned        = false;
@@ -145,6 +149,10 @@ static uint8_t g_ownerTempVal = 0;
 // S9: the native look the contract just handed the panel back to is still the contract's doing.
 // Its first frames go through the field gate like the contract's own (contractFrameScale).
 static bool    g_gateNative   = false;
+// The native frame now on the panel went out scaled down by the gate. When the gate's window ends
+// it is sent again at its own level (contractPulseTick), so a look that draws seldom, like the
+// swipe between two colour changes, does not sit dimmed until its next step.
+static bool    g_frameHeld    = false;
 
 // ---- small local helpers -----------------------------------------------------------
 // contract speed (0..255, higher=faster) -> primitive time_delay ms (inverse map).
@@ -157,38 +165,6 @@ static PSI_NOINLINE inline CRGB _scaled(const ContractRGB& c) { return CRGB(c.r,
 // to a 16-bit int on AVR and 255 * 255 overflows it.
 static PSI_NOINLINE inline CRGB _scaleC(const CRGB& c, uint8_t v) {
   return CRGB((uint16_t)c.r * v / 255, (uint16_t)c.g * v / 255, (uint16_t)c.b * v / 255);
-}
-
-// ---- tiny formatters for the verb-Q ack (see CV_QUERY) -----------------------
-// These exist to keep <stdio.h> OUT of this firmware. The verb-Q ack was the ONLY
-// stdio call site in the whole image, and that one snprintf() dragged in avr-libc's
-// vfprintf + __ultoa_invert + fputc + strnlen — ~1.3 KB of a 28 KB flash budget — to
-// print one status line. The stock upstream firmware links no stdio at all.
-// Each helper writes at `p` and returns the new write cursor. No bounds checking: the
-// one caller sizes its buffer for the widest possible line (see CV_QUERY).
-//
-// NOTE — no signed-decimal helper: the only %d in the old format string was
-// (int)g_effect, and ContractEffect is `enum : uint8_t` (contract_core.h:31), so it is
-// ALWAYS 0..255 and can never carry a sign. An unsigned conversion is therefore
-// byte-identical to the old %d, and a signed helper would be dead flash.
-static char* _fmtStr(char* p, const char* s) {          // literal, no NUL written
-  while (*s) *p++ = *s++;
-  return p;
-}
-static char* _fmtU16(char* p, uint16_t v) {             // unsigned decimal, unpadded ("0" for 0)
-  char tmp[5];                                          // uint16_t max = 65535 => 5 digits
-  uint8_t n = 0;
-  do { tmp[n++] = (char)('0' + (v % 10)); v /= 10; } while (v);
-  while (n) *p++ = tmp[--n];                            // emit most-significant first
-  return p;
-}
-static char* _fmtHex8(char* p, uint8_t v) {             // 2-digit ZERO-PADDED LOWER-CASE hex
-  // computed, not a lookup table: on AVR a `static const char[]` lands in .data (RAM),
-  // and this board has 2.5 KB total. Two compares cost less than 17 bytes of RAM.
-  const uint8_t hi = (uint8_t)(v >> 4), lo = (uint8_t)(v & 0x0f);
-  *p++ = (char)(hi < 10 ? '0' + hi : 'a' + (hi - 10));
-  *p++ = (char)(lo < 10 ? '0' + lo : 'a' + (lo - 10));
-  return p;
 }
 
 // ---- addressing (fork spec §4) ----------------------------------------------
@@ -330,7 +306,10 @@ uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
   if (g_owned || g_gateNative) {
     const uint8_t allowed = contractFieldGate(g_u, level, now);
     if (allowed < level) scale = (uint8_t)(((uint16_t)scale * allowed) / level);   // rounds down
+    // A native look may not draw again for a while; the contract's own looks are redrawn every frame.
+    g_frameHeld = allowed < level && (!g_owned || g_u.base == CB_NATIVE);
   } else {
+    g_frameHeld = false;
     if (!g_u.inShow) g_u.ceil = scale;                 // no show armed: the step follows the owner's level
     contractFieldForced(g_u, level, now);
   }
@@ -504,10 +483,13 @@ static PSI_NOINLINE void _applyLook(ContractLookPatch lp, uint32_t now) {
 // ---- verb dispatch ----------------------------------------------------------
 PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint16_t lineCrc, uint32_t now) {
   if (pr.hasAt) {                                      // a scored section: stored, not shown
+    // A scored A carries its look: an entry is a whole section, not a patch. Without i= the line
+    // is dropped (and then counts against verb V, as it should).
+    if (!pr.hasEffect) return;
     ScoreEntry e;
     e.atBeat     = pr.atBeat;
-    e.effect     = pr.hasEffect ? _lookHere(pr.effect, false) : CE_SOLID;
-    e.nativeCode = pr.hasEffect ? pr.nativeCode : -1;
+    e.effect     = _lookHere(pr.effect, false);
+    e.nativeCode = pr.nativeCode;
     e.color      = pr.hasColor ? pr.color : g_u.color;
     e.speed      = pr.hasSpeed ? pr.speed : 128;
     e.bright     = pr.hasBright ? pr.bright : 255;     // S6: carried in the entry; 255 is the ceiling
@@ -585,34 +567,16 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
       else if (pr.mode == 'i') _boundary('i', 0);
       break;
 
-    case CV_QUERY: {                                   // optional ack (targeted only)
-      if (p.unit == 'F' || p.unit == 'R') {
-        // Hand-rolled formatting — byte-identical to the snprintf() this replaces:
-        //   "!P%cq:ver=1.2,phase=2,i=%d,c=%02x%02x%02x,bpm=%u\r"
-        // Dropping that one call drops all of avr-libc's stdio (~1.3 KB) from the image.
-        // The timeline scenario the_query_ack_is_byte_exact pins these bytes.
-        // Widest line: "!PF"(3) + "q:ver=1.2,phase=2,i="(20) + i(<=3) + ",c="(3) + hex(6)
-        //              + ",bpm="(5) + bpm(<=5) + "\r"(1) + NUL(1) = 47 B.
-        char  buf[48];
-        char* w = buf;
-        *w++ = '!'; *w++ = 'P'; *w++ = p.unit;
-        w = _fmtStr(w, "q:ver=1.2,phase=2,i=");
-        w = _fmtU16(w, (uint16_t)g_u.effect);            // uint8_t enum => never negative
-        w = _fmtStr(w, ",c=");
-        w = _fmtHex8(w, g_u.color.r);
-        w = _fmtHex8(w, g_u.color.g);
-        w = _fmtHex8(w, g_u.color.b);
-        w = _fmtStr(w, ",bpm=");
-        // A held clock (C:bpm=0, C6) keeps its tempo for the resume; the wire still says 0, as it
-        // did when bpm=0 overwrote the tempo.
-        w = _fmtU16(w, g_clock.running ? g_clock.bpm : 0);
-        *w++ = '\r';
-        *w   = '\0';
-        wdpFinish();                                   // a WDP announce in flight goes out whole first
-        serialPort->print(buf);
-      }
+    case CV_VERIFY:                                    // section 7: is the score held the one the host sent?
+      if (!pr.hasN || !pr.hasK) break;
+      // No: back to the native look, which the owner can see with no return path. The reset keeps
+      // ok=2 for Q, and the core drops every scored line until the next M:v=show.
+      if (scoreVerify(g_u, g_score, pr.n, pr.k) == 2) _boundary('i', 0);
       break;
-    }
+
+    case CV_QUERY:                                     // section 10: by name and with a route, or no reply
+      if (contractQueryAnswerable(p)) { g_replyUnit = p.unit; g_replyRoute = pr.route; }
+      break;
 
     default:
       break;
@@ -620,12 +584,28 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
 }
 
 // ---- loop hooks -------------------------------------------------------------
-// Called every loop pass: crisp pulse expiry (wrap-safe elapsed compare).
+// Called every loop pass: crisp pulse expiry (wrap-safe elapsed compare), and the release of a
+// frame the gate held.
 inline void contractPulseTick() {
-  if (g_u.pulseActive && !contractOverlayUp(g_u, millis())) {   // the core's one expiry rule
+  const uint32_t now = millis();
+  if (g_u.pulseActive && !contractOverlayUp(g_u, now)) {   // the core's one expiry rule
     if (!_owns()) { _givePanelBack(); return; }        // L3: the native look returns
     firstTime = true;                                  // re-init the state machines the base look uses
   }
+  // S9: a native frame the gate held down is sent again, at its own level, the moment the window ends.
+  if (g_frameHeld && strobeCoolDownExpired(g_u.fieldOnsetMs, now, 2 * STROBE_MIN_STATE_MS)) FastLED.show(brightness());
+}
+
+// Called every loop pass: send an owed Q reply when it cannot block and cannot land inside a WDP
+// announce. Not while an announce is in flight, and only when the whole reply (57 bytes at most)
+// fits the serial TX buffer. One reply a pass; a second Q before the first is answered replaces it.
+inline void contractReplyTick() {
+  if (!g_replyUnit || gWdp.len != 0 || serialPort->availableForWrite() < (int)CONTRACT_REPLY_MAX) return;
+  char buf[CONTRACT_REPLY_MAX];
+  const uint8_t n = contractFormatQuery(buf, sizeof buf, g_replyRoute, 'P', g_replyUnit, PSI_SCORE_CAP,
+                                        g_u.scoreLen, g_u.loadOk, g_clock.running ? g_clock.bpm : 0);
+  serialPort->write((const uint8_t*)buf, n);
+  g_replyUnit = 0;
 }
 
 // Called inside the 25 ms loop gate. Returns true when the contract owns the frame (so the native

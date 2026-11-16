@@ -12,7 +12,7 @@
 #   1i. no floating point in the core or in the contract layer (and, stage 9b, none in the linked image)
 #   1b. wdp_announce_core.h WDP device announce unit tests (shared with the RSeries and Flthy forks)
 #   1c. wdp_fork.h: this fork's real WDP identity builds its line, front and rear
-#   1d. the WDP announce in the firmware: main.cpp + mocks (TX room, the Q ack, the jumper, the seed)
+#   1d. the WDP announce in the firmware: main.cpp + mocks (TX room, the Q reply, the jumper, the seed)
 #   2. psi_vm.h decode-walk test (every VM program: known ops, in-bounds arities, reaches OP_END)
 #   3. (retired: the firmware-layer guards are timeline scenarios now, stage 6c, on the real main.cpp)
 #   4. command-buffer width guard (the longest v1.3 scored line is 102 chars)
@@ -89,13 +89,17 @@ echo "[1b/9] wdp_announce_core WDP device announce unit tests"
 echo "[1c/9] wdp_fork PSI Front / PSI Rear identity"
 # Fork-local. The header's own types and caps, with the longest fw git gives a build
 # ("<sha>-dirty"), must build a valid line for both roles in the fork's WDP_LINE_MAX, which is
-# sized to exactly the front line (78 B here) rather than the core's 128.
+# sized to exactly the front line (93 B here) rather than the core's 128. Twice: the serial-only
+# build announces "contract.1.3", the build without the strip looks "contract.1.3s".
 "$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_fork.cpp -o "$T/psi_wdp_fork_test"
 "$T/psi_wdp_fork_test"
+"$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 -DPSI_NO_STRIP_LOOKS test_wdp_fork.cpp -o "$T/psi_wdp_fork_test_i2c"
+"$T/psi_wdp_fork_test_i2c"
 echo "[1d/9] WDP announce in the firmware (main.cpp + mocks)"
 # src/main.cpp verbatim against the golden harness's mocks, Serial1 modelled as a 63-byte TX
-# buffer draining at 9600 baud: pieces never exceed the room, a verb-Q ack mid-line waits for the
-# line (ContractPSI.h calls wdpFinish()), the jumper picks the type at each announce, and the seed
+# buffer draining at 9600 baud: pieces never exceed the room, a Q that arrives mid-line is
+# answered after the line and only when the whole reply fits (contractReplyTick() in
+# ContractPSI.h; nothing waits on the port), the jumper picks the type at each announce, and the seed
 # differs front vs rear. -std=gnu++17: the mocks use inline variables. -Wno-macro-redefined:
 # config.h redefines preamble.h's DEBUG_PRINT/UNUSED/FALL_THROUGH (upstream; stage 6 shows them).
 "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all \
@@ -380,7 +384,7 @@ fi   # PlatformIO present
 echo "[10] simavr: millis() rate per look, the show lifecycle, S9 on the wire, WS2812 waveform, CPU cost -- optional"
 # The host mocks have an ideal clock and a free show(). These five probes run real AVR code in
 # simavr (test/simavr/README.md): the firmware's millis() against Timer1 for each contract look,
-# the firmware through a show, X, idle, a native take-over, a pulse and a watchdog expiry (what the panel returns to
+# the firmware through a show, X, idle, a native take-over, a pulse, a watchdog expiry and a failed V (what the panel returns to
 # depends on when upstream's loop samples its pattern state, so it is checked on the real timer
 # too), the firmware under two hostile line streams with every frame decoded off the LED pin and
 # its dark-to-lit onsets counted (the S9 gate sits in the real driver's show(), which the host

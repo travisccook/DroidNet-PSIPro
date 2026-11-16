@@ -5,8 +5,8 @@
 //     (a) goes from dark to lit across its whole field at most three times in any second, and no
 //         two such onsets are less than 340 ms apart;
 //     (b) is never brighter than its owner's ceiling while the contract holds it;
-//     (c) is back on the board's own native look, and stays there, after M:v=idle or a watchdog
-//         expiry (in a stream with no native commands that look is the swipe at the owner's
+//     (c) is back on the board's own native look, and stays there, after M:v=idle, a watchdog
+//         expiry or a failed V (in a stream with no native commands that look is the swipe at the owner's
 //         brightness), and the watchdog fires when the test's own count says it must;
 //     (d) is dark at once after X, and stays dark until a line that may relight it;
 //     (e) L6: runs the mode a native command started, and the contract does not take the panel
@@ -124,10 +124,10 @@ static void expectDark()   { gDarkFrom = gNow; gExpectDark = true; gExpectNative
 static void expectUnknown(){ gExpectNative = gExpectDark = false; gExpectButton = -1; }
 
 // ---- sending, with the bookkeeping the properties need ----
-// Lines wait in a queue and go out as the mock's 512-byte RX buffer has room, so a burst is
-// delivered whole (the firmware reads everything that is there on each pass).
+// Lines wait in a queue until the end of the pass. Each is then fed and read by the firmware on
+// its own (a burst is still one pass: nothing is drawn between its lines), so that the bookkeeping
+// for a line runs after the firmware has taken that line and before it takes the next.
 static std::deque<std::string> gQueue;
-static bool gModeLine = false;            // a line that ends or restarts show mode went out in this pass
 // L2, by the test's own count: armed by M:v=show,wd=<s>; fed by any well-formed line addressed to
 // this board. gWdSure: nothing else (a V) may have ended show mode since it armed.
 static bool gWdArmed = false, gWdSure = false; static uint32_t gWdMs = 0, gLastAddressed = 0;
@@ -135,14 +135,20 @@ static void tx(const std::string& line) { gQueue.push_back(line); }
 static void deliver(const std::string& line) {
   ParsedContract p;
   const char* l = line.c_str();
+  if (Serial1.rxHead == Serial1.rxTail) Serial1.rxHead = Serial1.rxTail = 0;
   Serial1.feed("!"); Serial1.feed(l); Serial1.feed("\r");
+  serialEventRun();
   gLines++;
   logf(("line  " + line).c_str());
   if (!contractParse(l, p) || (p.cls != 'P' && p.cls != '*') || (p.unit != 'F' && p.unit != '*')) return;
   gLastAddressed = gNow;
   if (p.verb == CV_CLOCK) { expectUnknown(); return; }                 // a score may start to play
-  if (p.verb == CV_MODE || p.verb == CV_VERIFY) gModeLine = true;
-  if (p.verb == CV_VERIFY) gWdSure = false;
+  if (p.verb == CV_VERIFY) {
+    gWdSure = false;
+    // Section 7: a V that failed is an M:v=idle the unit ran on itself. (A good one changes nothing.)
+    if (p.params.hasN && p.params.hasK && g_u.loadOk == 2) { expectNative(); gWdArmed = false; }
+    return;
+  }
   if (p.verb == CV_MODE && p.params.mode == 'i')      { expectNative(); gWdArmed = false; }
   else if (p.verb == CV_MODE && p.params.mode == 's') { expectNative();  // armed: the native look until the show begins
     gWdArmed = gWdSure = p.params.hasWd && p.params.wd != 0; gWdMs = (uint32_t)p.params.wd * 1000u; }
@@ -163,24 +169,24 @@ static void press(int code) {
 }
 static void step(uint32_t ms = 1) {
   const bool was = g_u.inShow;
-  gModeLine = false;
   gNow += ms; g_mock_millis = gNow;
   if (Serial1.rxHead == Serial1.rxTail) Serial1.rxHead = Serial1.rxTail = 0;
-  while (!gQueue.empty() && Serial1.rxTail + (int)gQueue.front().size() + 2 < 500) { deliver(gQueue.front()); gQueue.pop_front(); }
   loop();
+  // Show mode ended inside the pass, so with no line saying so (lines are read after it): the
+  // watchdog. The panel goes back to native. (Not a native command: that ends the show when it is
+  // read, or, on the I2C build, at the start of the pass after.)
+  gPassesSincePress++;
+  if (was && !g_u.inShow && gPassesSincePress > 2) expectNative();
   // The firmware reads the native command now, and what it draws from here on is the owner's
   // light, not the contract's onset: the observers start counting afresh.
   if (gPressed) { gPressed = false; for (Onsets& o : gObs) o.n = 0; }
   serialEventRun();
+  while (!gQueue.empty()) { deliver(gQueue.front()); gQueue.pop_front(); }
   // L2: the watchdog must have fired by now (it is looked at once a frame; a slow pass is 40 ms).
   if (gWdArmed && gNow - gLastAddressed >= gWdMs + 80) {
     if (gWdSure && g_u.inShow) { gWdLate++; broke("the watchdog is late"); }
     gWdArmed = false;
   }
-  // Show mode ended with no line saying so, and no native command (which ends it in this pass, or
-  // in the next on the I2C build): the panel goes back to native.
-  gPassesSincePress++;
-  if (was && !g_u.inShow && !gModeLine && gPassesSincePress > 2) expectNative();
   // (c): the give-back may wait for the onset window (340 ms) and a frame
   if (gExpectNative && gNow - gNativeFrom > 400) {
     gNativeChecked++;

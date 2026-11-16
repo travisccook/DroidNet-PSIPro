@@ -459,24 +459,114 @@ static void the_accent_cool_down_cannot_be_bypassed() {
   CHECK(shown(2450).allAre(CYAN), "a pulse 400 ms after the last accepted one is taken");
 }
 
-// ---- the query ack (v1.2 form until verb V and the routed reply land) -----------------------------
-// Studio parses these exact bytes: unpadded decimal for i= and bpm=, two lower-case hex digits a
-// colour byte, a trailing \r, and nothing for a query not addressed to this unit by name.
-static void the_query_ack_is_byte_exact() {
-  boot();
-  at(1000, "!P*A:i=solid,c=0080ff"); at(1001, "!**C:bpm=128,ph=0,bpb=4,beat=0"); at(1100, "!PFQ");
-  at(2000, "!P*A:i=rainbow,c=0A0B0C"); at(2001, "!**C:bpm=30,ph=0,bpb=4,beat=0"); at(2100, "!PFQ");
-  at(3000, "!**C:bpm=7,ph=0,bpb=4,beat=0"); at(3100, "!PFQ");      // S1: out of range, the clock keeps 30
-  at(4000, "!**C:bpm=0"); at(4100, "!PFQ");                         // C6: a held clock reports 0
-  at(5000, "!P*Q"); at(5100, "!PRQ"); at(5200, "!**Q");             // not this unit by name: no ack
-  runTo(6000);
-  const char* tx = Serial1.txLog;
-  CHECK(strstr(tx, "!PFq:ver=1.2,phase=2,i=2,c=0080ff,bpm=128\r") != nullptr, "solid, mid colour, 3-digit bpm (tx: %s)", tx);
-  CHECK(countOf(tx, "!PFq:ver=1.2,phase=2,i=5,c=0a0b0c,bpm=30\r") == 2, "zero-padded hex; bpm=7 is ignored (tx: %s)", tx);
-  CHECK(strstr(tx, "!PFq:ver=1.2,phase=2,i=5,c=0a0b0c,bpm=0\r") != nullptr, "a held clock reads 0 (tx: %s)", tx);
-  CHECK(countOf(tx, "q:ver=") == 4, "four queries by name, four acks: saw %u", countOf(tx, "q:ver="));
+// ---- sections 7 and 10: verb V and the routed Q reply ----------------------------------------------
+static const char* kL0 = "P*A:i=solid,c=00ff00,at=0";
+static const char* kL1 = "P*A:i=solid,c=ff00ff,at=8";
+// M:v=show, the two lines (the first twice if asked), V with the given numbers, Q, then Play.
+static void loadTwo(uint16_t k, int n, bool twice = false) {
+  static char a[64], b[64], v[48];
+  snprintf(a, sizeof a, "!%s", kL0); snprintf(b, sizeof b, "!%s", kL1); snprintf(v, sizeof v, "!PFV:n=%d,k=%04x", n, k);
+  at(1000, "!**M:v=show"); at(1001, a); at(1002, b); if (twice) at(1003, a);
+  at(1004, v); at(1005, "!PFQ:r=0"); at(1100, "!**C:bpm=120,bpb=4,beat=0");
 }
-
+static void a_verified_load_plays_and_reports_ok() {
+  boot();
+  loadTwo((uint16_t)(crc16(kL0) ^ crc16(kL1)), 2);
+  runTo(3000);
+  CHECK(shown(2900).allAre(GREEN), "a good load plays");
+  char want[64]; snprintf(want, sizeof want, ";S0!PFq:ver=1.3,rel=1,cap=%d,n=2,ok=1,bpm=0\r", (int)PSI_SCORE_CAP);
+  CHECK(strstr(Serial1.txLog, want) != nullptr, "Q:r=0 after a good V (tx: %s)", Serial1.txLog);
+}
+// n and k do not depend on a line delivered twice (a mesh retry) or on the order of arrival.
+static void a_line_delivered_twice_is_harmless() {
+  boot();
+  loadTwo((uint16_t)(crc16(kL0) ^ crc16(kL1)), 2, true);
+  runTo(3000);
+  CHECK(shown(2900).allAre(GREEN) && strstr(Serial1.txLog, ",n=2,ok=1,"), "a repeated line changes neither n nor k (tx: %s)", Serial1.txLog);
+}
+// A board that did not get its whole show goes back to its native look, which the owner can see
+// with no return path, and says ok=2 until the next M:v=show.
+static void a_bad_checksum_gives_the_panel_back() {
+  boot();
+  loadTwo((uint16_t)(crc16(kL0) ^ crc16(kL1) ^ 1), 2);
+  at(4000, "!PFQ:r=0");
+  runTo(5000);
+  CHECK(swipeAt(2900), "a bad load must return to the swipe, Play or no Play");
+  CHECK(countOf(Serial1.txLog, ",n=0,ok=2,") == 2, "Q after a bad V reports ok=2, and still does 3 s later (tx: %s)", Serial1.txLog);
+}
+static void a_short_count_gives_the_panel_back() {
+  boot();
+  loadTwo((uint16_t)(crc16(kL0) ^ crc16(kL1)), 3);
+  runTo(3000);
+  CHECK(swipeAt(2900), "a missing line must return to the swipe");
+}
+// An insert into a full table is an error, not a silent drop: the load is bad even when V's own
+// numbers are right for the lines that were sent.
+static void an_overflowing_load_is_bad() {
+  boot();
+  static char buf[40][48], v[40];
+  uint16_t k = 0;
+  at(1000, "!**M:v=show");
+  for (int i = 0; i < 40; i++) {                       // 40 sections: more than either table holds
+    snprintf(buf[i], sizeof buf[i], "!P*A:i=solid,c=00ff00,at=%d", i * 4);
+    at(1001 + i, buf[i]); k ^= crc16(buf[i] + 1);
+  }
+  snprintf(v, sizeof v, "!PFV:n=40,k=%04x", k);
+  at(1100, v); at(1200, "!**C:bpm=120,bpb=4,beat=0");
+  runTo(3000);
+  CHECK(swipeAt(2900), "a load larger than the table must be refused");
+}
+// After a failed V the unit takes no scored line until the next M:v=show, so a late or retried
+// line cannot start half a show. The next M:v=show clears it.
+static void a_failed_load_drops_scored_lines_until_the_next_show() {
+  boot();
+  loadTwo((uint16_t)(crc16(kL0) ^ crc16(kL1) ^ 1), 2);   // fails at 1004
+  at(2000, "!P*A:i=solid,c=00ffff,at=0"); at(2100, "!**C:bpm=120,bpb=4,beat=0"); at(2500, "!PFQ:r=0");
+  static char a[64], v[48];
+  snprintf(a, sizeof a, "!%s", kL0); snprintf(v, sizeof v, "!PFV:n=1,k=%04x", crc16(kL0));
+  at(4000, "!**M:v=show"); at(4001, a); at(4002, v); at(4003, "!PFQ:r=0"); at(4100, "!**C:bpm=120,bpb=4,beat=0");
+  runTo(6000);
+  for (const Frame& f : between(2000, 3990))
+    if (f.allAre(CYAN)) { CHECK(false, "t=%u: a scored line after a failed V played", f.t); break; }
+  CHECK(strstr(Serial1.txLog, ",n=0,ok=2,") != nullptr, "the late line was not stored (tx: %s)", Serial1.txLog);
+  CHECK(shown(5900).allAre(GREEN) && strstr(Serial1.txLog, ",n=1,ok=1,"), "the next M:v=show loads and plays (tx: %s)", Serial1.txLog);
+}
+// A scored A carries its look. Without i= it is dropped, and V then sees a line missing.
+static void a_scored_line_without_a_look_is_dropped() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:c=00ff00,at=0"); at(1002, "!PFQ:r=0"); at(1100, "!**C:bpm=120,bpb=4,beat=0");
+  runTo(3000);
+  CHECK(strstr(Serial1.txLog, ",n=0,ok=0,") != nullptr, "nothing was stored (tx: %s)", Serial1.txLog);
+  CHECK(mostLit(1200, 3000) == 0, "the show began with nothing to play: dark");
+}
+// The reply, byte for byte: routed back the way SHADOW routes its replies, so a dome board never
+// puts a bare line on the bus for the WCB to broadcast. Unpadded decimals, a trailing \r.
+static void the_query_reply_is_byte_exact() {
+  boot();
+  at(1000, "!**C:bpm=128,ph=0,bpb=4,beat=0"); at(1100, "!PFQ:r=0");
+  at(2000, "!PFQ:r=7"); at(3000, "!PFQ:r=99");
+  at(4000, "!**C:bpm=0"); at(4100, "!PFQ:r=0");        // C6: a held clock reports 0
+  runTo(5000);
+  const char* tx = Serial1.txLog;
+  char want[80];
+  snprintf(want, sizeof want, ";S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
+  CHECK(strstr(tx, want) != nullptr, "r=0: straight to the Pi's own WCB (tx: %s)", tx);
+  snprintf(want, sizeof want, ";W7,;S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
+  CHECK(strstr(tx, want) != nullptr, "r=7: by way of WCB 7 (tx: %s)", tx);
+  snprintf(want, sizeof want, ";W99,;S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
+  CHECK(strstr(tx, want) != nullptr, "r=99: the longest route (tx: %s)", tx);
+  snprintf(want, sizeof want, ";S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=0\r", (int)PSI_SCORE_CAP);
+  CHECK(strstr(tx, want) != nullptr, "a held clock reads 0 (tx: %s)", tx);
+  CHECK(countOf(tx, "q:ver=") == 4, "four queries, four replies: saw %u", countOf(tx, "q:ver="));
+}
+// No r=, an r= that is not a number from 0 to 99, a wildcard, or the other PSI: no reply at all.
+static void a_query_that_cannot_be_routed_is_not_answered() {
+  boot();
+  at(1000, "!PFQ"); at(1100, "!**Q:r=0"); at(1200, "!P*Q:r=0"); at(1300, "!PRQ:r=0");
+  at(1400, "!PFQ:r=zz"); at(1500, "!PFQ:r=100"); at(1600, "!PFQ:r="); at(1700, "!PFQ:r=-1");
+  runTo(3000);
+  CHECK(strstr(Serial1.txLog, "q:ver=") == nullptr, "none of these is answered (tx: %s)", Serial1.txLog);
+}
 
 // ---- section 12: flash, pulse and scan have ONE timing definition, the core's -------------------
 // The oracle in these three is the core's own function, so the panel is checked against the same
@@ -760,6 +850,18 @@ static void the_swipe_after_idle_is_held_too() {
   for (size_t k = 1; k < on.size(); k++) CHECK(on[k] - on[k - 1] >= 340, "two relights %u ms apart (t=%u)", on[k] - on[k - 1], on[k]);
   CHECK(shown(5900).lit == 48 && shown(5900).scale == 200, "when the stream ends the swipe is back at the owner's 200");
 }
+// A held frame is released the moment the window ends, not at the look's next step: the swipe
+// draws only every 120 ms or so while it starts, and must not sit dimmed that long.
+static void a_held_frame_is_released_when_the_window_ends() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=ffffff"); at(2200, "!P*X"); at(2260, "!**M:v=idle");
+  runTo(3000);
+  uint32_t lit = 0, back = 0;
+  for (const Frame& f : between(2000, 2100)) if (f.scale == 200 && f.lit == 48) { lit = f.t; break; }
+  for (const Frame& f : between(2260, 3000)) if (f.scale == 200 && f.lit > 24) { back = f.t; break; }
+  CHECK(lit != 0 && shown(2300).scale <= 50, "the swipe's first frames after idle are held (scale %u)", shown(2300).scale);
+  CHECK(back >= lit + 340 && back <= lit + 344, "the swipe is at the owner's 200 within 4 ms of the window's end (t=%u), saw t=%u", lit + 340, back);
+}
 // Nothing the contract holds is ever brighter than the ceiling, whatever the primitive asked for
 // (upstream's bare show() latches a brightness stored at boot, not the owner's current one). Boot
 // at 200, then the owner turns it down to 20, then a show runs every native mode it may select.
@@ -889,7 +991,15 @@ static const Scenario kScenarios[] = {
   {"a_new_show_accents_its_first_beat", a_new_show_accents_its_first_beat},
   {"flash_alternates_no_faster_than_the_cap", flash_alternates_no_faster_than_the_cap},
   {"the_accent_cool_down_cannot_be_bypassed", the_accent_cool_down_cannot_be_bypassed},
-  {"the_query_ack_is_byte_exact", the_query_ack_is_byte_exact},
+  {"a_verified_load_plays_and_reports_ok", a_verified_load_plays_and_reports_ok},
+  {"a_line_delivered_twice_is_harmless", a_line_delivered_twice_is_harmless},
+  {"a_bad_checksum_gives_the_panel_back", a_bad_checksum_gives_the_panel_back},
+  {"a_short_count_gives_the_panel_back", a_short_count_gives_the_panel_back},
+  {"an_overflowing_load_is_bad", an_overflowing_load_is_bad},
+  {"a_failed_load_drops_scored_lines_until_the_next_show", a_failed_load_drops_scored_lines_until_the_next_show},
+  {"a_scored_line_without_a_look_is_dropped", a_scored_line_without_a_look_is_dropped},
+  {"the_query_reply_is_byte_exact", the_query_reply_is_byte_exact},
+  {"a_query_that_cannot_be_routed_is_not_answered", a_query_that_cannot_be_routed_is_not_answered},
   {"scan_is_the_shared_ping_pong", scan_is_the_shared_ping_pong},
   {"flash_speed_is_the_shared_timing", flash_speed_is_the_shared_timing},
   {"pulse_breathes_on_the_shared_timing", pulse_breathes_on_the_shared_timing},
@@ -912,6 +1022,7 @@ static const Scenario kScenarios[] = {
   {"x_leaves_the_watchdog_armed", x_leaves_the_watchdog_armed},
   {"a_relight_right_after_x_is_held", a_relight_right_after_x_is_held},
   {"the_swipe_after_idle_is_held_too", the_swipe_after_idle_is_held_too},
+  {"a_held_frame_is_released_when_the_window_ends", a_held_frame_is_released_when_the_window_ends},
   {"a_show_never_exceeds_the_ceiling", a_show_never_exceeds_the_ceiling},
   {"no_pulse_over_a_contract_native_look", no_pulse_over_a_contract_native_look},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},

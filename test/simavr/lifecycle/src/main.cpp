@@ -1,5 +1,6 @@
 // Real-firmware lifecycle probe: the fork's src/main.cpp VERBATIM (setup/loop renamed) on the
-// simulated ATmega32U4, taken through a show, X, M:v=idle, a native take-over and a pulse.
+// simulated ATmega32U4, taken through a show, X, M:v=idle, a native take-over, a pulse over the
+// native look, a watchdog expiry and a V that does not match.
 //
 // Why it exists: the host timeline scenarios check the same things, but on mocks with an ideal
 // clock (one loop pass a millisecond, a free show()). What the panel returns to after a show
@@ -36,7 +37,11 @@ static const char kRows[] PROGMEM =
   "14600|!**M:v=show,wd=2\n"           // cp12 2 s after idle: the swipe
   "14700|!P*A:i=solid,c=00ff00\n"      // cp13 armed, with a 2 s watchdog
   "16000|\n"                           // cp14 1.3 s of silence: the look holds
-  "17500|\n";                          // cp15 2.8 s of silence: the watchdog gave the panel back
+  "17500|!**M:v=show\n"                // cp15 2.8 s of silence: the watchdog gave the panel back
+  "17600|!P*A:i=solid,c=00ff00,at=0\n" // cp16 armed, a section loaded
+  "17700|!**C:bpm=120,bpb=4,beat=0\n"  // cp17 before Play: still the swipe
+  "18700|!PFV:n=2,k=0000\n"            // cp18 playing: all green
+  "20700|\n";                          // cp19 2 s after a V that does not match: the swipe
 static const char* gRow = kRows;
 static uint8_t gCp = 0;
 

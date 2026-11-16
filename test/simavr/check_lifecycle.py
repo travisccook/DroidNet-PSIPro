@@ -26,6 +26,10 @@ EXPECT = [
     ("swipe", "armed with wd=2"),
     ("green", "1.3 s of host silence: the look holds"),
     ("swipe", "2.8 s of host silence: the watchdog gave the panel back"),
+    ("swipe", "armed, one section loaded"),
+    ("swipe", "loaded, before Play"),
+    ("green", "the scored section plays"),
+    ("swipe", "2 s after a V that does not match: back to the native look"),
 ]
 KINDS = {
     "swipe": lambda c: c["lit"] == 48 and c["green"] == 0 and c["white"] == 0 and c["code"] == 1,

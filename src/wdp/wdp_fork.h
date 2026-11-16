@@ -3,20 +3,25 @@
 // the RSeries and FlthyHPs forks) builds and paces the line; this file only says what the board
 // is and where the line goes:
 //
-//     @WDP1 {"type":"PSI Front","fw":"<commit>","caps":["droidnet.contract"]}
+//     @WDP1 {"type":"PSI Front","fw":"<commit>","caps":["droidnet.contract","contract.1.3"]}
+//
+// The second tag says which contract the board speaks. The I2C build, which draws six of the
+// contract's looks as stand-ins (PSI_NO_STRIP_LOOKS), says "contract.1.3s" instead, so a host can
+// tell the two builds apart without a query.
 //
 // "PSI Rear" on a board with the front/rear jumper fitted. Front and rear PSIs can share one WCB
 // port, and the WCB keeps one record per (port, type), so the role is part of the type.
 //
 // The port is serialPort: Serial1, the header pins the WCB is wired to, at 9600 baud (USB Serial
 // only in a USB_SERIAL debug build). The line leaves in pieces no bigger than the room in the TX
-// buffer (63 bytes when empty; the line is 70-77), so loop() never waits on it. The one other
-// write to serialPort, the verb-Q ack in ContractPSI.h, calls wdpFinish() first, so it never
-// lands inside an announce. DEBUG_PRINT/DEBUG_PRINT_LN (include/config.h) also write there and do
-// not call it; DEBUG is off (compiled out) in every build of this fork.
+// buffer (63 bytes when empty; the line is 85-93), so loop() never waits on it. The one other
+// write to serialPort, the contract's Q reply (contractReplyTick() in ContractPSI.h), is sent
+// only while no announce is in flight, so it never lands inside one. DEBUG_PRINT/DEBUG_PRINT_LN
+// (include/config.h) also write there with no such care; DEBUG is off (compiled out) in every
+// build of this fork.
 //
-// Included by src/main.cpp after `Stream* serialPort` and BEFORE contract/ContractPSI.h, so the
-// ack can call wdpFinish().
+// Included by src/main.cpp after `Stream* serialPort` and BEFORE contract/ContractPSI.h, which
+// reads gWdp.
 //
 // Part of the DroidNet PSI Pro fork. Copyright (c) 2026 Travis Cook.
 // SPDX-License-Identifier: MIT
@@ -29,15 +34,23 @@
 #endif
 #define WDP_FORK_TYPE_FRONT "PSI Front"   // jumper open (pin HIGH)
 #define WDP_FORK_TYPE_REAR  "PSI Rear"    // jumper fitted (pin LOW)
-#define WDP_FORK_CAPS       "droidnet.contract"
+#ifdef PSI_NO_STRIP_LOOKS
+#define WDP_FORK_CONTRACT   "contract.1.3s"
+#else
+#define WDP_FORK_CONTRACT   "contract.1.3"
+#endif
+#define WDP_FORK_CAPS       "droidnet.contract " WDP_FORK_CONTRACT
+// The same tags as the line spells them (the space becomes `","`), for sizing the buffer below.
+#define WDP_FORK_CAPS_WIRE  "droidnet.contract\",\"" WDP_FORK_CONTRACT
 
-// The line buffer: exactly the longer of this build's two lines ("PSI Front") and its NUL, 72 B
-// for a clean build and 78 B for a "-dirty" one, instead of the core's 128-byte default: this
+// The line buffer: exactly the longer of this build's two lines ("PSI Front") and its NUL, 87 B
+// for a clean serial-only build and 93 B for a "-dirty" one (one more with I2C), instead of the
+// core's 128-byte default: this
 // board has 2,560 B of SRAM. The literal spells the line the core builds (test/host stages 1c and
 // 1d compare the two byte for byte); "" WDP_FW compiles only when WDP_FW is a string literal, so
 // a define that lost its quotes fails the build here instead of announcing garbage.
 #define WDP_LINE_MAX \
-  sizeof("@WDP1 {\"type\":\"" WDP_FORK_TYPE_FRONT "\",\"fw\":\"" WDP_FW "\",\"caps\":[\"" WDP_FORK_CAPS "\"]}\n")
+  sizeof("@WDP1 {\"type\":\"" WDP_FORK_TYPE_FRONT "\",\"fw\":\"" WDP_FW "\",\"caps\":[\"" WDP_FORK_CAPS_WIRE "\"]}\n")
 #include "wdp_announce_core.h"
 
 static_assert(sizeof(WDP_FORK_TYPE_REAR) <= sizeof(WDP_FORK_TYPE_FRONT), "WDP_LINE_MAX is sized by the front line");
@@ -96,11 +109,4 @@ inline void wdpForkTick() {
   if (n) serialPort->write((const uint8_t*)chunk, n);
 }
 
-// Before any other write to serialPort: sends the rest of a line in flight, if there is one. This
-// can wait for room in the TX buffer: at most the time to send that rest, under 0.1 s at 9600.
-inline void wdpFinish() {
-  const char* chunk = 0;
-  uint8_t n = wdpRest(gWdp, &chunk);
-  if (n) serialPort->write((const uint8_t*)chunk, n);
-}
 #endif  // WDP_FORK_IDENTITY_ONLY

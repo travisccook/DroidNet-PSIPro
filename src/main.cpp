@@ -363,7 +363,7 @@ CRGB overlayColors[COLUMNS];
 #include "psi_vm.h"
 
 // WDP device announce: tells the WCB on serialPort what this board is, every 25-30 s. Included
-// after serialPort and BEFORE ContractPSI.h, whose verb-Q ack calls wdpFinish(). Additive.
+// after serialPort and BEFORE ContractPSI.h, whose Q reply waits for an announce in flight. Additive.
 #include "wdp/wdp_fork.h"
 
 // Driveable-Animation Contract fork layer. Included HERE (after the global state
@@ -494,6 +494,9 @@ void loop()
   // Checked every loop pass (not only inside the 25 ms gate) for crisp, sub-tick
   // pulse-accent expiry. No-op unless a contract P overlay is active.
   contractPulseTick();
+
+  // An owed contract Q reply, sent only when it cannot block (ContractPSI.h).
+  contractReplyTick();
 
   // WDP device announce, every pass and outside the 25 ms gate: writes only what fits in the
   // serial TX buffer, so it never blocks. No-op between lines.

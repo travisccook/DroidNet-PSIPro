@@ -16,10 +16,17 @@ static int g_fail = 0, g_total = 0;
 #define CHECK(cond) do { g_total++; if(!(cond)){ g_fail++; \
   printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);} } while(0)
 
+// The lines, byte for byte. The second caps tag is the contract the build speaks: "contract.1.3",
+// or "contract.1.3s" for the build without the strip and hue looks (the PSIPro-i2c environment).
+#ifdef PSI_NO_STRIP_LOOKS
+#define CONTRACT_TAG "contract.1.3s"
+#else
+#define CONTRACT_TAG "contract.1.3"
+#endif
 static const char kFront[] =
-    "@WDP1 {\"type\":\"PSI Front\",\"fw\":\"abcdef0-dirty\",\"caps\":[\"droidnet.contract\"]}\n";
+    "@WDP1 {\"type\":\"PSI Front\",\"fw\":\"abcdef0-dirty\",\"caps\":[\"droidnet.contract\",\"" CONTRACT_TAG "\"]}\n";
 static const char kRear[] =
-    "@WDP1 {\"type\":\"PSI Rear\",\"fw\":\"abcdef0-dirty\",\"caps\":[\"droidnet.contract\"]}\n";
+    "@WDP1 {\"type\":\"PSI Rear\",\"fw\":\"abcdef0-dirty\",\"caps\":[\"droidnet.contract\",\"" CONTRACT_TAG "\"]}\n";
 
 static void check_line(const char* type, const char* want, size_t wantLen) {
   char out[WDP_LINE_MAX];
@@ -38,10 +45,11 @@ static void test_the_real_identity_builds_both_lines() {
 }
 
 static void test_the_line_buffer_is_exactly_the_front_line() {
-  // 77 bytes and the NUL: the front line fills it, so a byte less would refuse it (and with it
-  // every announce); the rear line is one shorter.
+  // 92 bytes and the NUL (93 and the NUL with the "s" tag): the front line fills it, so a byte
+  // less would refuse it (and with it every announce); the rear line is one shorter.
   CHECK(WDP_LINE_MAX == sizeof(kFront));
-  CHECK(WDP_LINE_MAX == 78);
+  CHECK(WDP_LINE_MAX == 93 + (int)sizeof(CONTRACT_TAG) - (int)sizeof("contract.1.3"));
+  CHECK(sizeof(kFront) - 1 <= 128);                  // the core's own line limit, which the WCB is sized for
   char small[WDP_LINE_MAX - 1];
   CHECK(wdpBuildLine(small, sizeof(small), WDP_FORK_TYPE_FRONT, WDP_FW, WDP_FORK_CAPS) == 0);
   CHECK(wdpBuildLine(small, sizeof(small), WDP_FORK_TYPE_REAR, WDP_FW, WDP_FORK_CAPS) == sizeof(kRear) - 1);
