@@ -3,7 +3,8 @@
 # bolted onto Neil Hutchison's PSI Pro firmware. Copyright (c) 2026 Travis Cook.
 # SPDX-License-Identifier: MIT
 #
-# Host checks for the PSI Pro contract fork (stages 1-8 need no hardware and no toolchain; stage 9 is the real cross-compile):
+# Host checks for the PSI Pro contract fork (stages 1-8 need no hardware and no toolchain; stage 9 is the real cross-compile,
+# stage 10 runs AVR code in simavr):
 #   1. contract_core.h parser unit tests
 #   1b. wdp_announce_core.h WDP device announce unit tests (shared with the RSeries and Flthy forks)
 #   1c. wdp_fork.h: this fork's real WDP identity builds its line, front and rear
@@ -243,8 +244,9 @@ if [ -z "$PIO" ] || [ ! -x "$PIO" ]; then
   echo "      Stages 1-6 passed, but they only run against our host mocks."
   echo "      Install it and re-run for the real check:  pip install platformio"
   echo "      Or point this at an existing install:      PIO=/path/to/pio $0"
-  exit 0
+  PIO=""
 fi
+if [ -n "$PIO" ]; then
 echo "using $PIO"
 ( cd ../.. && "$PIO" run -e PSIPro -e PSIPro-i2c )
 echo "cross-compiles for the real MCU (ATmega32U4 (SparkFun Pro Micro)) OK"
@@ -263,3 +265,29 @@ echo "    disable both and the I2C build fails. There used to be a third leg her
 echo "    CONTRACT_SLIM, that dropped five native modes to make room; those five are"
 echo "    now permanent PROGMEM bytecode (include/psi_vm.h), all 23 upstream modes"
 echo "    ship, and CONTRACT_SLIM is gone."
+fi   # PlatformIO present
+
+echo "[10] simavr: millis() rate per look, WS2812 waveform, CPU cost -- optional"
+# The host mocks have an ideal clock and a free show(). These three probes run real AVR code in
+# simavr (test/simavr/README.md): the firmware's millis() against Timer1 for each contract look,
+# the WS2812 waveform on PD4, and the cost of the per-frame math.
+SIMAVR="${SIMAVR:-$HOME/.platformio/packages/tool-simavr/bin/simavr}"
+if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
+  simrun() {  # <project> <seconds> <log> [simavr args...]: build, run until the timeout, clean the log
+    p=$1; secs=$2; log=$3; shift 3
+    ( cd "../simavr/$p" && "$PIO" run -s ) > "$log.build" 2>&1 || { cat "$log.build"; echo "FAIL: the $p probe did not build"; exit 1; }
+    timeout "$secs" "$SIMAVR" -m atmega32u4 -f 16000000 "$@" "../simavr/$p/.pio/build/$p/firmware.elf" \
+      > "$log.raw" 2>&1 || true
+    sed 's/\x1b\[[0-9;]*m//g; s/\.\.$//' "$log.raw" > "$log"
+  }
+  simrun millis 240 "$T/millis.txt"
+  # --report-only until the millis() credit is exact (review H1): the numbers are printed, not gated.
+  python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 1000 --report-only
+  simrun wave 8 "$T/wave.txt" -o "$T/wave.vcd" -at "led=trace@0x2b/0x10"
+  python3 ../simavr/check_wave.py "$T/wave.vcd" --min-gap-us 50
+  simrun bench 30 "$T/bench.txt"
+  grep ' us=' "$T/bench.txt" | sed 's/^/    /'
+else
+  echo "SKIP: needs PlatformIO and its simavr package:"
+  echo "      pip install platformio && pio pkg install -g --tool platformio/tool-simavr"
+fi

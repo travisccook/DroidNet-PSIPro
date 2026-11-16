@@ -38,10 +38,7 @@ git clone --depth 1 https://github.com/nhutchison/PSIPro.git /tmp/PSIPro   # rev
 | `updiff/results.txt` | 67 same (51 frame for frame, 16 once repeated frames are collapsed), 4 different |
 | `test/host/diff_upstream.cpp`, `test/host/diff_upstream.sh` | Moved out of here by the plan's Task 2: the same comparison as a `run.sh` stage with an expectation per row (77 timelines), against upstream vendored at `test/host/upstream-v1.7/` |
 | `simavr/millis_probe/` | The WS2812 driver alone behind the firmware's 26 ms gate: `millis()` against Timer1 for a range of compute times before `show()` |
-| `simavr/fwprobe/` | The real firmware with one contract look at a time: `millis()` error per look |
-| `simavr/check_millis.py` | Gate on the `fwprobe` log: `python3 simavr/check_millis.py <log> --limit-ppm 1000` |
-| `simavr/bench/` | Microseconds for `beatPosAt`, the envelope, each effect's math and one `show()` |
-| `simavr/wave/` | One frame traced on PD4 to a VCD; `check_wave.py` checks T0H, T1H, bit period, the bytes and the gap between frames |
+| `test/simavr/` | The firmware `millis()` probe, the waveform probe and the CPU bench moved there in the plan's Task 4 and run from `test/host/run.sh` |
 | `proto/millis_exact.diff` | The exact `millis()` credit for `include/FastLED.h` (plan Task 6) |
 | `proto/golden_script.diff` | `golden_native.cpp --cmd` takes a script `<ms>@<line>;<ms>@<line>` (plan Task 3) |
 | `proto/psi-r1-prototype.diff` | An unreviewed prototype of the PSI-side R1 changes that need no core change. Applies to `abba59d` with `git apply` |
@@ -95,29 +92,27 @@ BIN=$BIN bash updiff/matrix.sh
 supplies a three-line `Wire` stub. Upstream's own `config.h` and `matrices.h` sit beside it, so the upstream build
 uses upstream's settings.
 
-The simavr probes are PlatformIO projects. Build in place, run, then remove `.pio/`:
+The driver-only probe is a PlatformIO project. Build in place, run, then remove `.pio/`:
 
 ```bash
 SIM=~/.platformio/packages/tool-simavr/bin/simavr
-for p in millis_probe fwprobe bench; do
-  (cd simavr/$p && pio run && timeout 300 "$SIM" -m atmega32u4 -f 16000000 .pio/build/*/firmware.elf; rm -rf .pio)
-done
-(cd simavr/wave && pio run &&
-  timeout 8 "$SIM" -m atmega32u4 -f 16000000 -o "$OUT/wave.vcd" -at "led=trace@0x2b/0x10" .pio/build/wave/firmware.elf;
-  python3 check_wave.py "$OUT/wave.vcd"; rm -rf .pio)
+(cd simavr/millis_probe && pio run && timeout 300 "$SIM" -m atmega32u4 -f 16000000 .pio/build/probe/firmware.elf;
+  rm -rf .pio)
 ```
 
-simavr prints what the sketch writes to `Serial1`. The probes never exit, so `timeout` ends the run. The first
-`fwprobe` line (`warmup`) is taken before Timer1 settles and is to be ignored.
+simavr prints what the sketch writes to `Serial1`. The probe never exits, so `timeout` ends the run. The other
+probes are in `test/simavr/` (README there).
 
 ## Results as recorded
 
-- `simavr/fwprobe/result_current_firmware.txt`: `millis()` runs 1.6% fast for idle swipe, solid, comet, gradient,
+- As first recorded with the firmware probe (now `test/simavr/millis`): `millis()` runs 1.6% fast for idle swipe,
+  solid, comet, gradient,
   colorcycle and `native:1`, and 2.3% slow for twinkle, wipe and chase.
 - `proto/result_fwprobe_exact_credit.txt`: with `proto/millis_exact.diff` every look is within 126 ppm, which is one
   millisecond in the 8 s window.
-- `simavr/wave/result.txt`: T0H 250 ns, T1H 750 ns, 1250 ns bits (1437.5 ns at a byte boundary), the wire bytes are
+- The waveform probe (now `test/simavr/wave`): T0H 250 ns, T1H 750 ns, 1250 ns bits (1437.5 ns at a byte boundary),
+  the wire bytes are
   the frame's bytes in G, R, B order, and two `show()` calls with nothing between them are 107 µs apart.
-- `simavr/bench/result.txt`: `show()` 1607 µs, twinkle 6784 µs a frame, wipe, chase and gradient about 800 µs.
+- The bench (now `test/simavr/bench`): `show()` 1607 µs, twinkle 6784 µs a frame, wipe, chase and gradient about 800 µs.
 - `proto/result_timeline_prototype.txt`: the first prototype (before the core existed) against the first draft
   of the scenarios; `proto/result_timeline_v13_port.txt`: the port on the CA1 core, every scenario passing.

@@ -1,1 +1,0 @@
-bits=3456  T0H=[250]  T1H=[750]  periods=[1250, 1437, 1438]  frame=1465.8 us  gaps between frames=[2108.7, 107.1] us

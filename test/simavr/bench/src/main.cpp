@@ -1,4 +1,4 @@
-// CPU-cost bench of the contract_core.h per-frame math on the ATmega32U4 (simavr). Scratch only.
+// CPU cost of the contract_core.h per-frame math and of one show() on the ATmega32U4, in simavr.
 #include <Arduino.h>
 #include <FastLED.h>
 #include "contract_core.h"

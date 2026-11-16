@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check a simavr VCD of the WS2812 data pin (PD4) against the device timing and the frame bytes.
 
-usage: check_wave.py wave.vcd
+usage: check_wave.py wave.vcd [--min-gap-us N]
 Expects three identical frames of 48 LEDs: leds[i] = (r=i*5, g=255-i, b=i^0xA5), sent G,R,B.
 """
 import sys
@@ -9,7 +9,8 @@ import sys
 T0H, T1H, PERIOD = 250, 750, 1250           # ns, from include/FastLED.h's cycle budget
 SPEC_T0H = (200, 500)                       # WS2812 350 +/- 150 ns
 SPEC_T1H = (550, 850)                       # WS2812 700 +/- 150 ns
-LATCH_MIN = 50_000                          # ns, the original WS2812 reset; newer parts want 280 us
+# ns between two frames. The original WS2812 resets after 50 us low; later revisions want 280 us.
+LATCH_MIN = 1000 * int(sys.argv[sys.argv.index("--min-gap-us") + 1]) if "--min-gap-us" in sys.argv else 50_000
 
 
 def edges(path):
