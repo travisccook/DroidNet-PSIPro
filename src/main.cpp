@@ -543,7 +543,7 @@ void allOFF(bool showLED, unsigned long runtime=0)
 
 void fill_column(uint8_t column, CRGB color, uint8_t scale_brightness=0) {
   for (int i = 0; i < LEDS_PER_COLUMN; i++) {
-    int8_t ledIndex = ledMatrix[column][i];
+    int8_t ledIndex = psiLed(column, i);
     if (ledIndex != -1) {
       leds[ledIndex] = color;
       if (scale_brightness != 0) leds[ledIndex] %= scale_brightness;
@@ -566,14 +566,14 @@ void fill_half_column(uint8_t column, uint8_t half, CRGB color) {
   }
 
   for (int i = start; i < end_col; i++) {
-    int8_t ledIndex = ledMatrix[column][i];
+    int8_t ledIndex = psiLed(column, i);
     if (ledIndex != -1) leds[ledIndex] = color;
   }
 }
 
 void fill_row(uint8_t row, CRGB color, uint8_t scale_brightness=0) {
   for (int i = 0; i < COLUMNS; i++) {
-    int8_t ledIndex = ledMatrix[i][row];
+    int8_t ledIndex = psiLed(i, row);
     if (ledIndex != -1) {
       leds[ledIndex] = color;
       if (scale_brightness != 0) leds[ledIndex] %= scale_brightness;
@@ -771,7 +771,7 @@ void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime)
     for (int c = 0; c < COLUMNS; c++)
     {
       for (int i = 0; i < LEDS_PER_COLUMN; i++) {
-        int8_t ledIndex = ledMatrix[c][i];
+        int8_t ledIndex = psiLed(c, i);
         if (ledIndex != -1) {
           if (level[c] > i) leds[ledIndex] = CRGB::Black;
         }
@@ -938,7 +938,7 @@ void runPattern(int pattern) {
       vmPlay(VMP_RADAR);
       break;
     case 9:              //   = Flashing red heart (front) / Pulse trace (rear)
-      vmPlay(digitalRead(JUMP_FRONT_REAR) ? VMP_REDHEART : VMP_PULSE);
+      vmPlay(psiJumperOpen() ? VMP_REDHEART : VMP_PULSE);
       break;
     case 10:              //  10 = Star Wars Animation — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
       vmPlay(VMP_SWSCAN);
@@ -1236,8 +1236,8 @@ void doTcommand(int address, int argument, int timing)
   // This prevents overriding any timing parameters that may be in use, for an invalid
   // command.
   if (!((address == 0) || 
-      ((digitalRead(JUMP_FRONT_REAR)) && (address == 4)) || 
-      ((!digitalRead(JUMP_FRONT_REAR)) && (address == 5))))
+      ((psiJumperOpen()) && (address == 4)) || 
+      ((!psiJumperOpen()) && (address == 5))))
   {
     DEBUG_PRINT("Address "); DEBUG_PRINT(address); DEBUG_PRINT_LN(" not a valid PSI.  Ignoring");
     return;
@@ -1255,12 +1255,12 @@ void doTcommand(int address, int argument, int timing)
   }
   
   // If we are the front PSI, respond to 0 or 4
-  if ((digitalRead(JUMP_FRONT_REAR)) && (address == 4))
+  if ((psiJumperOpen()) && (address == 4))
   {
     runPattern(argument);
   }
   // If we are the rear PSI, respond to 0 or 5
-  else if ((!digitalRead(JUMP_FRONT_REAR)) && (address == 5))
+  else if ((!psiJumperOpen()) && (address == 5))
   {
     runPattern(argument);
   }

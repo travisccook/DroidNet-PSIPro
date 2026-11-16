@@ -179,10 +179,18 @@ CRGB rearSecondaryOffColor = CRGB::Black;     // Off Black
 #define JUMP_FRONT_REAR 14
 #endif
 
+// DroidNet: the front/rear jumper, read straight from the port on the Pro Micro (Arduino pin 14 is
+// PB3). digitalRead() costs 212 B of flash here for this one pin; the read is otherwise the same.
+#if defined(__AVR_ATmega32U4__) && (JUMP_FRONT_REAR == 14)
+  #define psiJumperOpen() ((PINB & _BV(PB3)) != 0)
+#else
+  #define psiJumperOpen() (digitalRead(JUMP_FRONT_REAR) != 0)
+#endif
+
 // Set the colors based on the pin being jumpered to ground.
 
 CRGB primary_color() {
-  if (digitalRead(JUMP_FRONT_REAR)) {
+  if (psiJumperOpen()) {
     return frontPrimaryColor;
   } else {
     return rearPrimaryColor;
@@ -190,7 +198,7 @@ CRGB primary_color() {
 }
 
 CRGB secondary_color() {
-  if (digitalRead(JUMP_FRONT_REAR)) {
+  if (psiJumperOpen()) {
     return frontSecondaryColor;
   } else {
     return rearSecondaryColor;
@@ -198,7 +206,7 @@ CRGB secondary_color() {
 }
 
 CRGB secondary_off_color() {
-  if (digitalRead(JUMP_FRONT_REAR)) {
+  if (psiJumperOpen()) {
     return frontSecondaryOffColor;
   } else {
     return rearSecondaryOffColor;
@@ -291,7 +299,8 @@ byte I2CAdress = 22;
 // Addressible LED Array
 // -1 = no LED in that grid space
 
-  int8_t ledMatrix[COLUMNS][LEDS_PER_COLUMN] = {
+// DroidNet: the table is in flash, not SRAM (60 B back). Read it with psiLed(column, row).
+  const int8_t ledMatrix[COLUMNS][LEDS_PER_COLUMN] PROGMEM = {
     { -1, -1, 23, 24, -1, -1, },
     { -1,  6, 22, 25, 41, -1, },
     {  5,  7, 21, 26, 40, 42, },
@@ -304,6 +313,10 @@ byte I2CAdress = 22;
     { -1, -1, 14, 33, -1, -1, } 
   };
 
+
+static inline int8_t psiLed(uint8_t column, uint8_t row) {
+  return (int8_t)pgm_read_byte(&ledMatrix[column][row]);
+}
 
 // Command processing stuff
 // maximum number of characters in a command (95 chars since we need the null termination)
@@ -326,7 +339,7 @@ char cmdString[CMD_MAX_LENGTH];
 #define POT_AVG_SIZE 30
 // Change this if you get flicker.  A larger number will reduce POT noise.
 #define POT_VARIANCE_LEVEL 2
-uint16_t POTReadings[POT_AVG_SIZE];
+uint8_t POTReadings[POT_AVG_SIZE];   // DroidNet: was uint16_t; a reading is 0 to 199 (30 B back)
 uint8_t POTIndex = 0;
 unsigned long POTSum = 0;
 uint8_t POTCount = 0;

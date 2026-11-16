@@ -137,7 +137,11 @@ static BeatClock  g_clock;
 // default 2 = pump on every beat (downbeat-emphasized) so a live A with m>0 but no
 // am= still breathes; an explicit am= (incl. a section's am=0 calm) overrides it.
 static uint8_t    g_activeAccentMode = 2;
-static ScoreEntry g_score[8];
+// Raw .bss storage, not `ScoreEntry g_score[N]`: ScoreEntry carries default member initialisers, so
+// an array of it is constant-initialised and its image is stored in flash to be copied to SRAM at
+// boot. Entries are only read below g_scoreCount and scoreInsert() writes a whole entry.
+static uint8_t    g_scoreMem[sizeof(ScoreEntry) * 8];
+static ScoreEntry* const g_score = (ScoreEntry*)(void*)g_scoreMem;
 static int        g_scoreCount = 0;
 static int        g_scoreIndex = -1;
 // beat span of the active score section, for the am=3 ("build") ramp. Set on every
@@ -202,7 +206,7 @@ static char* _fmtHex8(char* p, uint8_t v) {             // 2-digit ZERO-PADDED L
 inline bool contractAddressed(char cls, char unit) {
   if (cls != 'P' && cls != '*') return false;         // not a PSI class
   if (unit == '*') return true;                        // any PSI
-  bool isFront = (digitalRead(JUMP_FRONT_REAR) != 0);  // HIGH (pulled up) => front
+  bool isFront = (psiJumperOpen() != 0);  // HIGH (pulled up) => front
   if (unit == 'F') return isFront;
   if (unit == 'R') return !isFront;
   return false;                                        // 'T' (HP) never matches PSI

@@ -50,6 +50,7 @@ inline uint32_t millis() { return _mock_millis; }
 // addressing jumper (config.h:102 for ARDUINO_AVR_PRO)
 #define JUMP_FRONT_REAR 12
 inline int digitalRead(int) { return 1; }   // HIGH default (pulled up) => front
+#define psiJumperOpen() (digitalRead(JUMP_FRONT_REAR) != 0)   // include/config.h: the jumper read
 
 struct CHSV {
   uint8_t h = 0, s = 0, v = 0;

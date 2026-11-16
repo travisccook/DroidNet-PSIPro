@@ -952,7 +952,7 @@ static void vmShowDelay(uint16_t d) {
 // everything down; re-read from the live file, not trusted from the brief):
 //   randRow = random(0, LEDS_PER_COLUMN);
 //   randCol = random(0, COLUMNS);
-//   ledIndex = ledMatrix[randCol][randRow];
+//   ledIndex = psiLed(randCol, randRow);
 //   if (ledIndex != -1) leds[ledIndex] = color;
 // — ROW drawn before COLUMN, one full row+col pair PER sparkle, interleaved
 // across the numSparkles loop (draw1-row, draw1-col, draw2-row, draw2-col,
@@ -970,7 +970,7 @@ static void vmSparkleDraw(uint8_t n, CRGB col) {
   while (n--) {
     int randRow = random(0, LEDS_PER_COLUMN);
     int randCol = random(0, COLUMNS);
-    int8_t ledIndex = ledMatrix[randCol][randRow];
+    int8_t ledIndex = psiLed(randCol, randRow);
     if (ledIndex != -1) leds[ledIndex] = col;
   }
 }
