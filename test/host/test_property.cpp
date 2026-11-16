@@ -13,13 +13,25 @@
 //         back by itself;
 //     (f) S7: never runs, for a show, a native mode that is off the allow-list;
 //     (g) S10: never writes into a native look: no line changes the levels the native VU mode
-//         shows while a native look (the owner's, or a native:<n> of the show's) has the panel.
+//         shows while a native look (the owner's, or a native:<n> of the show's) has the panel;
+//     (h) S9 in LUMINANCE (Rec.709), the same limit as (a): a change of colour moves the
+//         luminance while the brightest channel stays where it was (white to blue and back);
+//     (i) S11: changes its look or colour across the whole field at most once in 170 ms, whatever
+//         path asks (a live A, a section reached by time or by a seek, an accent, a hand-back).
 //
 // What is measured is the frame on its way to the LEDs: the full-field level of every frame
 // FastLED.show() sends (the mean over the LEDs of each LED's brightest channel, times the master
-// scale), which is what the panel shows until the next frame. (a) is counted three times over,
-// with three pairs of thresholds for "dark" and "lit" (10 % and 50 % of the ceiling, 19 % and
-// 75 %, 4 % and 31 %): the limit must not depend on where an observer draws those lines.
+// scale), which is what the panel shows until the next frame. (a) is counted seven times over:
+// with three wide pairs of thresholds for "dark" and "lit" (10 % and 50 % of the ceiling, 19 % and
+// 75 %, 4 % and 31 %) and four bands only an eighth of the ceiling wide (3 to 15 %, 40 to 52 %,
+// 45 to 60 %, 80 to 95 %), because S9's step is a tenth of the ceiling. The limit must not depend
+// on where an observer draws those lines.
+//
+// TWO PHOTOMETERS, mirrored from the logics fork. The first reads each LED's brightest channel, so
+// a red or blue field counts as much as a white one. The second reads colour: the field's
+// luminance for (h), as the gate defines it (per LED (54 r + 183 g + 19 b) >> 8, then the mean),
+// with the three wide pairs; and the field's mean chromaticity for (i), for five observers, each
+// with its own idea of when the field is lit enough to have a colour.
 //
 // Two kinds of stream, mirrored from the logics fork's test_contract_property.cpp:
 //   * HOSTILE PROFILES: one per way a host was found able to flash a display, each a short script
@@ -75,7 +87,7 @@ static const char* pick(std::initializer_list<const char*> l) { return *(l.begin
 // onset on a native frame is the look's own and is set aside (counted in `own`, never in the
 // limit). Frames the contract draws are counted as ever, and nothing else is excluded.
 struct Onsets {
-  int darkPct = 10, litPct = 50;
+  int darkPct = 10, litPct = 50; bool lum = false;   // lum: this one reads luminance
   bool lit = false; uint32_t at[128]; long n = 0, total = 0, own = 0;
   bool armed = false;            // a contract edge came: the next native relight is the contract's
   int worst = 0; uint32_t minGap = 0xFFFFFFFFu;
@@ -98,8 +110,41 @@ struct Onsets {
 static uint32_t gNow = 0;
 static int gCeil = 20;                    // the owner's brightness in this stream
 static bool gButtons = false;             // this stream has an owner at the controller
-static Onsets gObs[3];
-static int gLevel = 0, gScale = 0, gLit = 0;
+static Onsets gObs[10];                   // (a): 0-2 wide, 3-6 narrow. (h): 7-9, on luminance
+// ---- (i): one observer of the field's colour ----
+// Below its dark level the field has no colour for it; the colour it sees when the field is lit
+// is compared with the one it saw last, and a different one is a change of look. On a native
+// look's frames (S10) only the change a contract edge makes is counted: the first lit frame after
+// the edge. What the look then does with its colours is its own.
+struct Colour {
+  int darkPct = 10, litPct = 50; bool lit = false, known = false, any = false, armed = false;
+  int chroma[3] = { 0, 0, 0 }; uint32_t at = 0;
+  int lastCode = -2;             // the native mode whose frame it last saw lit; -1: a frame the contract drew
+  // returns the gap to the last counted change when this frame is one, else 0xFFFFFFFF
+  uint32_t see(int level, int ceil, long sr, long sg, long sb, uint32_t now, bool nativeFrame, bool edge, bool sameLook, int code) {
+    if (!nativeFrame) armed = false; else if (edge) armed = true;
+    if (!lit && level * 100 >= ceil * litPct) lit = true;
+    else if (lit && level * 100 <= ceil * darkPct) lit = false;
+    const long top = sr > sg ? (sr > sb ? sr : sb) : (sg > sb ? sg : sb);
+    if (!lit || top == 0) return 0xFFFFFFFFu;      // too dim to have a colour, for this one
+    const int c[3] = { (int)(sr * 255 / top), (int)(sg * 255 / top), (int)(sb * 255 / top) };
+    int far = 0;
+    for (int i = 0; i < 3; i++) { const int d = c[i] > chroma[i] ? c[i] - chroma[i] : chroma[i] - c[i]; if (d > far) far = d; }
+    uint32_t gap = 0xFFFFFFFFu;
+    // Back on the native look it last saw lit (only black in between: X, then the look again):
+    // the same look, moved on by itself. S11 calls that no change, and so does the look gate.
+    const bool counts = (!nativeFrame || armed) && !sameLook && !(nativeFrame && code == lastCode);
+    lastCode = nativeFrame ? code : -1;
+    armed = false;                                  // the first lit frame after the edge was this one
+    if (known && far > 96 && counts) { if (any) gap = now - at; at = now; any = true; }
+    for (int i = 0; i < 3; i++) chroma[i] = c[i];
+    known = true;
+    return gap;
+  }
+};
+static Colour gCol[5];
+static uint32_t gColourGap = 0xFFFFFFFFu; static long gColourChanges = 0; static bool gWasMeter = false;
+static int gLevel = 0, gScale = 0, gLit = 0; static long gRgbKey = -1;
 static long gOverCeiling = 0, gNotNative = 0, gNotDark = 0, gNotButton = 0, gWdLate = 0, gOffList = 0, gReached = 0;
 static long gDarkChecked = 0, gNativeChecked = 0, gButtonChecked = 0, gContractFrames = 0, gLines = 0, gPresses = 0;
 static bool gExpectNative = false, gExpectDark = false; static uint32_t gNativeFrom = 0, gDarkFrom = 0;
@@ -125,35 +170,63 @@ static void broke(const char* why) {
 // Is the panel a native look's (the board's own, or a native:<n> a show selected)?
 static bool nativeHasPanel() { return !g_owned || (g_u.base == CB_NATIVE && !g_u.pulseActive); }
 static void hook(const CRGB* l, int n, uint8_t scale) {
-  long sum = 0; int lit = 0;
+  long sum = 0, sr = 0, sg = 0, sb = 0, sy = 0; int lit = 0;
   for (int i = 0; i < n; i++) {
     int m = l[i].r; if (l[i].g > m) m = l[i].g; if (l[i].b > m) m = l[i].b;
     sum += m; if (m) lit++;
+    sr += l[i].r; sg += l[i].g; sb += l[i].b; sy += (54 * l[i].r + 183 * l[i].g + 19 * l[i].b) >> 8;
   }
   const int level = (int)((sum * scale) / ((long)n * 255));
-  if (gTrace && (level != gLevel || scale != gScale)) {
-    char b[160]; snprintf(b, sizeof b, "frame level %3d scale %3u lit %2d%s   [gate: %s ref %u onset %u ceil %u]", level, scale, lit,
-                          g_owned ? " (contract)" : "", g_u.fieldLit ? "lit" : "not lit", g_u.fieldRef, g_u.fieldOnsetMs, g_u.ceil);
+  const int luminance = (int)((sy * scale) / ((long)n * 255));
+  const long rgbKey = (sr / 256) * 1000000 + (sg / 256) * 1000 + sb / 256;
+  if (gTrace && (level != gLevel || scale != gScale || rgbKey != gRgbKey)) {
+    char b[200]; snprintf(b, sizeof b, "frame level %3d lum %3d scale %3u lit %2d rgb %02lx%02lx%02lx%s   [gate: %s ref %u, lum %s ref %u, onset %u, look %u, ceil %u]",
+                          level, luminance, scale, lit, sr / n, sg / n, sb / n, g_owned ? " (contract)" : "",
+                          g_u.fieldLit ? "lit" : "not lit", g_u.fieldRef, g_u.fieldLitY ? "lit" : "not lit", g_u.fieldRefY,
+                          g_u.fieldOnsetMs, g_u.lookMs, g_u.ceil);
     logf(b);
   }
+  gRgbKey = rgbKey;
   gLevel = level; gScale = scale; gLit = lit; gFrameMs = gNow;
   // A native frame: the board's own look, or a native:<n> a show selected (not an accent overlay
   // still up from the section before it: that is the contract's own drawing). Its edges: the
   // drawer or the look changed since the last frame, a line restarted the look, or a show raised
   // the brightness it gives the look.
   const bool nativeFrame = nativeHasPanel();
-  const long sig = ((long)nativeFrame << 25) | ((long)g_owned << 24) | ((long)g_u.base << 16) | ((long)(g_u.nativeCode & 0xFF) << 8) |
-                   (long)(g_u.curSection & 0xFF);
+  // (Not the section cursor: a section that applies the look the unit already has does not restart it, S11.)
+  const long sig = ((long)nativeFrame << 25) | ((long)g_owned << 24) | ((long)g_u.base << 16) | ((long)(g_u.nativeCode & 0xFF) << 8);
   const int handed = (g_owned && g_u.base == CB_NATIVE) ? tempGlobalBrightnessValue : 0;
-  bool edge = gEdge || sig != gSig || handed > gHanded;
-  if (gPassesSincePress <= 2) edge = false;         // a native command: the owner's light, not an edge
+  bool edgeLook = sig != gSig;                      // the drawer or the look changed: an edge for (a) and for (i)
+  bool edge = edgeLook || gEdge || handed > gHanded;   // ...a line that may restart a native look, or more
+                                                    // brightness for one: edges for (a) (the next relight)
+  if (gPassesSincePress <= 2) edge = edgeLook = false;   // a native command: the owner's light, not an edge
   gEdge = false; gSig = sig; gHanded = handed;
+  // S10: Leia (6) and Knight Rider (15) move a lit area under a quarter of the field. That is not
+  // a field onset, whoever started the look and whenever: nothing on their frames is counted.
+  const int nativeCode = g_owned ? g_u.nativeCode : lastPSIeventCode;
+  const bool smallArea = nativeFrame && (nativeCode == 6 || nativeCode == 15);
+  if (smallArea) edge = edgeLook = false;
   for (Onsets& o : gObs) {
     const int before = o.worst; const uint32_t gap = o.minGap; const long own = o.own;
-    o.see(level, gCeil, gNow, nativeFrame, edge);
+    if (smallArea) o.armed = false;
+    o.see(o.lum ? luminance : level, gCeil, gNow, nativeFrame, edge);
     if (gTrace && o.own > own && &o == &gObs[0]) logf("   (that light is the native look's own: set aside)");
     if (o.worst > 3 && before <= 3) broke("a fourth onset in one second");
-    if (o.minGap < 340 && gap >= 340) broke("two onsets under 340 ms apart");
+    if (o.minGap < 340 && gap >= 340) broke(o.lum ? "two luminance onsets under 340 ms apart" : "two onsets under 340 ms apart");
+  }
+  // The contract's meter look is one look in three colours (green rows, then yellow, then red):
+  // its mean colour moves with its bars. From one meter frame to the next that is the look's own
+  // texture, not a change of look; into the meter and out of it is counted as ever.
+  const bool meter = !nativeFrame && g_u.base == CB_LOOK && !g_u.pulseActive && g_u.effect == CE_METER;
+  const bool sameLook = meter && gWasMeter;
+  gWasMeter = meter;
+  for (Colour& k : gCol) {
+    if (smallArea) k.armed = false;
+    const uint32_t gap = k.see(level, gCeil, sr, sg, sb, gNow, nativeFrame, edgeLook, sameLook, nativeCode);
+    if (gap == 0xFFFFFFFFu) continue;
+    if (&k == &gCol[0]) gColourChanges++;
+    if (gTrace) { char b[96]; snprintf(b, sizeof b, "   (a change of colour for observer %d, %u ms after its last)", (int)(&k - gCol), gap); logf(b); }
+    if (gap < gColourGap) { gColourGap = gap; if (gap < STROBE_MIN_STATE_MS) broke("two changes of colour under 170 ms apart"); }
   }
   if (g_owned) { gContractFrames++; if (scale > gCeil) { gOverCeiling++; broke("a contract frame above the ceiling"); } }
   // (f): S7. The show never runs a native mode that is off the allow-list.
@@ -192,7 +265,9 @@ static void deliver(const std::string& line) {
   // A line that (re)starts a native:<n> look is an edge even when nothing else about the panel's
   // drawer changes (the same code again). No other line is one by itself: what it does to a
   // native look shows as a change of drawer, of look or of the brightness handed to it.
-  if (p.verb == CV_ANIMATE && !p.params.hasAt && p.params.hasEffect && p.params.effect == CE_NATIVE) gEdge = true;
+  // (A line naming a code that is off the allow-list is dropped whole: no edge.)
+  if (p.verb == CV_ANIMATE && !p.params.hasAt && p.params.hasEffect && p.params.effect == CE_NATIVE &&
+      nativeAllowedPsi(p.params.nativeCode)) gEdge = true;
   if (p.verb == CV_CLOCK) { expectUnknown(); return; }                 // a score may start to play
   if (p.verb == CV_VERIFY) {
     gWdSure = false;
@@ -227,10 +302,15 @@ static void step(uint32_t ms = 1) {
   // watchdog. The panel goes back to native. (Not a native command: that ends the show when it is
   // read, or, on the I2C build, at the start of the pass after.)
   gPassesSincePress++;
-  if (was && !g_u.inShow && gPassesSincePress > 2) { expectNative(); gEdge = true; }
+  // (An edge, unless the native look's first frame came in this same pass: then it has been seen as one.)
+  if (was && !g_u.inShow && gPassesSincePress > 2) { expectNative(); if (gFrameMs != gNow) gEdge = true; }
   // The firmware reads the native command now, and what it draws from here on is the owner's
   // light, not the contract's onset: the observers start counting afresh.
-  if (gPressed) { gPressed = false; gEdge = false; for (Onsets& o : gObs) { o.n = 0; o.armed = false; } }
+  if (gPressed) {
+    gPressed = false; gEdge = false;
+    for (Onsets& o : gObs) { o.n = 0; o.armed = false; }
+    for (Colour& k : gCol) k.known = k.any = k.armed = false;   // ...nor the contract's change of look
+  }
   serialEventRun();
   while (!gQueue.empty()) { deliver(gQueue.front()); gQueue.pop_front(); }
   // L2: the watchdog must have fired by now (it is looked at once a frame; a slow pass is 40 ms).
@@ -258,7 +338,11 @@ static void step(uint32_t ms = 1) {
 }
 static void begin(int ownerBright, bool alwaysOn) {
   gCeil = ownerBright;
-  gObs[1].darkPct = 19; gObs[1].litPct = 75; gObs[2].darkPct = 4; gObs[2].litPct = 31;
+  static const int kBand[10][2] = { { 10, 50 }, { 19, 75 }, { 4, 31 }, { 3, 15 }, { 40, 52 }, { 45, 60 }, { 80, 95 },
+                                    { 10, 50 }, { 19, 75 }, { 4, 31 } };
+  for (int i = 0; i < 10; i++) { gObs[i].darkPct = kBand[i][0]; gObs[i].litPct = kBand[i][1]; gObs[i].lum = i >= 7; }
+  static const int kColour[5][2] = { { 10, 50 }, { 19, 75 }, { 4, 31 }, { 3, 15 }, { 45, 60 } };
+  for (int i = 0; i < 5; i++) { gCol[i].darkPct = kColour[i][0]; gCol[i].litPct = kColour[i][1]; }
   g_avr_next = 1; g_mock_analog = 512; g_mock_pins[JUMP_FRONT_REAR] = 1;      // a front PSI
   EEPROM.mem[alwaysOnAddress] = alwaysOn ? 0x01 : 0x00; EEPROM.mem[externalPOTAddress] = 0x01;
   EEPROM.mem[internalBrightnessAddress] = (uint8_t)ownerBright;
@@ -392,6 +476,38 @@ static const Profile kProfiles[] = {
              snprintf(l, sizeof l, "PFA:i=native:0,s=255,at=%d", b + 1); tx(l); }
            tx("**C:bpm=120,ph=0,bpb=4,beat=0"); },
     [](uint32_t t) { if (t == 0) tx("**C:bpm=120,ph=0,bpb=4,beat=0"); }, 11900 },
+  // ---- what the brightest channel cannot see, and what a quarter-of-the-ceiling step let through ----
+  { "C seeks between a white and a blue section (the brightest channel never moves)",
+    []() { pShow(); tx("PFA:i=solid,c=ffffff,at=0"); tx("PFA:i=solid,c=0000ff,at=100"); },
+    [](uint32_t t) { if (t == 0) tx("P*C:bpm=120,beat=100"); if (t == 50) tx("P*C:bpm=120,beat=0"); }, 100 },
+  { "C seeks between a red and a blue section",
+    []() { pShow(); tx("PFA:i=solid,c=ff0000,at=0"); tx("PFA:i=solid,c=0000ff,at=100"); },
+    [](uint32_t t) { if (t == 0) tx("P*C:bpm=120,beat=100"); if (t == 50) tx("P*C:bpm=120,beat=0"); }, 100 },
+  { "C seeks between a native section and a red one", []() { pShow(); tx("PFA:i=native:18,at=0"); tx("PFA:i=solid,c=ff0000,at=100"); },
+    [](uint32_t t) { if (t == 0) tx("P*C:bpm=120,beat=100"); if (t == 50) tx("P*C:bpm=120,beat=0"); }, 100 },
+  { "a white accent between two colours of a live look", []() { pShow(); tx("PFA:i=solid,c=ff0000"); },
+    [](uint32_t t) { if (t == 0) tx("PFP:c=ffffff,d=170"); if (t == 20) tx("PFA:i=solid,c=0000ff"); if (t == 340) tx("PFP:c=ffffff,d=300");
+                     if (t == 360) tx("PFA:i=solid,c=ff0000"); }, 680 },
+  { "white by a colour change, X, white again by an accent (two luminance onsets, one brightness onset)",
+    []() { pShow(); tx("PFA:i=solid,c=0000ff"); },
+    [](uint32_t t) { if (t == 0) tx("PFA:i=solid,c=ffffff"); if (t == 10) tx("PFX"); if (t == 20) tx("PFP:c=ffffff,d=170");
+                     if (t == 200) tx("PFA:i=solid,c=0000ff"); }, 400 },
+  { "live A between red and blue, as fast as it can be sent", pShow,
+    [](uint32_t t) { if (t == 0) tx("PFA:i=solid,c=ff0000"); if (t == 30) tx("PFA:i=solid,c=0000ff"); }, 60 },
+  // I heart U flashes by itself (once in 1,040 ms): X and a relight just after its own ON edge.
+  { "native:7 (it flashes by itself), X and a relight just after its own ON edge", []() { pShow(); tx("PFA:i=native:7"); },
+    [](uint32_t t) { if (t == 510) tx("PFX"); if (t == 520) tx("PFA:i=solid,c=ffffff"); if (t == 690) tx("PFA:i=native:7"); }, 1205 },
+  { "B between 0 and 63 (under a quarter of the ceiling)", []() { pShow(); tx("PFA:i=solid,c=ffffff"); },
+    [](uint32_t t) { if (t == 0) tx("PFB:b=0"); if (t == 50) tx("PFB:b=63"); }, 100 },
+  { "B between 192 and 255 (the top quarter)", []() { pShow(); tx("PFA:i=solid,c=ffffff"); },
+    [](uint32_t t) { if (t == 0) tx("PFB:b=192"); if (t == 50) tx("PFB:b=255"); }, 100 },
+  { "the top fifth of a meter following L", []() { pShow(); tx("PFA:i=meter,c=ffffff"); tx("P*L:v=255"); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=204"); if (t == 50) tx("P*L:v=255"); }, 100 },
+  // Looks whose own animation moves the colour, at their fastest: the hue goes round, and with it
+  // the luminance (blue is a twentieth of green), while the brightest channel stays where it is.
+  { "rainbow at its fastest", []() { pShow(); tx("PFA:i=rainbow,s=255"); }, [](uint32_t) {}, 1000 },
+  { "colorcycle at its fastest", []() { pShow(); tx("PFA:i=colorcycle,s=255"); }, [](uint32_t) {}, 1000 },
+  { "gradient at its fastest", []() { pShow(); tx("PFA:i=gradient,s=255"); }, [](uint32_t) {}, 1000 },
   { "B 0/255 under a native look", []() { pShow(); tx("PFA:i=native:17"); },
     [](uint32_t t) { if (t == 0) tx("PFB:b=0"); if (t == 50) tx("PFB:b=255"); }, 100 },
   { "the pump under a native look at 300 BPM", []() { pShow(); tx("PFA:i=native:16,m=255,am=2"); tx("**C:bpm=300,ph=0,bpb=4,beat=0"); },
@@ -403,10 +519,17 @@ static const Profile kProfiles[] = {
 static const int kProfileCount = (int)(sizeof kProfiles / sizeof kProfiles[0]);
 
 struct Result {
-  int worst = 0; uint32_t minGap = 0xFFFFFFFFu; long overCeiling = 0, notNative = 0, notDark = 0, wdLate = 0, notButton = 0, offList = 0, reached = 0;
+  int worst = 0; uint32_t minGap = 0xFFFFFFFFu, narrowGap = 0xFFFFFFFFu, lumGap = 0xFFFFFFFFu, colourGap = 0xFFFFFFFFu;
+  long overCeiling = 0, notNative = 0, notDark = 0, wdLate = 0, notButton = 0, offList = 0, reached = 0, colourChanges = 0, lumOnsets = 0;
   long onsets = 0, own = 0, darkChecked = 0, nativeChecked = 0, contractFrames = 0, lines = 0, presses = 0, buttonChecked = 0;
   void take() {
-    for (const Onsets& o : gObs) { if (o.worst > worst) worst = o.worst; if (o.minGap < minGap) minGap = o.minGap; }
+    for (int i = 0; i < 10; i++) {
+      const Onsets& o = gObs[i];
+      if (o.worst > worst) worst = o.worst;
+      uint32_t& g = i < 3 ? minGap : (i < 7 ? narrowGap : lumGap);
+      if (o.minGap < g) g = o.minGap;
+    }
+    colourGap = gColourGap; colourChanges = gColourChanges; lumOnsets = gObs[7].total;
     overCeiling = gOverCeiling; notNative = gNotNative; notDark = gNotDark; wdLate = gWdLate; notButton = gNotButton; offList = gOffList; reached = gReached;
     onsets = gObs[0].total; own = gObs[0].own; darkChecked = gDarkChecked; nativeChecked = gNativeChecked; contractFrames = gContractFrames;
     lines = gLines; presses = gPresses; buttonChecked = gButtonChecked;
@@ -414,18 +537,26 @@ struct Result {
   void add(const Result& o) {
     if (o.worst > worst) worst = o.worst;
     if (o.minGap < minGap) minGap = o.minGap;
+    if (o.narrowGap < narrowGap) narrowGap = o.narrowGap;
+    if (o.lumGap < lumGap) lumGap = o.lumGap;
+    if (o.colourGap < colourGap) colourGap = o.colourGap;
+    colourChanges += o.colourChanges; lumOnsets += o.lumOnsets;
     overCeiling += o.overCeiling; notNative += o.notNative; notDark += o.notDark; wdLate += o.wdLate; notButton += o.notButton;
     offList += o.offList; reached += o.reached;
     onsets += o.onsets; own += o.own; darkChecked += o.darkChecked; nativeChecked += o.nativeChecked; contractFrames += o.contractFrames;
     lines += o.lines; presses += o.presses; buttonChecked += o.buttonChecked;
   }
   bool holds() const {
-    return worst <= 3 && minGap >= 2 * STROBE_MIN_STATE_MS && overCeiling == 0 && notNative == 0 && notDark == 0 && wdLate == 0 &&
+    return worst <= 3 && minGap >= 2 * STROBE_MIN_STATE_MS && narrowGap >= 2 * STROBE_MIN_STATE_MS &&
+           lumGap >= 2 * STROBE_MIN_STATE_MS && colourGap >= STROBE_MIN_STATE_MS && overCeiling == 0 && notNative == 0 && notDark == 0 && wdLate == 0 &&
            notButton == 0 && offList == 0 && reached == 0;
   }
   void print(const char* verdict, const char* name) const {
     printf("%s S9 %s: %d onsets in one second", verdict, name, worst);
     if (minGap != 0xFFFFFFFFu) printf(" (closest two %u ms apart)", minGap);
+    if (narrowGap < 2 * STROBE_MIN_STATE_MS) printf(", narrow-band onsets %u ms apart", narrowGap);
+    if (lumGap < 2 * STROBE_MIN_STATE_MS)    printf(", luminance onsets %u ms apart", lumGap);
+    if (colourGap < STROBE_MIN_STATE_MS)     printf(", colour changes %u ms apart", colourGap);
     if (notDark)     printf(", %ld ms lit after X", notDark);
     if (notNative)   printf(", %ld ms not native after idle", notNative);
     if (overCeiling) printf(", %ld frames over the ceiling", overCeiling);
@@ -460,13 +591,14 @@ static void runJob(int job, uint32_t seed) {
   const int owner = rnd(3) == 0 ? (int)(20 + rnd(181)) : 20;
   begin(owner, gButtons);                          // with an owner: alwaysOn, so a native mode keeps running
   const uint32_t busy = 20 + rnd(300);             // one line every `busy` ms on average
+  const bool fine = rnd(4) == 0;                   // a quarter pass through the loop every 1 to 4 ms, not every 1
   for (uint32_t t = 0; t < 12000; ) {
     if (rnd(busy) == 0) { const bool burst = rnd(8) == 0; for (uint32_t n = 1 + (burst ? rnd(12) : 0); n > 0; n--) tx(randomLine()); }
     if (gButtons && rnd(3500) == 0) {              // about three native commands a stream
       static const int kMode[] = { 1, 1, 15, 15, 0, 16, 17, 18, 21 };
       press(kMode[rnd(9)]);
     }
-    const uint32_t slow = rnd(200) == 0 ? 10 + rnd(4) * 10 : 1;   // now and then a slow pass
+    const uint32_t slow = rnd(200) == 0 ? 10 + rnd(4) * 10 : (fine ? 1 + rnd(4) : 1);   // now and then a slow pass
     step(slow); t += slow;
   }
 }
@@ -521,5 +653,7 @@ int main() {
          "   after X, %ld ms checked native after idle, %ld native commands and %ld ms checked on their mode. Seed %u.\n",
          kProfileCount, kRounds, streams, all.lines, all.contractFrames, all.onsets, all.minGap, all.own, all.darkChecked,
          all.nativeChecked, all.presses, all.buttonChecked, seed);
+  printf("   (narrow-band onsets: the closest two %u ms apart; luminance onsets: %ld, the closest two %u ms apart;\n"
+         "   colour changes: %ld, the closest two %u ms apart)\n", all.narrowGap, all.lumOnsets, all.lumGap, all.colourChanges, all.colourGap);
   return 0;
 }

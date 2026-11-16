@@ -320,9 +320,11 @@ for bin in psi_timeline psi_timeline_nocontract psi_timeline_all psi_timeline_i2
 done
 
 echo "[6e] contract S9 as a property: hostile and random line streams, the frames measured"
-# test_property.cpp: 23 hostile profiles x 8 rounds and 1500 random streams, each in a fresh copy
-# of the firmware, as the default environment builds it (the one with the contract layer). Dark-to-lit onsets (at most 3 a second, never two inside
-# 340 ms; on a native look's frames, the ones a contract edge led to), nothing above the owner's
+# test_property.cpp: 36 hostile profiles x 8 rounds and 1500 random streams, each in a fresh copy
+# of the firmware, as the default environment builds it (the one with the contract layer).
+# Dark-to-lit onsets (at most 3 a second, never two inside 340 ms; on a native look's frames, the
+# ones a contract edge led to), counted by seven observers of the brightest channel and three of
+# luminance; changes of colour (never two inside 170 ms), by five; nothing above the owner's
 # brightness, dark after X, native after idle, a native command keeps the panel, and no line
 # writes into a native look.
 for cfg in "-DPSI_NO_STRIP_LOOKS"; do
