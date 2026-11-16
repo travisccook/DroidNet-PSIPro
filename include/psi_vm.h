@@ -942,6 +942,21 @@ static uint8_t g_vmRuntime;          // descriptor runtime seconds
 static uint8_t g_vmFlags;
 static bool    g_vmDone;             // oneshot finished (hold display)
 
+// The CURRENT mode is a program that has run to its end and holds its last frame (the lightsaber
+// battle under alwaysOn): it draws nothing more. When the contract layer gives the panel back to
+// such a mode the LEDs hold the contract's frame and nothing would ever replace it, so the layer
+// plays the program again from its first step: vmReplayIfEnded(). (Not through firstTime:
+// runPattern() clears that for a mode that is already current. runPattern() also clears g_vmDone
+// when another mode starts, so that this is always about the current one.)
+static inline void vmReplayIfEnded() {
+  // ...or is about to end: its last frame is drawn and only the OP_END that ends it is left (the
+  // battle's last hold is 500 ms long, and a pulse that comes in it finds the program not ended).
+  if (!g_vmDone && !((g_vmFlags & VMF_ONESHOT) && pgm_read_byte(g_vmPC) == OP_END)) return;
+  g_vmDone = false;
+  g_vmPC = g_vmLoopPtr;              // a oneshot has no loop start: this is its first byte
+  g_vmRepLeft = 0;
+}
+
 static void vmShowDelay(uint16_t d) {
   FastLED.show(brightness());
   set_delay(d);
@@ -1257,6 +1272,7 @@ inline void vmPlay(uint8_t progId) {
     if (!alwaysOn) {
       lastPSIeventCode = defaultPattern;
       patternRunning = false;
+      g_vmDone = false;              // the mode is no longer current (vmReplayIfEnded is about the current one)
     }
   } else if ((g_vmRuntime == 0) && (!timingReceived)) {
     if (g_vmDescLoops) loopsDonedoRestoreDefault();

@@ -254,6 +254,15 @@ static PSI_NOINLINE void _givePanelBack() {
     lastPSIeventCode = defaultPattern;
     patternRunning = false;
     timingReceived = false;
+  } else {
+    // The mode that was running gets the panel back as it is (a pulse over it, L3; the owner's
+    // command, L6). What the contract drew is still in the frame buffer and on the LEDs, and not
+    // every mode replaces it: short circuit (4) fades whatever the buffer holds, and a program
+    // that has ended (the lightsaber battle under alwaysOn) draws nothing at all. So the buffer
+    // is cleared, and a mode that has ended plays again; the panel would otherwise keep the
+    // contract's light with nothing left that owns it.
+    FastLED.clear();
+    vmReplayIfEnded();
   }
   g_owned = false;
 }
@@ -310,6 +319,15 @@ static inline void _serviceYield() { if (g_yieldPending) { g_yieldPending = fals
 inline void contractYieldToNative() { _yieldNow(); }
 static inline void _serviceYield() { }
 #endif
+// D and A (main.cpp doDcommand): upstream runs the default pattern for ANY address. true: do that.
+// A D addressed to this PSI (0, 4 front, 5 rear) is its owner's: the show ends first (L6). A D for
+// another board changes nothing here while the contract has the panel or a show is armed (a logic
+// display's 3D on a shared line ended a scored show: review finding 4); with no show it does what
+// upstream does.
+inline bool contractYieldForD(int address) {
+  if (address == 0 || address == (psiJumperOpen() ? 4 : 5)) { contractYieldToNative(); return true; }
+  return !g_owned && !g_u.inShow;
+}
 
 // Verb L feeds the contract's OWN meter look, and only while the contract is drawing it. The fed
 // level is kept here and goes into level[] (main.cpp) when the contract runs VUMeter() for
@@ -351,32 +369,39 @@ inline bool contractHoldsLevels() {
 //     would count as an onset, only the last one, before the contract's first frame after it.
 //     Then a rise the contract makes from there is the onset it is, and a native look's own
 //     light keeps the contract's next onset at its distance.
-// The measures are computed exactly, floor(sum * scale / (n * 255)): at a low brightness a unit
-// of level is several percent of the ceiling, and a measure that rounded twice would miss a rise
-// an observer can see. 48 LEDs, two sums, four divides; nothing here blocks.
+// The measures are of what goes out on the wire: each channel as the LED driver scales it,
+// channel * (scale + 1) >> 8 (scale8, include/FastLED.h), then each LED's brightest channel and its
+// luminance, then the mean. At a low brightness a level is several percent of the ceiling: a
+// measure that rounded another way (the whole frame's sum times scale / 255, as this was at
+// first) was a level off the wire now and then, and took a real rise for texture (review
+// finding 6). 48 LEDs, three multiplies each; nothing here blocks.
 #ifndef PSI_FRAME_GATE_WIRED
 #error "FastLED.h was included before main.cpp named PSI_FRAME_GATE: frames would skip the S9 gate"
 #endif
-static PSI_NOINLINE uint8_t _fieldOf(uint16_t sum, uint8_t scale) {
-  return (uint8_t)((uint16_t)(((uint32_t)sum * scale) / 255u) / NUM_LEDS);
+static uint8_t g_mLevel, g_mLum;                       // what _measure() found
+static PSI_NOINLINE void _measure(const CRGB* l, uint8_t n, uint8_t scale) {
+  uint16_t sum = 0, sumY = 0;                          // 48 * 255 fits
+  const uint16_t k = (uint16_t)scale + 1u;
+  for (uint8_t i = 0; i < n; i++) {
+    const uint8_t r = (uint8_t)((l[i].r * k) >> 8), g = (uint8_t)((l[i].g * k) >> 8), b = (uint8_t)((l[i].b * k) >> 8);
+    uint8_t m = r;
+    if (g > m) m = g;
+    if (b > m) m = b;
+    sum += m;
+    sumY += contractLuminance(r, g, b);
+  }
+  g_mLevel = (uint8_t)(sum / n); g_mLum = (uint8_t)(sumY / n);
 }
 uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
   const bool drawn = g_owned && (g_u.base != CB_NATIVE || g_u.pulseActive);     // the contract drew this frame itself
   if (drawn && scale > g_u.ceil) scale = g_u.ceil;
-  uint16_t sum = 0, sumY = 0;                          // 48 * 255 fits
-  for (uint8_t i = 0; i < n; i++) {
-    uint8_t m = l[i].r;
-    if (l[i].g > m) m = l[i].g;
-    if (l[i].b > m) m = l[i].b;
-    sum += m;
-    sumY += contractLuminance(l[i].r, l[i].g, l[i].b);
-  }
+  _measure(l, n, scale);
   const uint32_t now = millis();
 #ifdef PSI_ENABLE_I2C
   const uint8_t sreg = SREG;                           // a native frame can be drawn from the TWI
   cli();                                               // interrupt: keep the gate's state whole
 #endif
-  uint8_t level = _fieldOf(sum, scale), lum = _fieldOf(sumY, scale);
+  const uint8_t level = g_mLevel, lum = g_mLum;
   const bool reports = !drawn && _nativeReports(g_owned ? g_u.nativeCode : lastPSIeventCode);
   if (g_seenNative && (drawn || reports)) {            // what Leia or Knight Rider left on the LEDs
     contractFieldTell(g_u, g_seenLevel, g_seenLum, now);
@@ -411,9 +436,9 @@ uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
     const uint8_t ask = contractFieldAsk(g_u, level, lum, now);
     if (ask != 255) {
       scale = (uint8_t)(((uint16_t)scale * ask) / 255u);                        // rounds down
-      level = _fieldOf(sum, scale); lum = _fieldOf(sumY, scale);
+      _measure(l, n, scale);                           // what goes out, as it goes out
     }
-    contractFieldTell(g_u, level, lum, now);
+    contractFieldTell(g_u, g_mLevel, g_mLum, now);
   }
 #ifdef PSI_ENABLE_I2C
   SREG = sreg;
@@ -542,7 +567,13 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
     case CE_METER:                                                          // level[] fed by verb L
       g_meterMine = true;
       if (contractHoldsLevels()) for (uint8_t c = 0; c < COLUMNS; c++) level[c] = g_levelRows;
-      VUMeter(d, 0, 0);
+      // The bars are redrawn every 170 ms at the fastest (the native meter: every 250 ms), whatever
+      // s= asks for (review finding 1). The top rows are a region of the panel like any other, and
+      // the gate sees only the whole field: at 20 ms a step, L alternating between half and full
+      // blinked the top half ten times a second, and with no level feed the random walk did the
+      // same. Drawn 170 ms apart at the least, a region that goes dark and lights again does it
+      // 340 ms after it last lit.
+      VUMeter(d < STROBE_MIN_STATE_MS ? (uint16_t)STROBE_MIN_STATE_MS : d, 0, 0);
       g_meterMine = false;
       break;
     case CE_NATIVE:  runPattern(g_u.nativeCode);                    break;
@@ -814,6 +845,7 @@ inline bool contractLoopTick() {
       if (!contractNativeMayStart(g_u, g_u.nativeCode, level, now)) return true;
       _nativeEdge(1, g_u.nativeCode);
       firstTime = true;                                // re-init the native state machines
+      timingReceived = false;                          // not with a |timing the owner once gave another command
       g_lastEffect = eff;
     } else if (level != g_nativeLevel) {
       // The show moves its brightness (B, b=, the pump). Every native mode draws at brightness().

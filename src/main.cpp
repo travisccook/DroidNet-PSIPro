@@ -389,6 +389,7 @@ static inline void contractServicePending()  { }
 static inline void contractPulseTick()       { }
 static inline void contractReplyTick()       { }
 static inline void contractYieldToNative()   { }
+static inline bool contractYieldForD(int)    { return true; }    // upstream: D and A reset, whatever the address
 static inline void contractOwnerSet3P()      { }
 static inline bool contractHoldsLevels()     { return false; }
 #endif
@@ -931,6 +932,7 @@ void runPattern(int pattern) {
   {
     lastPSIeventCode = pattern;
     firstTime = true;
+    g_vmDone = false;   // DroidNet: "the current mode's program has ended" (psi_vm.h) was about the old mode
   }
   else
   {
@@ -1319,7 +1321,10 @@ void doDcommand(int address)
   DEBUG_PRINT_LN(address); 
   */
 
-  contractYieldToNative();   // DroidNet: as doTcommand
+  // DroidNet: upstream resets on D and A whatever their address. A D for THIS PSI ends a contract
+  // show as a T does (L6). One for another board, while the contract has the panel, is left alone:
+  // on a shared line it is someone else's command, and it must not end this board's show.
+  if (!contractYieldForD(address)) return;
   runPattern(defaultPattern);
 }
 

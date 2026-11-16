@@ -306,8 +306,8 @@ What it buys:
 
 Six new parametric effects render along the panel's 10 columns as a 1-D strand: **comet, chase, wipe,
 gradient, colorcycle, twinkle**. Their math lives in the shared core and is host-tested, so the same
-cue renders the same way on every board in the family. (The I2C build draws these six as stand-ins;
-see "This fork is SERIAL-ONLY by default".)
+cue renders the same way on every board in the family. (R1's image draws these six as stand-ins and
+says so in its announce; see "This fork is SERIAL-ONLY by default".)
 
 **Every native command of the original firmware still works.** The whole JawaLite `<addr>T` / `A` /
 `D` / `xPy` grammar, all the modes 0-21 and 92, the pot, the EEPROM settings, the jumper. With no
@@ -424,8 +424,9 @@ WCB's port, 9600 baud):
   for a tree with uncommitted changes, or `unknown` built without git. `scripts/wdp_fw.py` sets it
   at build time; the images in `firmware/` carry their source commit.
 - **`caps`**: `droidnet.contract`, the Driveable-Animation Contract above, and the version the
-  build speaks: `contract.1.3`, or `contract.1.3s` from the I2C build, which draws six of the
-  contract's looks as stand-ins.
+  build speaks: `contract.1.3s` from the default (serial-only) build, which draws six of the
+  contract's looks as stand-ins (`contract.1.3` is a build with all of them, which no environment
+  links today). The I2C build has no contract layer and sends no `caps` at all.
 
 The WCB consumes the line; it is never forwarded to another port or board. The line goes out in
 pieces no bigger than the free room in the serial TX buffer, so the render loop never waits on it,

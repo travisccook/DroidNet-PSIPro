@@ -308,7 +308,9 @@ static void every_look_latches_frames() {
   runTo(1000 + 1000 * n);
   for (int k = 0; k < n; k++) {
     const uint32_t a = 1100 + 1000 * k, b = 1990 + 1000 * k;
-    CHECK(between(a, b).size() >= 5, "i=%s latched %u frames in 0.9 s", looks[k], (unsigned)between(a, b).size());
+    // (the meter is drawn every 170 ms at the fastest: 182 ms on the 26 ms frame grid, 4 or 5 frames here)
+    const unsigned least = !strcmp(looks[k], "meter") ? 4 : 5;
+    CHECK(between(a, b).size() >= least, "i=%s latched %u frames in 0.9 s", looks[k], (unsigned)between(a, b).size());
     if (k == 0) CHECK(mostLit(a, b) == 0, "i=off is dark");
     else        CHECK(mostLit(a, b) > 0, "i=%s lit nothing", looks[k]);
   }
@@ -1276,6 +1278,161 @@ static void a_native_look_started_dark_is_a_look_change_when_it_lights() {
   CHECK(red >= green + 170, "the native look lights %u ms after the look before it did; a change of look waits 170", red - green);
 }
 
+// ---- the independent review of R1 (2026-11-16): each finding as a scenario ------------------------
+// A scenario that needs several fresh firmwares runs each in a forked child; the child's verdict
+// comes back as its exit status (0: it held), what it printed is the reason.
+static bool inChild(void (*fn)(int), int arg) {
+  fflush(stdout);
+  const pid_t pid = fork();
+  if (pid == 0) { g_fails = 0; fn(arg); fflush(stdout); _exit(g_fails ? 1 : 0); }
+  int status = 0;
+  return pid > 0 && waitpid(pid, &status, 0) == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+static const int kListed[] = {0, 1, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 92};
+// A shade of magenta on the panel: no native mode draws one, so it is what a contract look left.
+static unsigned magentaLeds(const Frame& f) {
+  unsigned n = 0;
+  for (int i = 0; i < NUM_LEDS; i++) if (f.px[i].r != 0 && f.px[i].r == f.px[i].b && f.px[i].g == 0) n++;
+  return n;
+}
+// Review finding 2. With alwaysOn (the fork's default) a mode stays the board's own look after its
+// program has ended, and the lightsaber battle then draws nothing more. A pulse over it must not
+// stay on the panel: the board's look comes back, for every mode on the list, finished or not.
+static void pulseOverMode(int mode) {
+  char cmd[16]; snprintf(cmd, sizeof cmd, "0T%d", mode);
+  boot(0x01);
+  at(1000, cmd); at(20000, "!PFP:c=ff00ff,d=170");
+  runTo(26000);
+  CHECK(magentaLeds(shown(20100)) == 48, "the pulse lights over mode %d", mode);
+  for (const uint32_t t : {21500u, 23000u, 25900u})
+    CHECK(magentaLeds(shown(t)) == 0, "mode %d: %u LEDs still show the pulse %u ms after it", mode, magentaLeds(shown(t)), t - 20000);
+  CHECK(lastPSIeventCode == mode, "mode %d is still the board's look (it is %d)", mode, lastPSIeventCode);
+}
+static void a_pulse_never_stays_on_a_native_mode() {
+  for (int m : kListed) CHECK(inChild(pulseOverMode, m), "mode %d (above)", m);
+}
+// ...and L6: the owner sends the mode that is current, and finished, while a show has the panel.
+// The command takes the panel back (the show is over) and the mode plays again.
+static void sameModeOverAShow(int mode) {
+  char cmd[16]; snprintf(cmd, sizeof cmd, "0T%d", mode);
+  boot(0x01);
+  at(1000, cmd); at(20000, "!**M:v=show"); at(20100, "!P*A:i=solid,c=ff00ff"); at(21000, cmd);
+  runTo(27000);
+  CHECK(magentaLeds(shown(20900)) == 48, "the show's look is up over mode %d", mode);
+  for (const uint32_t t : {22500u, 24000u, 26900u})
+    CHECK(magentaLeds(shown(t)) == 0, "mode %d: %u LEDs still show the show's look %u ms after the command", mode, magentaLeds(shown(t)), t - 21000);
+}
+static void a_native_command_takes_the_panel_back_for_a_mode_that_had_ended() {
+  for (int m : kListed) CHECK(inChild(sameModeOverAShow, m), "mode %d (above)", m);
+}
+// Review finding 1. The meter's top rows follow L. L alternating between half and full, 20 times a
+// second, must not blink the top half of the panel: a region of a quarter of the field or more
+// lights at most once in 340 ms, like the whole field (S9, S10's test).
+static void l_cannot_blink_half_the_panel() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=meter,c=ffffff,s=255");
+  for (uint32_t t = 2000; t < 6000; t += 100) { at(t, "!P*L:v=255"); at(t + 50, "!P*L:v=128"); }
+  runTo(6500);
+  std::vector<uint32_t> on; bool lit = true;
+  for (const Frame& f : between(1900, 6100)) {
+    unsigned top = 0, n = 0;
+    for (int c = 0; c < COLUMNS; c++) for (int r = 0; r < 3; r++) { const int led = psiLed((uint8_t)c, (uint8_t)r); if (led < 0) continue; n++; if (f.px[led].r | f.px[led].g | f.px[led].b) top++; }
+    const bool dark = f.scale == 0 || top * 10 <= n, bright = f.scale >= 100 && top * 2 >= n;
+    if (!lit && bright) { on.push_back(f.t); lit = true; } else if (lit && dark) lit = false;
+  }
+  CHECK(on.size() >= 3, "the top half does follow L (%u times in 4 s)", (unsigned)on.size());
+  for (size_t k = 1; k < on.size(); k++) CHECK(on[k] - on[k - 1] >= 340, "the top half lit twice %u ms apart (t=%u)", on[k] - on[k - 1], on[k]);
+}
+// Review finding 4. D and A reset every PSI that hears them, whatever their address (upstream).
+// During a show a D for another board (3D is a logic display's, on a shared line) is not this
+// PSI's owner taking it back: the show plays on, and no frame of the swipe slips in. A D for this
+// PSI ends the show.
+static void a_d_for_another_board_does_not_end_the_show() {
+  boot();
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=solid,c=00ff00"); at(2000, "3D"); at(2500, "3A"); at(4000, "0D");
+  runTo(5000);
+  for (const Frame& f : between(1300, 3990))
+    if (!f.allAre(GREEN)) { CHECK(false, "t=%u: the show's look is gone (%u lit, px0 %02x%02x%02x)", f.t, f.lit, f.px[0].r, f.px[0].g, f.px[0].b); break; }
+  CHECK(swipeAt(4900), "0D ends the show: the swipe");
+}
+// Review finding 5. A |timing the owner gave an earlier command stays armed in upstream's state.
+// A native look a show starts must not inherit it: native:22 would be cut and restarted every
+// second. The look must run exactly as it does with no such command before it.
+static void nativeInAShow(int stale) {
+  boot(0x00);
+  if (stale) at(1000, "0T6|1");
+  at(4000, "!**M:v=show"); at(4100, "!P*A:i=native:22");
+  runTo(12000);
+  uint32_t h = 2166136261u; unsigned frames = 0;
+  for (const Frame& f : between(4500, 12000)) {
+    frames++;
+    h = (h ^ f.scale) * 16777619u; h = (h ^ (f.t & 0xFFFF)) * 16777619u;
+    for (int i = 0; i < NUM_LEDS; i++) { h = (h ^ f.px[i].r) * 16777619u; h = (h ^ f.px[i].g) * 16777619u; h = (h ^ f.px[i].b) * 16777619u; }
+  }
+  printf("  %s: %u frames, hash %08x\n", stale ? "after 0T6|1" : "with no command before", frames, h);
+  FILE* out = fopen(stale ? "/dev/fd/3" : "/dev/fd/4", "w");
+  if (out) { fprintf(out, "%08x %u\n", h, frames); fclose(out); }
+}
+static void a_stale_timing_does_not_cut_a_shows_native_look() {
+  int p[2][2]; char got[2][64] = {"", ""};
+  for (int k = 0; k < 2; k++) {
+    CHECK(pipe(p[k]) == 0, "pipe");
+    fflush(stdout);
+    const pid_t pid = fork();
+    if (pid == 0) { dup2(p[k][1], k ? 3 : 4); nativeInAShow(k); fflush(stdout); _exit(0); }
+    close(p[k][1]);
+    const ssize_t n = read(p[k][0], got[k], sizeof got[k] - 1); if (n > 0) got[k][n] = 0;
+    close(p[k][0]); int st; waitpid(pid, &st, 0);
+  }
+  CHECK(got[0][0] && !strcmp(got[0], got[1]), "native:22 in a show after 0T6|1 is not what it is without it (%s vs %s)", got[1], got[0]);
+}
+// Review, test quality (a). The gate has two measures. Dark, then blue, then white 171 ms later:
+// the brightest channel sees one onset (the blue), the luminance sees a second one (the white,
+// ten times the light). The white must wait until 340 ms after the blue lit.
+static void white_171_ms_after_blue_from_dark_waits_for_the_window() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=0000ff"); at(2171, "!P*A:i=solid,c=ffffff");
+  runTo(3000);
+  uint32_t blue = 0, white = 0;
+  for (const Frame& f : between(2000, 3000)) {
+    if (!blue && f.lit == 48 && f.px[0].b == 255 && f.px[0].r == 0 && f.scale >= 100) blue = f.t;
+    if (!white && f.allAre(WHITE) && f.scale >= 100) white = f.t;
+  }
+  CHECK(blue != 0 && white != 0, "blue, then white (blue t=%u, white t=%u)", blue, white);
+  CHECK(white >= blue + 340 && white <= blue + 340 + 27, "white at full level within a frame of 340 ms after the blue lit (t=%u), saw t=%u", blue + 340, white);
+}
+// Review, test quality (b). A C that seeks between a solid section and a scan section every 90 ms
+// would restart the scan each time if sections were applied at once: the scan would never leave
+// its first column. A section waits its 170 ms, and meanwhile the look that is up keeps moving.
+static void a_seek_storm_does_not_freeze_the_look() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=solid,c=00ff00,at=0"); at(1002, "!P*A:i=scan,c=00ff00,s=255,at=100");
+  for (uint32_t t = 1500; t < 6500; t += 180) { at(t, "!P*C:bpm=120,beat=100"); at(t + 90, "!P*C:bpm=120,beat=0"); }
+  runTo(7000);
+  bool seen[COLUMNS] = {false}; unsigned cols = 0;
+  for (const Frame& f : between(1500, 6500)) {
+    if (f.lit == 0 || f.lit == 48) continue;
+    for (int c = 0; c < COLUMNS; c++) { const int led = psiLed((uint8_t)c, 2); if (led >= 0 && f.px[led].g == 255 && !seen[c]) { seen[c] = true; cols++; } }
+  }
+  CHECK(cols >= 4, "the scan moves under the seeks: it reached %u columns in 5 s", cols);
+}
+// Review, test quality (c). Play 100 ms after Send: the swipe came back at the Send, so the first
+// beat's accent is a change of look inside 170 ms of it. It is not lost and not early: it shows
+// when the look may change, 170 ms after the swipe took the panel.
+static void play_at_once_after_send_accents_when_the_look_may_change() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=sparkle,c=00ff00,at=0,am=1,ae=solid,ac=ffffff"); at(1100, "!**C:bpm=60,bpb=4,beat=0");
+  at(2000, "!**M:v=show"); at(2001, "!P*A:i=sparkle,c=00ff00,at=0,am=1,ae=solid,ac=ffffff"); at(2100, "!**C:bpm=60,bpb=4,beat=0");
+  runTo(2600);
+  uint32_t swipe = 0;
+  for (const Frame& f : between(2000, 2100)) if (f.lit == 48 && !f.allAre(WHITE)) { swipe = f.t; break; }
+  const std::vector<uint32_t> on = onsets(2000, 2600, WHITE);
+  CHECK(swipe != 0, "the swipe is back at the second Send");
+  CHECK(on.size() == 1 && on[0] >= swipe + 170 && on[0] <= swipe + 170 + 27,
+        "the second show's first accent shows 170 ms after the swipe came back (t=%u): saw %u accent(s), the first at t=%u",
+        swipe + 170, (unsigned)on.size(), on.empty() ? 0 : on[0]);
+}
+
 // ---- core revision CA1.2: what a line may and may not do ---------------------------------------
 // A scored line delivered twice (a mesh retry) changes nothing: the section that is playing does
 // not restart. A DIFFERENT line for the same beat replaces the entry, and the look follows.
@@ -1431,6 +1588,14 @@ static const Scenario kScenarios[] = {
   {"white_after_blue_is_an_onset", white_after_blue_is_an_onset},
   {"a_rise_over_a_half_lit_native_mode_is_an_onset", a_rise_over_a_half_lit_native_mode_is_an_onset},
   {"a_native_look_started_dark_is_a_look_change_when_it_lights", a_native_look_started_dark_is_a_look_change_when_it_lights},
+  {"a_pulse_never_stays_on_a_native_mode", a_pulse_never_stays_on_a_native_mode},
+  {"a_native_command_takes_the_panel_back_for_a_mode_that_had_ended", a_native_command_takes_the_panel_back_for_a_mode_that_had_ended},
+  {"l_cannot_blink_half_the_panel", l_cannot_blink_half_the_panel},
+  {"a_d_for_another_board_does_not_end_the_show", a_d_for_another_board_does_not_end_the_show},
+  {"a_stale_timing_does_not_cut_a_shows_native_look", a_stale_timing_does_not_cut_a_shows_native_look},
+  {"white_171_ms_after_blue_from_dark_waits_for_the_window", white_171_ms_after_blue_from_dark_waits_for_the_window},
+  {"a_seek_storm_does_not_freeze_the_look", a_seek_storm_does_not_freeze_the_look},
+  {"play_at_once_after_send_accents_when_the_look_may_change", play_at_once_after_send_accents_when_the_look_may_change},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},
   {"a_bpm_that_is_not_a_number_is_ignored", a_bpm_that_is_not_a_number_is_ignored},
 #ifdef PSI_ENABLE_I2C

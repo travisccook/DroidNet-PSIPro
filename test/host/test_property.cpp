@@ -17,7 +17,13 @@
 //     (h) S9 in LUMINANCE (Rec.709), the same limit as (a): a change of colour moves the
 //         luminance while the brightest channel stays where it was (white to blue and back);
 //     (i) S11: changes its look or colour across the whole field at most once in 170 ms, whatever
-//         path asks (a live A, a section reached by time or by a seek, an accent, a hand-back).
+//         path asks (a live A, a section reached by time or by a seek, an accent, a hand-back);
+//     (j) the limit of (a) for a region: on the frames the contract draws, no half of the panel
+//         and no quadrant of it goes from dark to lit twice inside 340 ms (the top rows of a meter
+//         following L are such a region);
+//     (k) never leaves its own light on the panel with nothing that owns it: once the board's own
+//         look has the panel back, a frame the contract drew is replaced within 1.2 s,
+//         whatever mode that look is and whether or not its program has run to its end.
 //
 // What is measured is the frame on its way to the LEDs: the full-field level of every frame
 // FastLED.show() sends (the mean over the LEDs of each LED's brightest channel, times the master
@@ -26,6 +32,16 @@
 // 75 %, 4 % and 31 %) and four bands only an eighth of the ceiling wide (3 to 15 %, 40 to 52 %,
 // 45 to 60 %, 80 to 95 %), because S9's step is a tenth of the ceiling. The limit must not depend
 // on where an observer draws those lines.
+//
+// ONE ONSET TIME FOR BOTH MEASURES. S9 keeps the brightest channel and the luminance apart and
+// gives them one clock: an onset in either needs 340 ms from the last onset or brightening in
+// either. Observers with thresholds cannot check that jointly (a red field is a fifth of white's
+// luminance: lit for one, dark for another), so the test also carries S9's rule itself, written
+// out again here from the spec and fed with the frames as they go out (gS9, below): each measure
+// is lit or not, a step is a tenth of the ceiling (at least 2 levels), a rise of a step above the
+// trough is an onset, a lit measure that falls a step below its peak is not lit. A frame the
+// contract draws must never be an onset, in either measure, less than 340 ms after the field
+// last lit or got brighter. (Dark, blue, then white 171 ms later: the white is one.)
 //
 // TWO PHOTOMETERS, mirrored from the logics fork. The first reads each LED's brightest channel, so
 // a red or blue field counts as much as a white one. The second reads colour: the field's
@@ -91,18 +107,19 @@ struct Onsets {
   bool lit = false; uint32_t at[128]; long n = 0, total = 0, own = 0;
   bool armed = false;            // a contract edge came: the next native relight is the contract's
   int worst = 0; uint32_t minGap = 0xFFFFFFFFu;
+  void count(uint32_t when, bool nativeFrame) {
+    if (nativeFrame && !armed) { own++; return; }
+    armed = false;
+    if (n > 0 && when - at[(n - 1) & 127] < minGap) minGap = when - at[(n - 1) & 127];
+    at[n++ & 127] = when; total++;
+    int w = 0; for (long i = n; i-- > 0 && n - i <= 128 && when - at[i & 127] < 1000; ) w++;
+    if (w > worst) worst = w;
+  }
   void see(int level, int ceil, uint32_t now, bool nativeFrame, bool edge) {
     if (!nativeFrame) armed = false;                 // the contract draws: its frames answer for themselves
     else if (edge) armed = true;
-    if (!lit && level * 100 >= ceil * litPct) {
-      lit = true;
-      if (nativeFrame && !armed) { own++; return; }
-      armed = false;
-      if (n > 0 && now - at[(n - 1) & 127] < minGap) minGap = now - at[(n - 1) & 127];
-      at[n++ & 127] = now; total++;
-      int w = 0; for (long i = n; i-- > 0 && n - i <= 128 && now - at[i & 127] < 1000; ) w++;
-      if (w > worst) worst = w;
-    } else if (lit && level * 100 <= ceil * darkPct) lit = false;
+    if (!lit && level * 100 >= ceil * litPct) { lit = true; count(now, nativeFrame); }
+    else if (lit && level * 100 <= ceil * darkPct) lit = false;
   }
 };
 
@@ -111,6 +128,34 @@ static uint32_t gNow = 0;
 static int gCeil = 20;                    // the owner's brightness in this stream
 static bool gButtons = false;             // this stream has an owner at the controller
 static Onsets gObs[10];                   // (a): 0-2 wide, 3-6 narrow. (h): 7-9, on luminance
+// ---- S9's rule for the two measures together, from the spec (see the head of this file) ----
+struct S9Rule {
+  bool lit[2] = { false, false }; int ref[2] = { 0, 0 }; uint32_t stamp = 0; bool any = false;
+  // returns the time since the field last lit or got brighter when this frame is an onset the
+  // contract drew, else 0xFFFFFFFF. `stamps`: this frame's light is known to the board's gate.
+  uint32_t see(int level, int lum, int ceil, uint32_t now, bool drawn, bool stamps) {
+    const int step = ceil < 10 ? 2 : ceil / 10 + 1, x[2] = { level, lum };
+    bool onset = false, brighter = false;
+    for (int m = 0; m < 2; m++) {
+      if (lit[m]) { if (x[m] > ref[m]) { ref[m] = x[m]; brighter = true; } else if (ref[m] - x[m] >= step) { lit[m] = false; ref[m] = x[m]; } }
+      else if (x[m] < ref[m]) ref[m] = x[m];
+      else if (x[m] - ref[m] >= step) { lit[m] = true; ref[m] = x[m]; onset = true; }
+    }
+    uint32_t gap = 0xFFFFFFFFu;
+    if (onset && drawn && any) gap = now - stamp;
+    if ((onset || brighter) && stamps) { stamp = now; any = true; }
+    return gap;
+  }
+};
+static S9Rule gS9; static uint32_t gEitherGap = 0xFFFFFFFFu;
+// ---- (j): the regions. Two halves by rows, two by columns, four quadrants; two pairs of thresholds each ----
+static const int kRegions = 8;
+static bool gInRegion[kRegions][NUM_LEDS]; static int gRegionLeds[kRegions];
+struct Region { int darkPct = 10, litPct = 50; bool lit = false, any = false; uint32_t at = 0; };
+static Region gReg[kRegions][2];
+static uint32_t gRegionGap = 0xFFFFFFFFu;
+// ---- (k): the contract's light with no owner ----
+static bool gLastFrameContract = false; static uint32_t gUnownedSince = 0; static long gStuck = 0;
 // ---- (i): one observer of the field's colour ----
 // Below its dark level the field has no colour for it; the colour it sees when the field is lit
 // is compared with the one it saw last, and a different one is a change of look. On a native
@@ -170,14 +215,17 @@ static void broke(const char* why) {
 // Is the panel a native look's (the board's own, or a native:<n> a show selected)?
 static bool nativeHasPanel() { return !g_owned || (g_u.base == CB_NATIVE && !g_u.pulseActive); }
 static void hook(const CRGB* l, int n, uint8_t scale) {
+  // The photometers read what goes out on the wire: each channel as the LED driver scales it,
+  // channel * (scale + 1) >> 8 (include/FastLED.h; the scale oracle holds the mock to the same).
   long sum = 0, sr = 0, sg = 0, sb = 0, sy = 0; int lit = 0;
   for (int i = 0; i < n; i++) {
-    int m = l[i].r; if (l[i].g > m) m = l[i].g; if (l[i].b > m) m = l[i].b;
-    sum += m; if (m) lit++;
-    sr += l[i].r; sg += l[i].g; sb += l[i].b; sy += (54 * l[i].r + 183 * l[i].g + 19 * l[i].b) >> 8;
+    const int r = (l[i].r * (scale + 1)) >> 8, g = (l[i].g * (scale + 1)) >> 8, b = (l[i].b * (scale + 1)) >> 8;
+    int m = r; if (g > m) m = g; if (b > m) m = b;
+    sum += m; if (l[i].r | l[i].g | l[i].b) lit++;
+    sr += l[i].r; sg += l[i].g; sb += l[i].b; sy += (54 * r + 183 * g + 19 * b) >> 8;
   }
-  const int level = (int)((sum * scale) / ((long)n * 255));
-  const int luminance = (int)((sy * scale) / ((long)n * 255));
+  const int level = (int)(sum / n);
+  const int luminance = (int)(sy / n);
   const long rgbKey = (sr / 256) * 1000000 + (sg / 256) * 1000 + sb / 256;
   if (gTrace && (level != gLevel || scale != gScale || rgbKey != gRgbKey)) {
     char b[200]; snprintf(b, sizeof b, "frame level %3d lum %3d scale %3u lit %2d rgb %02lx%02lx%02lx%s   [gate: %s ref %u, lum %s ref %u, onset %u, look %u, ceil %u]",
@@ -220,6 +268,28 @@ static void hook(const CRGB* l, int n, uint8_t scale) {
   const bool meter = !nativeFrame && g_u.base == CB_LOOK && !g_u.pulseActive && g_u.effect == CE_METER;
   const bool sameLook = meter && gWasMeter;
   gWasMeter = meter;
+  // S9 for both measures at once. Every frame moves the rule's state; the light of Leia and Knight
+  // Rider is not on its clock (S10: a small lit area moving is no onset of the field).
+  {
+    const uint32_t gap = gS9.see(level, luminance, gCeil, gNow, !nativeFrame, !smallArea);
+    if (gap < gEitherGap) { gEitherGap = gap; if (gap < 340) broke("a frame the contract drew is an onset inside 340 ms of the last (the two measures together)"); }
+  }
+  // (j): each region's level as it goes out, on the frames the contract draws. A native look's
+  // frames move the regions' state and are not counted: its own picture is its own (S10).
+  for (int g = 0; g < kRegions; g++) {
+    long rs = 0;
+    for (int i = 0; i < n; i++) if (gInRegion[g][i]) { int m = l[i].r; if (l[i].g > m) m = l[i].g; if (l[i].b > m) m = l[i].b; rs += (m * (scale + 1)) >> 8; }
+    const int rl = (int)(rs / gRegionLeds[g]);
+    for (Region& o : gReg[g]) {
+      if (!o.lit && rl * 100 >= gCeil * o.litPct) {
+        o.lit = true;
+        if (nativeFrame) { o.any = false; continue; }
+        if (o.any && gNow - o.at < gRegionGap) { gRegionGap = gNow - o.at; if (gRegionGap < 340) broke("a region of the panel lit twice inside 340 ms"); }
+        o.at = gNow; o.any = true;
+      } else if (o.lit && rl * 100 <= gCeil * o.darkPct) o.lit = false;
+    }
+  }
+  gLastFrameContract = !nativeFrame && level > 0;
   for (Colour& k : gCol) {
     if (smallArea) k.armed = false;
     const uint32_t gap = k.see(level, gCeil, sr, sg, sb, gNow, nativeFrame, edgeLook, sameLook, nativeCode);
@@ -310,6 +380,7 @@ static void step(uint32_t ms = 1) {
     gPressed = false; gEdge = false;
     for (Onsets& o : gObs) { o.n = 0; o.armed = false; }
     for (Colour& k : gCol) k.known = k.any = k.armed = false;   // ...nor the contract's change of look
+    for (int g = 0; g < kRegions; g++) for (Region& o : gReg[g]) o.any = false;
   }
   serialEventRun();
   while (!gQueue.empty()) { deliver(gQueue.front()); gQueue.pop_front(); }
@@ -326,6 +397,10 @@ static void step(uint32_t ms = 1) {
     const bool swipe = lastPSIeventCode == defaultPattern && gNow - gFrameMs < 500 && gScale == gCeil;
     if (g_owned || (!gButtons && !swipe)) { gNotNative++; broke("not on the native look after idle"); }
   }
+  // (k): the board's own look has the panel, and what is on the LEDs is still a frame the contract
+  // drew. A native mode draws within 1.1 s (the slowest steps: I heart U, the Star Wars intro).
+  if (g_owned) gUnownedSince = gNow;
+  else if (gLastFrameContract && gNow - gUnownedSince > 1200) { gStuck++; broke("the contract's light is on the panel and nothing owns it"); }
   // (d): one frame for the board to draw it, then dark
   if (gExpectDark && gNow - gDarkFrom > 30) { gDarkChecked++; if (gLevel * 10 > gCeil) { gNotDark++; broke("lit after X"); } }
   // (e): the native command runs, and the contract stays off the panel. Counted from the second
@@ -341,6 +416,17 @@ static void begin(int ownerBright, bool alwaysOn) {
   static const int kBand[10][2] = { { 10, 50 }, { 19, 75 }, { 4, 31 }, { 3, 15 }, { 40, 52 }, { 45, 60 }, { 80, 95 },
                                     { 10, 50 }, { 19, 75 }, { 4, 31 } };
   for (int i = 0; i < 10; i++) { gObs[i].darkPct = kBand[i][0]; gObs[i].litPct = kBand[i][1]; gObs[i].lum = i >= 7; }
+  // the regions: rows 0-2, rows 3-5, columns 0-4, columns 5-9, and the four quadrants of those
+  for (int c = 0; c < COLUMNS; c++) for (int r = 0; r < LEDS_PER_COLUMN; r++) {
+    const int led = psiLed((uint8_t)c, (uint8_t)r);
+    if (led < 0) continue;
+    const int top = r < 3 ? 0 : 1, left = c < 5 ? 0 : 1;
+    gInRegion[top][led] = true; gInRegion[2 + left][led] = true; gInRegion[4 + top * 2 + left][led] = true;
+  }
+  for (int g = 0; g < kRegions; g++) {
+    gRegionLeds[g] = 0; for (int i = 0; i < NUM_LEDS; i++) if (gInRegion[g][i]) gRegionLeds[g]++;
+    gReg[g][1].darkPct = 4; gReg[g][1].litPct = 31;
+  }
   static const int kColour[5][2] = { { 10, 50 }, { 19, 75 }, { 4, 31 }, { 3, 15 }, { 45, 60 } };
   for (int i = 0; i < 5; i++) { gCol[i].darkPct = kColour[i][0]; gCol[i].litPct = kColour[i][1]; }
   g_avr_next = 1; g_mock_analog = 512; g_mock_pins[JUMP_FRONT_REAR] = 1;      // a front PSI
@@ -508,6 +594,19 @@ static const Profile kProfiles[] = {
   { "rainbow at its fastest", []() { pShow(); tx("PFA:i=rainbow,s=255"); }, [](uint32_t) {}, 1000 },
   { "colorcycle at its fastest", []() { pShow(); tx("PFA:i=colorcycle,s=255"); }, [](uint32_t) {}, 1000 },
   { "gradient at its fastest", []() { pShow(); tx("PFA:i=gradient,s=255"); }, [](uint32_t) {}, 1000 },
+  // ---- the independent review of R1 ----
+  { "L between half and full at the meter (the top half of the panel)", []() { pShow(); tx("PFA:i=meter,c=ffffff,s=255"); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=255"); if (t == 50) tx("P*L:v=128"); }, 100 },
+  { "L stepping up the meter a row at a time, and down at once", []() { pShow(); tx("PFA:i=meter,c=ffffff,s=255"); },
+    [](uint32_t t) { if (t % 30 == 0) { char l[24]; snprintf(l, sizeof l, "P*L:v=%u", (unsigned)(t >= 180 ? 0 : 45 + t * 7 / 6)); tx(l); } }, 210 },
+  { "the meter with no level feed, at its fastest", []() { pShow(); tx("PFA:i=meter,c=ffffff,s=255"); }, [](uint32_t) {}, 1000 },
+  { "from dark: blue, then white 171 ms later (one brightness onset, two in luminance)", pShow,
+    [](uint32_t t) { if (t == 0) tx("PFA:i=off"); if (t == 400) tx("PFA:i=solid,c=0000ff"); if (t == 571) tx("PFA:i=solid,c=ffffff"); }, 1200 },
+  // (the battle lasts 5.4 s; the pulse comes after it, and then nothing for 2.8 s)
+  { "P over a mode whose program has ended (the lightsaber battle under alwaysOn)", []() { ownerRuns(19); },
+    [](uint32_t t) { if (t == 5200) tx("PFP:c=ffffff,d=170"); }, 8040 },
+  { "P over short circuit, which fades whatever the panel holds", []() { ownerRuns(4); },
+    [](uint32_t t) { if (t == 0) tx("PFP:c=ffffff,d=170"); }, 700 },
   { "B 0/255 under a native look", []() { pShow(); tx("PFA:i=native:17"); },
     [](uint32_t t) { if (t == 0) tx("PFB:b=0"); if (t == 50) tx("PFB:b=255"); }, 100 },
   { "the pump under a native look at 300 BPM", []() { pShow(); tx("PFA:i=native:16,m=255,am=2"); tx("**C:bpm=300,ph=0,bpb=4,beat=0"); },
@@ -520,6 +619,7 @@ static const int kProfileCount = (int)(sizeof kProfiles / sizeof kProfiles[0]);
 
 struct Result {
   int worst = 0; uint32_t minGap = 0xFFFFFFFFu, narrowGap = 0xFFFFFFFFu, lumGap = 0xFFFFFFFFu, colourGap = 0xFFFFFFFFu;
+  uint32_t eitherGap = 0xFFFFFFFFu, regionGap = 0xFFFFFFFFu; long stuck = 0;
   long overCeiling = 0, notNative = 0, notDark = 0, wdLate = 0, notButton = 0, offList = 0, reached = 0, colourChanges = 0, lumOnsets = 0;
   long onsets = 0, own = 0, darkChecked = 0, nativeChecked = 0, contractFrames = 0, lines = 0, presses = 0, buttonChecked = 0;
   void take() {
@@ -529,6 +629,7 @@ struct Result {
       uint32_t& g = i < 3 ? minGap : (i < 7 ? narrowGap : lumGap);
       if (o.minGap < g) g = o.minGap;
     }
+    eitherGap = gEitherGap; regionGap = gRegionGap; stuck = gStuck;
     colourGap = gColourGap; colourChanges = gColourChanges; lumOnsets = gObs[7].total;
     overCeiling = gOverCeiling; notNative = gNotNative; notDark = gNotDark; wdLate = gWdLate; notButton = gNotButton; offList = gOffList; reached = gReached;
     onsets = gObs[0].total; own = gObs[0].own; darkChecked = gDarkChecked; nativeChecked = gNativeChecked; contractFrames = gContractFrames;
@@ -540,6 +641,9 @@ struct Result {
     if (o.narrowGap < narrowGap) narrowGap = o.narrowGap;
     if (o.lumGap < lumGap) lumGap = o.lumGap;
     if (o.colourGap < colourGap) colourGap = o.colourGap;
+    if (o.eitherGap < eitherGap) eitherGap = o.eitherGap;
+    if (o.regionGap < regionGap) regionGap = o.regionGap;
+    stuck += o.stuck;
     colourChanges += o.colourChanges; lumOnsets += o.lumOnsets;
     overCeiling += o.overCeiling; notNative += o.notNative; notDark += o.notDark; wdLate += o.wdLate; notButton += o.notButton;
     offList += o.offList; reached += o.reached;
@@ -549,12 +653,16 @@ struct Result {
   bool holds() const {
     return worst <= 3 && minGap >= 2 * STROBE_MIN_STATE_MS && narrowGap >= 2 * STROBE_MIN_STATE_MS &&
            lumGap >= 2 * STROBE_MIN_STATE_MS && colourGap >= STROBE_MIN_STATE_MS && overCeiling == 0 && notNative == 0 && notDark == 0 && wdLate == 0 &&
-           notButton == 0 && offList == 0 && reached == 0;
+           notButton == 0 && offList == 0 && reached == 0 && eitherGap >= 2 * STROBE_MIN_STATE_MS &&
+           regionGap >= 2 * STROBE_MIN_STATE_MS && stuck == 0;
   }
   void print(const char* verdict, const char* name) const {
     printf("%s S9 %s: %d onsets in one second", verdict, name, worst);
     if (minGap != 0xFFFFFFFFu) printf(" (closest two %u ms apart)", minGap);
     if (narrowGap < 2 * STROBE_MIN_STATE_MS) printf(", narrow-band onsets %u ms apart", narrowGap);
+    if (eitherGap < 2 * STROBE_MIN_STATE_MS) printf(", an onset the contract drew %u ms after the field last lit (both measures)", eitherGap);
+    if (regionGap < 2 * STROBE_MIN_STATE_MS) printf(", a region lit twice %u ms apart", regionGap);
+    if (stuck)                               printf(", %ld ms of the contract's light with no owner", stuck);
     if (lumGap < 2 * STROBE_MIN_STATE_MS)    printf(", luminance onsets %u ms apart", lumGap);
     if (colourGap < STROBE_MIN_STATE_MS)     printf(", colour changes %u ms apart", colourGap);
     if (notDark)     printf(", %ld ms lit after X", notDark);
@@ -595,8 +703,8 @@ static void runJob(int job, uint32_t seed) {
   for (uint32_t t = 0; t < 12000; ) {
     if (rnd(busy) == 0) { const bool burst = rnd(8) == 0; for (uint32_t n = 1 + (burst ? rnd(12) : 0); n > 0; n--) tx(randomLine()); }
     if (gButtons && rnd(3500) == 0) {              // about three native commands a stream
-      static const int kMode[] = { 1, 1, 15, 15, 0, 16, 17, 18, 21 };
-      press(kMode[rnd(9)]);
+      static const int kMode[] = { 1, 1, 15, 15, 0, 16, 17, 18, 21, 19, 19, 4, 7, 20 };
+      press(kMode[rnd(14)]);
     }
     const uint32_t slow = rnd(200) == 0 ? 10 + rnd(4) * 10 : (fine ? 1 + rnd(4) : 1);   // now and then a slow pass
     step(slow); t += slow;
@@ -654,6 +762,8 @@ int main() {
          kProfileCount, kRounds, streams, all.lines, all.contractFrames, all.onsets, all.minGap, all.own, all.darkChecked,
          all.nativeChecked, all.presses, all.buttonChecked, seed);
   printf("   (narrow-band onsets: the closest two %u ms apart; luminance onsets: %ld, the closest two %u ms apart;\n"
-         "   colour changes: %ld, the closest two %u ms apart)\n", all.narrowGap, all.lumOnsets, all.lumGap, all.colourChanges, all.colourGap);
+         "   colour changes: %ld, the closest two %u ms apart; S9 for both measures together: the closest onset %u ms after the last light;\n"
+         "   a region of the panel: lit twice %u ms apart at the closest)\n", all.narrowGap, all.lumOnsets, all.lumGap, all.colourChanges,
+         all.colourGap, all.eitherGap, all.regionGap);
   return 0;
 }
