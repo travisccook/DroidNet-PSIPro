@@ -55,6 +55,14 @@ Neil credits these people in his own docs, and we carry that forward:
 the one place it is *less* capable than the firmware it forked, and it is a deliberate choice rather
 than an oversight, so it belongs up here rather than in a footnote.
 
+**Two more defaults differ from upstream v1.7**, and both are in `include/config.h`:
+
+- `alwaysOn = true` (upstream: `false`). With a blank EEPROM a `T` mode stays on until the next
+  command instead of returning to the swipe by itself. `0P0` stores upstream's behaviour, `0P1`
+  this one; a board whose EEPROM already holds the setting keeps it.
+- 9600 baud on the serial header (`_9600BAUDSJEDI_` is defined; upstream ships 2400). The WCB the
+  board is wired to speaks 9600.
+
 If anything on your droid talks to the PSI over I2C — a MarcDuino, a Teeces or STEALTH setup, any
 JawaLite master on the bus at address 22 — **you want the I2C build**. It is its own environment:
 
@@ -94,17 +102,19 @@ What it buys, measured:
 
 | | serial-only (default) | with I2C |
 | --- | --- | --- |
-| flash | 25,320 B (88.3%) | 26,758 B (93.3%) |
-| SRAM | 1,564 B (61.1%) | 1,845 B (72.1%) |
-| worst-case stack | 360 B of 996 B (36%) | 485 B of 715 B (68%) |
+| flash | 27,424 B (95.6%) | 27,876 B (97.2%) |
+| SRAM | 1,595 B (62.3%) | 1,800 B (70.3%) |
+| worst-case stack | 435 B of 965 B (45%) | 533 B of 760 B (70%) |
+| score sections a show may hold | 16 | 12 |
+| contract looks | all | six drawn as stand-ins (above) |
 | can an interrupt reach a render? | **no** | yes (upstream's native path) |
 
 Both configurations ship all 23 upstream modes (0-21 and 92) — there is no "drop modes to fit" trade here (see
-[What this fork adds](#what-this-fork-adds)/the animation VM below); the only difference between
-the two columns is the I2C intake itself.
+[What this fork adds](#what-this-fork-adds)/the animation VM below). What differs between the two
+columns is the I2C intake, the six contract looks it leaves no room for, and four score sections.
 
-Both configurations are built and type-checked by `test/host/run.sh` on every run, so neither can
-quietly rot.
+Both configurations are built by `test/host/run.sh` on every run, gated on flash and stack, and run
+through the same scenarios and the same hostile-stream test, so neither can quietly rot.
 
 ---
 
@@ -112,12 +122,20 @@ quietly rot.
 
 **Work in progress.** This DroidNet build is provided as is, without warranty of any kind. Use it at your own risk. To go back, flash the upstream firmware ([README_UPSTREAM.md](README_UPSTREAM.md)).
 
-**Testing.** It cross-compiles for the real microcontroller. `pio run` builds a complete
-firmware image with the real avr-gcc for the real ATmega32U4, and the real linker signs off on it.
-That is a genuine step up from where this fork started — it used to be checked only by a type-check
-against a hand-written mock, and that mock lied twice (see below). The host suite is 341 checks on
-the contract parser, the beat clock and the effect math, plus render-layer guards, and
-`bash test/host/run.sh` now finishes by doing the cross-compile itself.
+**It has never run on a PSI Pro board.** Everything below is the host, the cross-compiler and a
+simulator of the ATmega32U4. Until the bench checklist in the firmware plan is recorded, treat any
+image from this tree as untested on hardware: start with the brightness low and the board on its
+own supply.
+
+**Testing.** `bash test/host/run.sh` is the whole suite. It runs the firmware's own `src/main.cpp`
+on host mocks of the hardware (no mock of the board API: that one lied twice and is retired) and
+compares it, frame for frame, with captures of every native mode (36 goldens) and with upstream
+v1.7 on the same mocks (78 scripted timelines); runs 84 scripted contract scenarios on each of the
+two builds; feeds the firmware 17 hostile line scripts and 1,500 random streams and measures the
+frames (at most three dark-to-lit swings a second, nothing above the owner's brightness); then
+cross-compiles both builds with the real avr-gcc, gates their flash and worst-case stack, and runs
+five probes in simavr: `millis()` against a hardware timer for each look, the show lifecycle,
+the frames on the LED pin under hostile streams, the WS2812 waveform, and the cost of a frame.
 
 **It fits, with real headroom in the default build, but not by much in the I2C build.** This is the
 tightest board of the three, and the numbers are worth knowing before you build:
@@ -125,11 +143,12 @@ tightest board of the three, and the numbers are worth knowing before you build:
 | Build | Flash | of 28,672 B |
 | --- | --- | --- |
 | Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
-| **This fork, as shipped (serial-only)** | **25,320 B** | **88.3%** |
-| This fork with the I2C intake (`-e PSIPro-i2c`) | 26,758 B | 93.3% |
-| …I2C, with the codegen flags removed | 28,572 B | 99.7% |
-| …I2C, with `PSI_NOINLINE` removed | 28,300 B | 98.7% |
-| …I2C, with both removed | 30,114 B | 105.0% — **will not link** |
+| **This fork, as shipped (serial-only)** | **27,424 B** | **95.6%** |
+| …serial-only, without `-mcall-prologues` | 28,492 B | 99.4% |
+| …serial-only, with `PSI_NOINLINE` removed | 28,262 B | 98.6% |
+| This fork with the I2C intake (`-e PSIPro-i2c`) | 27,876 B | 97.2% |
+| …I2C, with `PSI_NOINLINE` removed | 28,424 B | 99.1% |
+| …I2C, without `-mcall-prologues` | 28,942 B | 100.9% — **will not link** |
 
 Neil's firmware already used 87.6% of this chip. All 23 upstream modes (0-21 and 92) ship, and every
 upstream mode's animation except the four deliberate native holdouts
@@ -137,14 +156,14 @@ upstream mode's animation except the four deliberate native holdouts
 one small interpreter (`include/psi_vm.h`) — the contract effects remain parametric C++ renderers —
 which is *why* there is headroom at all: it replaced the hand-written per-mode state machines with
 one. That headroom is not evenly spread, though.
-The **serial-only default has real margin** (3,352 B spare) — either the AVR codegen flags in
-`platformio.ini` or the `PSI_NOINLINE` outlining in `src/contract/ContractPSI.h` could be dropped on
-its own and it would still fit (94.3% / 94.1%). The **I2C build has less** (1,914 B spare): it
-survives losing either one, barely (99.7% / 98.7%), but not both, per the last three rows above. (For
-scale: as originally published, before any of the flash or VM work, this fork linked at 38,790 B —
-135.3%. There used to be a third leg here too, `CONTRACT_SLIM`, an escape hatch that dropped five
-native novelty modes to claw back room. It is gone — see "What this fork adds", below — because the
-VM made it unnecessary.)
+Since the contract's version 1.3 neither build has room to spare. `run.sh` fails the serial-only
+build over 28,416 B and the I2C build over 28,160 B, so a change that would not leave room for a fix
+is caught when it is made: the serial-only build is 992 B under its line, the I2C build 284 B. Both
+need the AVR codegen flags in `platformio.ini` and the `PSI_NOINLINE` outlining in
+`src/contract/ContractPSI.h` (the last four rows above). (For scale: as originally published,
+before any of the flash or VM work, this fork linked at 38,790 B — 135.3%. There used to be a
+`CONTRACT_SLIM` escape hatch that dropped five native novelty modes to claw back room. It is gone
+— see "What this fork adds", below — because the VM made it unnecessary.)
 
 The design target going into the VM conversion was roughly 26.3-26.4 KB serial / 27.7-27.8 KB I2C —
 the probe's own byte-cost estimate plus about 100 B of slack. The VM-era totals (26,760 B / 28,202 B)
@@ -152,28 +171,29 @@ landed about 0.4 KB over that in both environments: the measured price of byte-e
 ops and program shapes the probe's seeds got wrong, forced by the golden captures) plus the +94 B
 mode-22 demo. Since then the clean-room WS2812 driver that replaced FastLED gave back 2,162 B
 (`docs/FASTLED_DRIVER_VERIFICATION.md`), collapsing `displayMatrixColor`'s per-row switches another
-748 B, and the WDP device announce (below) costs about 1.47 KB of flash and 172 B of SRAM. The
-linker enforces the ceiling on every run.
+748 B, and the WDP device announce (below) costs about 1.47 KB of flash and 172 B of SRAM.
+Contract v1.3 (the safety limits, the show lifecycle, load verification, the output gate) then took
+most of what was left, after its shared core lost its floating point (1.4 KB of soft-float library
+that one `float` expression had linked). `run.sh` fails a build that links any of it again.
 
 ### SRAM and the stack
 
-SRAM sits at 1,564 B of 2,560 B (61.1%), leaving **996 B for the stack** in the default
+SRAM sits at 1,595 B of 2,560 B (62.3%), leaving **965 B for the stack** in the default
 serial-only build. That used to be an open question here. It has now been analysed statically
 (`test/host/stack_report.py` computes the bound directly from the linked ELF — see the tool's own
 `--help` for why `-fstack-usage` can't be trusted under `-flto`), and in the shipped configuration
 the answer is good:
 
-- **Worst-case stack: 360 B of 996 B (36%), and the bound is SOUND** — with the TWI vector gone,
+- **Worst-case stack: 435 B of 965 B (45%), and the bound is SOUND** — with the TWI vector gone,
   **no interrupt in the image can reach a render at all**, and no interrupt can nest.
 
-- **In the I2C build (`-e PSIPro-i2c`) the worst case is 485 B of 715 B (68%), 230 B spare, and that
-  bound is SOUND too** — 299 B of synchronous stack plus the worst single interrupt, 186 B. (That is
+- **In the I2C build (`-e PSIPro-i2c`) the worst case is 533 B of 760 B (70%), 227 B spare, and that
+  bound is SOUND too** — 346 B of synchronous stack plus the worst single interrupt, 187 B. (That is
   a conservative charge: the tool bounds the USB interrupt's indirect calls by the largest
-  address-taken function, the I2C `receiveEvent`. The I2C interrupt itself, which runs Neil's native
-  parser and a render, is 143 B.) No recursion anywhere, no `alloca`/VLA
+  address-taken function, the I2C `receiveEvent`.) No recursion anywhere, no `alloca`/VLA
   (every frame is a compile-time constant), and **no heap at all** — nothing links `malloc`, so the
-  whole 715 B really is stack. It is the tightest margin on the board: the WDP announce's 172 B of
-  SRAM came out of it (it was 402 B spare before).
+  whole 760 B really is stack. It is the tightest margin on the board, which is why this build holds
+  12 score sections and not 16. `run.sh` fails the build under 128 B of headroom (256 B serial-only).
 
 - **It used to be unsound, and you should know why.** Stock FastLED's `showPixels()` executes an
   unconditional `sei` (it disables interrupts to bit-bang the WS2812 data, then re-enables them).
@@ -250,6 +270,7 @@ It is a wire grammar plus a render layer. That's it.
          C = beat-clock seed                  B = brightness
          L = level (e.g. VU energy)           X = stop
          M = mode (show / idle)               Q = query
+         V = verify a pushed score
 
 example: !PFA:i=comet,c=ff8800,s=200,m=64,am=1
          (front PSI, animate, comet in orange, fast, accent on the downbeat)
@@ -269,12 +290,50 @@ What it buys:
 
 Six new parametric effects render along the panel's 10 columns as a 1-D strand: **comet, chase, wipe,
 gradient, colorcycle, twinkle**. Their math lives in the shared core and is host-tested, so the same
-cue renders the same way on every board in the family.
+cue renders the same way on every board in the family. (The I2C build draws these six as stand-ins;
+see "This fork is SERIAL-ONLY by default".)
 
-**Every native command of the original firmware still works exactly as before.** The whole JawaLite
-`<addr>T` / `A` / `D` / `xPy` grammar, all the modes 0-21 and 92, the I2C intake, the pot, the
-EEPROM settings, the jumper — untouched. The contract layer only takes over the frame while it is
-armed, and hands the panel straight back to `runPattern()` on stop. This is not a rewrite.
+**Every native command of the original firmware still works.** The whole JawaLite `<addr>T` / `A` /
+`D` / `xPy` grammar, all the modes 0-21 and 92, the pot, the EEPROM settings, the jumper. With no
+contract line on the wire the board draws what upstream v1.7 draws: `run.sh` runs both on the same
+mocks through 78 scripted timelines and 75 are identical frame for frame. What differs, all of it:
+
+- the three defaults above (serial-only, `alwaysOn`, 9600 baud);
+- `0T19|n`: the lightsaber battle plays whole, as upstream's own comment says it should (upstream's
+  code stops it at once);
+- under `alwaysOn`, the tail of mode 4 (short circuit), when two pixels are left lit, repeats
+  differently: upstream's 8-bit loop counter wraps there (two timelines);
+- every frame is preceded by 200 µs of quiet line, so that two frames sent in the same tick latch
+  on every WS2812 revision.
+
+This is not a rewrite.
+
+### What the contract does on this board (version 1.3, first release)
+
+The contract's specification and its plan are in the DroidNet Signal Booster repository
+(`docs/superpowers/specs/2026-11-16-driveable-animation-contract-v1.3-design.md`). On the PSI:
+
+- **Brightness belongs to the owner.** A show's ceiling is the board's own brightness when the show
+  arms (the pot, the EEPROM value or `3P`); `b=` and `B` are fractions of it. A line can dim the
+  panel and can never make it brighter. A `3P` sent during a show is kept: the next show arms with
+  it and the board is given back at it.
+- **A show begins and ends cleanly.** `M:v=show` arms and keeps the swipe until the show's first
+  `C`, `A` or `P`. `X` is dark until `M:v=idle` or a look. `M:v=idle` returns to the swipe, whatever
+  the show selected. A `P` with no show overlays the board's own look and returns to it.
+- **The owner's controller always wins.** A native `T` or `D` command addressed to the PSI ends a
+  show on it and then runs.
+- **A dead host gives the board back.** `M:v=show,wd=<seconds>`: that long with no line addressed
+  to the board, and it behaves as if it had received `M:v=idle`.
+- **A pushed show is checked.** `V:n=,k=` compares what arrived with what was sent; on a mismatch
+  the board goes back to the swipe and reports `ok=2`. `Q:r=<n>` is answered with
+  `ver, rel, cap, n, ok, bpm`, routed back through the WCB.
+- **Nothing a host sends can strobe the panel.** Tempo is taken from 30 to 300 BPM, beat accents
+  recur no faster than every 340 ms, live looks are spaced 170 ms, and every frame the contract
+  draws passes one gate on its way out: the whole field goes from dark to lit at most three times
+  a second, whatever lines arrive.
+- **Native modes run as stock.** A show may select modes 0 to 22 and 92, without 2, 3 and 5
+  (Flash, Alarm, Scream: whole-field strobes). Their frames are never altered. Every one of them
+  draws at the brightness the show gives it, so `b=` and `B` dim all of them.
 
 ### The animation VM: modes are data now
 
@@ -323,7 +382,7 @@ fork sends one 0.5-3 s after power-up and then every 25-30 s, on the serial head
 WCB's port, 9600 baud):
 
 ```text
-@WDP1 {"type":"PSI Front","fw":"1a2b3c4","caps":["droidnet.contract"]}
+@WDP1 {"type":"PSI Front","fw":"1a2b3c4","caps":["droidnet.contract","contract.1.3"]}
 ```
 
 - **`type`** comes from the front/rear jumper, read at each announce with the contract's own test
@@ -333,11 +392,14 @@ WCB's port, 9600 baud):
 - **`fw`** is the commit the firmware was built from: `git rev-parse --short=7 HEAD`, with `-dirty`
   for a tree with uncommitted changes, or `unknown` built without git. `scripts/wdp_fw.py` sets it
   at build time; the images in `firmware/` carry their source commit.
-- **`caps`**: `droidnet.contract`, the Driveable-Animation Contract above.
+- **`caps`**: `droidnet.contract`, the Driveable-Animation Contract above, and the version the
+  build speaks: `contract.1.3`, or `contract.1.3s` from the I2C build, which draws six of the
+  contract's looks as stand-ins.
 
 The WCB consumes the line; it is never forwarded to another port or board. The line goes out in
 pieces no bigger than the free room in the serial TX buffer, so the render loop never waits on it,
-and the verb-Q ack finishes a line in flight before writing its own, so the two never interleave.
+and the contract's reply to `Q` is written only while no announce is in flight, so the two never
+interleave.
 Each board's timing is jittered from the chip's factory serial number and the jumper, so PSIs that
 power up together, front and rear included, do not announce in step.
 
@@ -346,14 +408,15 @@ WCB's serial pins are 3.3 V, and two PSIs on one WCB port need their TX lines co
 both are wiring questions, outside this firmware (see "Wiring & baud" and "Questions" in Greg's
 `docs/WDP_DEVICE_ANNOUNCE.md`). The line-building core, `src/wdp/wdp_announce_core.h`, is shared
 byte-identically with the RSeries and Flthy forks; `src/wdp/wdp_fork.h` is the PSI's identity and
-its three hooks.
+its two hooks.
 
 ---
 
 ## What is theirs, and what is ours
 
-Their code is around 3,200 lines of carefully-tuned firmware. Ours is about 775 lines of new code
-plus a handful of hooks.
+Their code is around 3,200 lines of carefully-tuned firmware. Ours is a contract layer of about
+2,100 lines (1,285 of them a core shared with two other boards), an animation interpreter, a
+WS2812 driver, and a handful of hooks.
 
 **Theirs** (Neil Hutchison and contributors):
 
@@ -377,15 +440,20 @@ credit him for it; not part of the contract layer either:
 
 | Path | Lines | What it is |
 | --- | --- | --- |
-| `src/contract/contract_core.h` | 362 | Pure, dependency-free C++: the wire parser, the beat clock, the effect math, the score table. Byte-identical across all three DroidNet forks. |
-| `src/contract/ContractPSI.h` | 412 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`VUMeter` primitives and the `vmContractScan`/`vmContractSparkle` animation-VM shims (`include/psi_vm.h`). Adds no new render primitives of its own. |
-| `test/host/` | 724 | The host test harness (parser tests + a mock of the board API). |
+| `src/contract/contract_core.h` | 1,285 | Pure, dependency-free, integer-only C++: the wire parser, the beat clock, the safety limits, the score, the effect math. Byte-identical across all three DroidNet forks; `src/contract/CORE_PIN` names the commit it was copied from. |
+| `src/contract/ContractPSI.h` | 799 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`VUMeter` primitives and the `vmContractSparkle` animation-VM shim (`include/psi_vm.h`). Adds no new render primitives of its own. |
+| `include/psi_vm.h` | 1,321 | The animation interpreter and the bytecode of every upstream mode it plays (see "The animation VM", above). |
+| `include/FastLED.h` | 460 | The clean-room WS2812 driver that replaced the FastLED package (`docs/FASTLED_DRIVER_VERIFICATION.md`). |
+| `test/host/`, `test/simavr/` | 7,600 | The host suite and the simavr probes. They run `src/main.cpp` itself; there is no mock of the board API. |
 
 **Ours, inside the files above** (small hooks, all of them additive):
 
-- `src/main.cpp` — one `#include`, one `if (!contractLoopTick())` guard in `loop()`, one
-  `contractPulseTick()` call, an `if (cmdString[0]=='!')` branch in `serialEvent()` and
-  `receiveEvent()`, the `buildCommand()` bounds fix, and two `g_contractArmed` guards in `VUMeter()`.
+- `src/main.cpp` — one `#include`; in `loop()`, the `if (!contractLoopTick())` guard and the
+  `contractServicePending()`, `contractPulseTick()` and `contractReplyTick()` calls; an
+  `if (cmdString[0]=='!')` branch in `serialEvent()` and `receiveEvent()`; the `buildCommand()`
+  bounds fix; `contractYieldToNative()` in `doTcommand()` and `doDcommand()`;
+  `contractOwnerSet3P()` in `doPcommand()`; two `contractHoldsLevels()` guards in `VUMeter()`; and
+  `#define PSI_FRAME_GATE`, which names the contract's gate to the LED driver.
 - `include/functions.h` — prototypes for the native primitives the contract layer calls.
 
 **Ours, the WDP device announce** (see "WDP device announce", above):
@@ -393,16 +461,17 @@ credit him for it; not part of the contract layer either:
 | Path | What it is |
 | --- | --- |
 | `src/wdp/wdp_announce_core.h` | Pure C++: builds, checks and paces the `@WDP1` line. Byte-identical across all three DroidNet forks (LGPL-2.1-only, as its header says). |
-| `src/wdp/wdp_fork.h` | The PSI's identity (type from the jumper, `fw`, caps), its seed, and `wdpForkSetup()` / `wdpForkTick()` / `wdpFinish()`. |
+| `src/wdp/wdp_fork.h` | The PSI's identity (type from the jumper, `fw`, caps), its seed, and `wdpForkSetup()` / `wdpForkTick()`. |
 | `scripts/wdp_fw.py` | PlatformIO `pre:` script: defines `WDP_FW` from git. |
 
 Its hooks: in `src/main.cpp`, one `#include`, `wdpForkSetup()` in `setup()` and `wdpForkTick()` in
-`loop()`; in `src/contract/ContractPSI.h`, `wdpFinish()` before the verb-Q ack.
+`loop()`. `src/contract/ContractPSI.h` reads the announcer's state so that its `Q` reply never
+lands inside an announce.
 
 Not part of the contract layer, but ours in the same "additive layer" sense: `include/psi_vm.h`, the
 animation bytecode interpreter the upstream modes now play through (all but the four native
-holdouts), plus the hand-written `vmContractScan`/`vmContractSparkle` shims the contract's scan and
-sparkle effects render through — see "The animation VM: modes are data now", above.
+holdouts), plus the hand-written `vmContractSparkle` shim the contract's sparkle effect renders
+through — see "The animation VM: modes are data now", above.
 
 That is the whole diff. `git diff 11d69a3..HEAD -- src include` will show you exactly this.
 
@@ -427,12 +496,12 @@ not the FastLED package. `scripts/wdp_fw.py` runs `git` at build time for the WD
 
 **The build flags in `platformio.ini` are load-bearing, not decoration.** `-mcall-prologues`,
 `-mrelax`, `-fno-inline-small-functions`, `-fno-move-loop-invariants` and
-`--param=max-inline-insns-auto=2` are worth about 1.7-1.8 KB together, and the `PSI_NOINLINE`
-outlining in `src/contract/ContractPSI.h` is worth another 1.5-1.65 KB. None of them change behaviour — they only
-change where GCC emits code — but without both, the I2C build does not fit (30,114 B, 105.0%) and the
-serial-only build sits at the very ceiling. If you rebuild these sources in the Arduino IDE, or in
-your own project file, **you will not get those flags**, and the I2C build is left with about 100 B
-to spare. Use this project file.
+`--param=max-inline-insns-auto=2` and the `PSI_NOINLINE` outlining in
+`src/contract/ContractPSI.h` change no behaviour — only where GCC emits code — and both builds
+need them: without `-mcall-prologues` alone the serial-only build is 28,492 B (99.4%) and the I2C
+build, at 28,942 B, does not link. If you rebuild these sources in the Arduino IDE, or in your own
+project file, **you will not get those flags**. Use this project file, and build the I2C variant
+as `-e PSIPro-i2c` (it also leaves out the six contract looks that do not fit).
 
 Both the flags and the `PSI_NOINLINE` block carry comments explaining what was measured, and what was
 tried and rejected (e.g. `-funsigned-char` saves 32 B and is a trap: `char` is signed on this target,
