@@ -161,11 +161,13 @@ echo "[6/9] golden-frame parity: mocks + Neil's animation code must reproduce"
 echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # The FULL-variant binary (built via mk_full_config.sh's shadowed config.h — a
 # historical CONTRACT_SLIM strip that is now a documented no-op, see that script) is
-# the ground truth. golden_matrix.txt's 31 rows are not 31 modes: 28 of them are captures of
+# the ground truth. golden_matrix.txt's first 30 rows are not 30 modes: 28 of them are captures of
 # the 23 upstream modes' (0-21 and 92) native ground truth (several modes get more than one row —
-# front/rear jumper, alwaysOn); two more (contract_scan/contract_sparkle) are the contract
-# CE_SCAN/CE_SPARKLE looks captured from the pre-shim natives (scanCol/DiscoBall at 9502cad),
-# which the VM shims must reproduce byte-for-byte; the last, mode22_process, has "ground truth" from the
+# front/rear jumper, alwaysOn); one more (contract_sparkle) is the contract CE_SPARKLE look
+# captured from the pre-shim native (DiscoBall at 9502cad), which the VM shim must reproduce
+# (contract scan is not a capture any more: v1.3 defines it by fxScanPos() in the core, and the
+# timeline scenario scan_is_the_shared_ping_pong checks the panel against that function);
+# the last, mode22_process, has "ground truth" from the
 # VM program itself (see vmc_process's comment, include/psi_vm.h) rather than any native code.
 # golden_matrix.txt drives the same capture
 # command line that produced the committed .psig files; any regenerated capture
@@ -209,7 +211,7 @@ fi
 echo "[6d] the I2C build's stand-in looks"
 # The PSIPro-i2c environment builds without the six strip and hue looks (PSI_NO_STRIP_LOOKS). A
 # line naming one must draw the nearest look that build has, frame for frame: comet, chase and wipe
-# are the scan golden, twinkle is the sparkle golden, gradient and colorcycle are solid in c=.
+# are scan, twinkle is the sparkle golden, gradient and colorcycle are solid in c=.
 "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -w -DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS \
     -I native_mocks -I "$BUILD/config_full" -I ../../include -o "$BUILD/golden_i2c" golden_native.cpp
 frames() { python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); sys.stdout.buffer.write(d[d.index(b"\nFRAMES\n"):])' "$1"; }
@@ -223,7 +225,7 @@ standin() {  # <look named on the wire> <look drawn> [committed golden of the lo
   fi
   cmp -s <(frames "$want") <(frames "$GOLD/i2c_$1.psig") || { echo "FAIL: on the I2C build i=$1 is not i=$2"; exit 1; }
 }
-standin comet scan contract_scan; standin chase scan contract_scan; standin wipe scan contract_scan
+standin comet scan; standin chase scan; standin wipe scan
 standin twinkle sparkle contract_sparkle
 standin gradient solid; standin colorcycle solid
 # ...and the build still has the looks it keeps: rainbow is not solid there.

@@ -18,7 +18,7 @@
 // useTempInternalBrightness/tempGlobalBrightnessValue, firstTime, lastPSIeventCode,
 // serialPort) is declared, AFTER functions.h has prototyped the native render
 // primitives it still calls (allON/allOFF/VUMeter/runPattern/brightness), and AFTER
-// include/psi_vm.h (main.cpp ~line 359) — whose vmContractScan/vmContractSparkle
+// include/psi_vm.h (main.cpp ~line 359) — whose vmContractSparkle
 // shims replaced the native scanCol()/DiscoBall() this layer used to call directly;
 // see psi_vm.h's own "Contract-layer shims" comment, and AFTER src/wdp/wdp_fork.h, whose
 // wdpFinish() the verb-Q ack calls. It is included BEFORE
@@ -30,8 +30,10 @@
 //     contractShowBegin, contractLevel, scoreAccept). This file adds only what is the PSI's own:
 //     who holds the panel, the owner's brightness, and the renderers.
 //   * Color is TRACTABLE: allON(CRGB,...), fill_column() and VUMeter(...) in main.cpp all take a
-//     live CRGB. CE_SCAN/CE_SPARKLE go through vmContractScan(d, col)/vmContractSparkle(d, col)
-//     in include/psi_vm.h. _renderLook() is the one renderer, for the base look and the overlay.
+//     live CRGB. CE_SPARKLE goes through vmContractSparkle(d, col) in include/psi_vm.h.
+//     flash, pulse and scan use the core's one timing definition (fxFlashOn, fxPulseBright,
+//     fxScanPos), the same on all three boards. _renderLook() is the one renderer, for the base
+//     look and the overlay.
 //   * Brightness rides the VOLATILE 3P path only (useTempInternalBrightness +
 //     tempGlobalBrightnessValue, read by brightness() in main.cpp) — NEVER the 2P EEPROM path —
 //     so B, the envelope and a show never wear EEPROM. The owner's own 3P state is saved when the
@@ -65,7 +67,7 @@
 // ---- forward declaration: fill_column ---------------------------------------
 // Every OTHER board primitive this layer calls (allON/allOFF/VUMeter/runPattern/
 // brightness — the native ones; scanCol()/DiscoBall() are gone, replaced by the
-// vmContractScan/vmContractSparkle shims in include/psi_vm.h) is declared in
+// vmContractSparkle shim in include/psi_vm.h) is declared in
 // include/functions.h, which main.cpp pulls in via preamble.h at line 286 — well
 // above our include point at main.cpp:366. fill_column() is
 // the one exception: it is DEFINED at main.cpp:517 but declared in no header at all, so at
@@ -266,9 +268,15 @@ inline void contractYieldToNative() { _yieldNow(); }
 static inline void _serviceYield() { }
 #endif
 
-// The meter's level[] is the contract's while it holds the panel (verb L feeds it); otherwise
-// VUMeter() in main.cpp runs its own random walk.
-inline bool contractHoldsLevels() { return g_owned; }
+// The meter's level[] is the contract's while verb L feeds it. With no L for 2 s the stock random
+// walk in VUMeter() (main.cpp) runs again, so a meter look with no level feed still moves, and a
+// native VU mode is never left frozen by a show that has ended.
+static bool     g_levelFed = false;
+static uint32_t g_levelMs  = 0;
+inline bool contractHoldsLevels() {
+  if (g_levelFed && (uint32_t)(millis() - g_levelMs) >= 2000u) g_levelFed = false;
+  return g_levelFed;
+}
 
 // ---- the looks this build has ----------------------------------------------------
 // PSI_NO_STRIP_LOOKS (set only in the PSIPro-i2c environment) builds R1 without the six strip and
@@ -351,12 +359,17 @@ inline void _renderTwinkle(const CRGB& col) {
   FastLED.show(brightness());
 }
 #endif  // PSI_NO_STRIP_LOOKS
-// ---- strobe-capped flash toggle (reuses allON/allOFF; enforces < ~3 Hz) -----
-static inline void _renderFlash(const CRGB& c, uint16_t delayMs, uint32_t t0) {
-  uint32_t half = STROBE_MIN_STATE_MS;
-  if (delayMs > half) half = delayMs;                  // never faster than the cap
-  bool on = ((millis() - t0) % (2 * half)) < half;
-  if (on) allON(c, true, 0); else allOFF(true, 0);
+// ---- flash and scan: the core's shared timing (contract v1.3 section 12) -------------------
+// flash: a state is 170 ms at s=255 up to 425 ms at s=0, so it can never pass the strobe cap.
+static inline void _renderFlash(const CRGB& c, uint32_t t0) {
+  if (fxFlashOn(millis() - t0, g_u.speed)) allON(c, true, 0); else allOFF(true, 0);
+}
+// scan: ONE lit column that walks the panel and back, a step every fxStepMs(speed).
+static inline void _renderScan(const CRGB& col, uint32_t t0) {
+  const int pos = fxScanPos(millis() - t0, g_u.speed, COLUMNS, false);
+  CRGB off(0, 0, 0);
+  for (int p = 0; p < COLUMNS; p++) fill_column((uint8_t)p, p == pos ? col : off, 0);
+  FastLED.show(brightness());
 }
 
 // ---- the ONE look renderer: draw `eff` in `col` on a timeline that starts at t0 -------
@@ -368,9 +381,9 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
   switch (eff) {
     case CE_OFF:     allOFF(true, 0);                               break;
     case CE_SOLID:   allON(col, true, 0);                           break;
-    case CE_FLASH:   _renderFlash(col, d, t0);                      break;
-    case CE_PULSE:   allON(col, true, 0);                           break;  // the envelope pumps brightness
-    case CE_SCAN:    vmContractScan(d, col);                        break;
+    case CE_FLASH:   _renderFlash(col, t0);                         break;
+    case CE_PULSE:   allON(col, true, 0);                           break;  // contractLoopTick() breathes or pumps the level
+    case CE_SCAN:    _renderScan(col, t0);                          break;
     case CE_RAINBOW: _renderRainbow(d);                             break;
 #ifndef PSI_NO_STRIP_LOOKS                               // else _lookHere() never lets one reach here
     case CE_COMET:   _renderComet(col, t0);                         break;
@@ -484,6 +497,8 @@ inline void applyContract(const ParsedContract& p, uint32_t now) {
       uint8_t v = pr.hasLevel ? pr.level : 0;
       int lvl = LEDS_PER_COLUMN - ((int)v * LEDS_PER_COLUMN) / 255;   // v=255 -> 0 (full), v=0 -> 6 (empty)
       for (int c = 0; c < COLUMNS; c++) level[c] = lvl;
+      g_levelMs = now;
+      g_levelFed = true;
       break;
     }
 
@@ -536,7 +551,9 @@ inline void contractPulseTick() {
   if (g_u.pulseActive && (uint32_t)(millis() - g_u.pulseStartMs) >= g_u.pulseDurMs) {
     g_u.pulseActive = false;
     if (!_owns()) { _givePanelBack(); return; }        // L3: the native look returns
-    firstTime = true;                                  // re-init the native state machines the base look uses
+    // Re-init the state machines the base look uses (sparkle, the meter). Not a native:<n> look:
+    // it carries on where it was, as the board's own native look does under a pulse.
+    if (g_u.base != CB_NATIVE) firstTime = true;
   }
 }
 
@@ -565,10 +582,12 @@ inline bool contractLoopTick() {
         g_lastEffect = CE_NONE;
       }
       // The scored accent. Consume the edge first, always (or a beat that does not fire is tested
-      // again on every frame); then the SAME predicate the pump uses (S2).
+      // again on every frame); then the SAME predicate the pump uses (S2). A native:<n> section
+      // takes no overlay in R1 (section 6): an accent must never restart or replace a native sequence.
       if (beatEdge(g_u.lastAccentBeat, bp.beatIndex) && g_u.curSection >= 0) {
         const ScoreEntry& e = g_score[g_u.curSection];
-        if (e.accentFx != CE_NONE && beatAccentFires(e.accentMode, bp, g_clock, e.accentEvery)) {
+        if (e.accentFx != CE_NONE && e.effect != CE_NATIVE &&
+            beatAccentFires(e.accentMode, bp, g_clock, e.accentEvery)) {
           _fireAccent(e.accentFx, e.accentColor, (uint32_t)e.accentDur10 * 10u, now);
         }
       }
@@ -585,6 +604,11 @@ inline bool contractLoopTick() {
     float prog = (g_u.curSection >= 0) ? beatSectionProgress(bp.beatIndex, g_u.sectionStart, g_u.sectionEnd) : 0.0f;
     uint8_t env = beatAccentAmount(g_u.accentMode, bp, g_u.beatMod, prog, g_clock, g_u.accentEvery);
     effBright = envBright(lvl, g_u.beatMod, env);
+  } else if (g_u.pulseActive ? g_u.pulseFx == CE_PULSE : (g_u.base == CB_LOOK && g_u.effect == CE_PULSE)) {
+    // pulse: the shared breathe (a 2000 ms cycle at s=0 down to 340 ms at s=255, never faster: S8)
+    // whenever nothing pumps the look. Under the beat pump the envelope IS the breathe.
+    const uint32_t t0 = g_u.pulseActive ? g_u.pulseStartMs : g_u.startMs;
+    effBright = (uint8_t)(((uint16_t)lvl * fxPulseBright(now - t0, g_u.speed)) / 255u);
   }
   useTempInternalBrightness = true;                    // 3P volatile path only, never EEPROM
   tempGlobalBrightnessValue = effBright;

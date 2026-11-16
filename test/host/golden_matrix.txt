@@ -27,7 +27,6 @@ mode92_vuinf      0T92 8000  front 00,01,14 512
 mode02_alwayson   0T2  8000  front ff,ff,ff 512
 mode19_alwayson   0T19 12000 front ff,ff,ff 512
 mode22_process    0T22 15000 front 00,01,14 512
-contract_scan     !P*A:i=scan,c=ff0000    12000 front 00,01,14 512
 contract_sparkle  !P*A:i=sparkle,c=ff0000 12000 front 00,01,14 512
 seq_leia_knight     1000@0T6;2300@0T15           12000 front 00,01,14 512
 seq_march_d_march   1000@0T11;2300@0D;2500@0T11  8000  front 00,01,14 512

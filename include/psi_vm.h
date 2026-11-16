@@ -1273,41 +1273,8 @@ inline void vmPlay(uint8_t progId) {
 // hardcodes start_col=0/scanDirection=1 below), under the contract's own
 // firstTime re-init protocol (runContractAnim() sets firstTime on effect
 // switch, same as every native mode body's own lifecycle).
-static void vmContractScan(unsigned long d, const CRGB& col) {
-  if (firstTime) {
-    ledPatternState = COLUMNS - 1;   // scanCol(...,start_col=0,scanDirection=1) entry state
-    firstTime = false;
-    patternRunning = true;
-  }
-  if (checkDelay()) {
-    if (ledPatternState >= 0 && ledPatternState <= COLUMNS - 1) {
-      // Native's per-case allOFF(true) in FULL — not just its clear+show.
-      // allOFF's body (src/main.cpp) ends with `if ((runtime != 0) ||
-      // (timingReceived)) globalTimerDonedoRestoreDefault();`, and scanCol
-      // called it with runtime defaulted to 0, so the tail reduces to the
-      // timingReceived branch below — inherited by scanCol on EVERY gated
-      // tick even though scanCol's own body never names timingReceived.
-      // (allOFF's firstTime block is dead here: the shim's own firstTime
-      // block above has already cleared the flag, exactly as native
-      // scanCol's had by the time its cases ran.)
-      FastLED.clear();
-      FastLED.show();                // native allOFF(true): clear + bare show
-      if (timingReceived) globalTimerDonedoRestoreDefault();
-      fill_column((uint8_t)ledPatternState, col, 0);
-      vmShowDelay(d);
-    }
-    ledPatternState--;
-    if (ledPatternState < 0) {
-      ledPatternState = COLUMNS - 1;
-      globalPatternLoops--;
-    }
-  }
-  // native scanCol()'s OWN body has no runtime/loops epilogue (no
-  // loopsDonedoRestoreDefault/globalTimerDonedoRestoreDefault call of its
-  // own, and no reference to timingReceived) — globalPatternLoops decrements
-  // for bookkeeping only. Its ONE timing conditional is the inherited
-  // allOFF(true) tail mirrored above, inside the gated tick.
-}
+// (vmContractScan() is gone: contract v1.3 gives scan one timing definition for all three boards,
+// fxScanPos() in contract_core.h, and ContractPSI.h draws it from that. DiscoBall's shim stays.)
 
 static void vmContractSparkle(unsigned long d, const CRGB& col) {
   if (firstTime) {

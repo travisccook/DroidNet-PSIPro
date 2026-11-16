@@ -24,6 +24,16 @@ static uint8_t peakScale(uint32_t a, uint32_t b) {
   for (const Frame& f : between(a, b)) if (f.lit && f.scale > m) m = f.scale;
   return m;
 }
+// A peak is a rise of the frame's brightness scale followed by a fall.
+static unsigned pumpPeaks(uint32_t a, uint32_t b) {
+  unsigned peaks = 0; uint8_t prev = 255; bool rising = false;
+  for (const Frame& f : between(a, b)) {
+    if (f.scale > prev + 4) rising = true;
+    else if (f.scale + 4 < prev && rising) { peaks++; rising = false; }
+    prev = f.scale;
+  }
+  return peaks;
+}
 static unsigned countOf(const char* hay, const char* needle) {
   unsigned n = 0;
   for (const char* q = hay; (q = strstr(q, needle)) != nullptr; q++) n++;
@@ -39,16 +49,6 @@ static void no_wd_means_no_watchdog() {
 }
 
 // ---- S1, S2: the pump cannot strobe -----------------------------------------------------------
-// A peak is a rise of the frame's brightness scale followed by a fall.
-static unsigned pumpPeaks(uint32_t a, uint32_t b) {
-  unsigned peaks = 0; uint8_t prev = 255; bool rising = false;
-  for (const Frame& f : between(a, b)) {
-    if (f.scale > prev + 4) rising = true;
-    else if (f.scale + 4 < prev && rising) { peaks++; rising = false; }
-    prev = f.scale;
-  }
-  return peaks;
-}
 // S1: a tempo outside 30..300 is ignored whole, so no clock runs and nothing pumps.
 static void out_of_range_bpm_is_ignored() {
   boot(0x00, 0x01, 200);                               // owner brightness 200: the pump's swing is visible
@@ -475,6 +475,102 @@ static void the_query_ack_is_byte_exact() {
   CHECK(countOf(tx, "q:ver=") == 4, "four queries by name, four acks: saw %u", countOf(tx, "q:ver="));
 }
 
+
+// ---- section 12: flash, pulse and scan have ONE timing definition, the core's -------------------
+// The oracle in these three is the core's own function, so the panel is checked against the same
+// maths the other two boards and Studio's preview use.
+// scan: exactly one whole column lit, at fxScanPos(), walking the panel and back.
+static void scan_is_the_shared_ping_pong() {
+  boot();
+  at(1000, "!P*A:i=scan,c=00ff00,s=200");            // applied at t=1000: the look's own time zero
+  runTo(4000);
+  unsigned frames = 0; bool seen[COLUMNS] = {false};
+  for (const Frame& f : between(1030, 4000)) {
+    const int want = fxScanPos(f.t - 1000, 200, COLUMNS, false);
+    for (int c = 0; c < COLUMNS; c++)
+      for (int r = 0; r < LEDS_PER_COLUMN; r++) {
+        const int led = psiLed((uint8_t)c, (uint8_t)r);
+        if (led < 0) continue;
+        const bool lit = f.px[led].g == 255 && f.px[led].r == 0 && f.px[led].b == 0;
+        const bool dark = !(f.px[led].r | f.px[led].g | f.px[led].b);
+        if (c == want ? !lit : !dark) { CHECK(false, "t=%u: column %d is wrong (the lit column should be %d)", f.t, c, want); goto done; }
+      }
+    seen[want] = true; frames++;
+  }
+done:
+  CHECK(frames > 100, "the scan latches every frame (%u in 3 s)", frames);
+  for (int c = 0; c < COLUMNS; c++) CHECK(seen[c], "the scan never reached column %d", c);
+}
+// flash: a state is fxFlashHalfMs(speed), 170 ms at s=255 up to 425 ms at s=0, to within a frame.
+static void flash_speed_is_the_shared_timing() {
+  boot();
+  at(1000, "!P*A:i=flash,c=00ff00,s=0");
+  runTo(6000);
+  uint32_t since = 0; bool state = false, first = true; unsigned states = 0;
+  for (const Frame& f : between(1100, 6000)) {
+    const bool lit = f.lit > 0;
+    if (first) { state = lit; first = false; continue; }
+    if (lit == state) continue;
+    if (since) {
+      const uint32_t d = f.t - since;
+      CHECK(d + 26 >= fxFlashHalfMs(0) && d <= fxFlashHalfMs(0) + 26, "at s=0 a state is %u ms, saw %u", (unsigned)fxFlashHalfMs(0), d);
+      states++;
+    }
+    since = f.t; state = lit;
+  }
+  CHECK(states >= 8, "flash at s=0 changes state about every 425 ms (%u states in 5 s)", states);
+}
+// pulse: with nothing pumping the look it breathes on fxPulseBright(): 340 ms a cycle at s=255,
+// never faster (S8), 2 s a cycle at s=0. Under the beat pump the envelope is the breathe.
+static void pulse_breathes_on_the_shared_timing() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!P*A:i=pulse,c=ffffff,s=255"); at(6000, "!P*A:i=pulse,c=ffffff,s=0");
+  runTo(13000);
+  for (const Frame& f : between(1100, 5900)) {
+    const uint8_t want = (uint8_t)(((uint16_t)200 * fxPulseBright(f.t - 1000, 255)) / 255u);
+    if (f.scale != want) { CHECK(false, "t=%u: the breathe is %u, the core says %u", f.t, f.scale, want); break; }
+  }
+  const unsigned fast = pumpPeaks(1100, 5900), slow = pumpPeaks(6500, 12500);
+  CHECK(fast >= 12 && fast <= 14, "s=255 is a 340 ms cycle: 14 peaks in 4.8 s, never more; saw %u", fast);
+  CHECK(slow == 3, "s=0 is a 2 s cycle: 3 peaks in 6 s, saw %u", slow);
+}
+static void a_pumped_pulse_follows_the_beat() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**C:bpm=120,bpb=4,beat=0"); at(1001, "!P*A:i=pulse,c=ffffff,s=255,m=255,am=2");
+  runTo(5100);
+  const unsigned p = pumpPeaks(1100, 5100);
+  CHECK(p >= 7 && p <= 9, "under the pump a pulse peaks once a beat (8 in 4 s), not on its own cycle; saw %u", p);
+}
+
+// ---- section 6: no accent on a native section; a meter with no level feed ------------------------
+static void no_accent_on_a_native_section() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=native:15,at=0,am=2,ae=solid,ac=ffffff");
+  at(2000, "!**C:bpm=60,bpb=4,beat=0");
+  runTo(6000);
+  CHECK(mostLit(2500, 6000) > 0 && mostLit(2500, 6000) <= 6, "the native section plays (Knight Rider)");
+  CHECK(onsets(2000, 6000, WHITE).empty(), "a native section takes no overlay in R1");
+}
+static void a_meter_with_no_level_feed_walks() {
+  boot();
+  at(1000, "!P*A:i=meter"); at(1100, "!P*L:v=128");
+  runTo(8000);
+  unsigned fedKinds = 0, walkKinds = 0; unsigned seenFed[49] = {0}, seenWalk[49] = {0};
+  for (const Frame& f : between(1500, 3000)) if (!seenFed[f.lit]++) fedKinds++;
+  for (const Frame& f : between(4000, 8000)) if (!seenWalk[f.lit]++) walkKinds++;
+  CHECK(fedKinds == 1, "while L feeds it the meter is a flat bar");
+  CHECK(walkKinds >= 3, "2 s after the last L the stock random walk runs (saw %u shapes)", walkKinds);
+}
+// ...and a show's L must not leave the board's own VU mode frozen once the show has ended.
+static void a_native_vu_mode_walks_after_a_show() {
+  boot(0x01);                                          // alwaysOn: the native VU mode keeps running
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=meter"); at(1200, "!P*L:v=128"); at(1500, "!**M:v=idle"); at(1600, "0T92");
+  runTo(9000);
+  unsigned kinds = 0; unsigned seen[49] = {0};
+  for (const Frame& f : between(4000, 9000)) if (!seen[f.lit]++) kinds++;
+  CHECK(kinds >= 3, "the native VU meter moves again 2 s after the show's last L (saw %u shapes)", kinds);
+}
+
 #ifdef PSI_ENABLE_I2C
 // ---- the I2C build: the TWI interrupt only queues ------------------------------------------------
 // A contract line from an I2C master is copied in the interrupt and applied by loop(): nothing is
@@ -545,6 +641,13 @@ static const Scenario kScenarios[] = {
   {"flash_alternates_no_faster_than_the_cap", flash_alternates_no_faster_than_the_cap},
   {"the_accent_cool_down_cannot_be_bypassed", the_accent_cool_down_cannot_be_bypassed},
   {"the_query_ack_is_byte_exact", the_query_ack_is_byte_exact},
+  {"scan_is_the_shared_ping_pong", scan_is_the_shared_ping_pong},
+  {"flash_speed_is_the_shared_timing", flash_speed_is_the_shared_timing},
+  {"pulse_breathes_on_the_shared_timing", pulse_breathes_on_the_shared_timing},
+  {"a_pumped_pulse_follows_the_beat", a_pumped_pulse_follows_the_beat},
+  {"no_accent_on_a_native_section", no_accent_on_a_native_section},
+  {"a_meter_with_no_level_feed_walks", a_meter_with_no_level_feed_walks},
+  {"a_native_vu_mode_walks_after_a_show", a_native_vu_mode_walks_after_a_show},
 #ifdef PSI_ENABLE_I2C
   {"an_i2c_contract_line_is_applied_by_loop", an_i2c_contract_line_is_applied_by_loop},
   {"an_i2c_native_command_takes_the_panel_back", an_i2c_native_command_takes_the_panel_back},
