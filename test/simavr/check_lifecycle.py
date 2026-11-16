@@ -23,6 +23,9 @@ EXPECT = [
     ("swipe", "armed a third time"),
     ("green", "the live look"),
     ("swipe", "2 s after M:v=idle: the swipe again"),
+    ("swipe", "armed with wd=2"),
+    ("green", "1.3 s of host silence: the look holds"),
+    ("swipe", "2.8 s of host silence: the watchdog gave the panel back"),
 ]
 KINDS = {
     "swipe": lambda c: c["lit"] == 48 and c["green"] == 0 and c["white"] == 0 and c["code"] == 1,

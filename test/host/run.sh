@@ -360,7 +360,7 @@ fi   # PlatformIO present
 echo "[10] simavr: millis() rate per look, the show lifecycle, S9 on the wire, WS2812 waveform, CPU cost -- optional"
 # The host mocks have an ideal clock and a free show(). These five probes run real AVR code in
 # simavr (test/simavr/README.md): the firmware's millis() against Timer1 for each contract look,
-# the firmware through a show, X, idle, a native take-over and a pulse (what the panel returns to
+# the firmware through a show, X, idle, a native take-over, a pulse and a watchdog expiry (what the panel returns to
 # depends on when upstream's loop samples its pattern state, so it is checked on the real timer
 # too), the firmware under two hostile line streams with every frame decoded off the LED pin and
 # its dark-to-lit onsets counted (the S9 gate sits in the real driver's show(), which the host

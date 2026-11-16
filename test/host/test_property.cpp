@@ -5,8 +5,9 @@
 //     (a) goes from dark to lit across its whole field at most three times in any second, and no
 //         two such onsets are less than 340 ms apart;
 //     (b) is never brighter than its owner's ceiling while the contract holds it;
-//     (c) is back on the board's own native look, and stays there, after M:v=idle (in a stream
-//         with no native commands that look is the swipe at the owner's brightness);
+//     (c) is back on the board's own native look, and stays there, after M:v=idle or a watchdog
+//         expiry (in a stream with no native commands that look is the swipe at the owner's
+//         brightness), and the watchdog fires when the test's own count says it must;
 //     (d) is dark at once after X, and stays dark until a line that may relight it;
 //     (e) L6: runs the mode a native command started, and the contract does not take the panel
 //         back by itself.
@@ -127,6 +128,9 @@ static void expectUnknown(){ gExpectNative = gExpectDark = false; gExpectButton 
 // delivered whole (the firmware reads everything that is there on each pass).
 static std::deque<std::string> gQueue;
 static bool gModeLine = false;            // a line that ends or restarts show mode went out in this pass
+// L2, by the test's own count: armed by M:v=show,wd=<s>; fed by any well-formed line addressed to
+// this board. gWdSure: nothing else (a V) may have ended show mode since it armed.
+static bool gWdArmed = false, gWdSure = false; static uint32_t gWdMs = 0, gLastAddressed = 0;
 static void tx(const std::string& line) { gQueue.push_back(line); }
 static void deliver(const std::string& line) {
   ParsedContract p;
@@ -135,10 +139,13 @@ static void deliver(const std::string& line) {
   gLines++;
   logf(("line  " + line).c_str());
   if (!contractParse(l, p) || (p.cls != 'P' && p.cls != '*') || (p.unit != 'F' && p.unit != '*')) return;
+  gLastAddressed = gNow;
   if (p.verb == CV_CLOCK) { expectUnknown(); return; }                 // a score may start to play
   if (p.verb == CV_MODE || p.verb == CV_VERIFY) gModeLine = true;
-  if (p.verb == CV_MODE && p.params.mode == 'i')      expectNative();
-  else if (p.verb == CV_MODE && p.params.mode == 's') expectNative();  // armed: the native look until the show begins
+  if (p.verb == CV_VERIFY) gWdSure = false;
+  if (p.verb == CV_MODE && p.params.mode == 'i')      { expectNative(); gWdArmed = false; }
+  else if (p.verb == CV_MODE && p.params.mode == 's') { expectNative();  // armed: the native look until the show begins
+    gWdArmed = gWdSure = p.params.hasWd && p.params.wd != 0; gWdMs = (uint32_t)p.params.wd * 1000u; }
   else if (p.verb == CV_STOP)                         expectDark();
   else if (p.verb == CV_ANIMATE || p.verb == CV_PULSE) expectUnknown(); // may take, or relight, the panel
   // Q, L, B, V and an M that is neither show nor idle: nothing the panel may light up for
@@ -149,6 +156,7 @@ static void press(int code) {
   Serial1.feed(b); Serial1.feed("\r");
   logf((std::string("BUTTON ") + b).c_str());
   gPressed = true; gPassesSincePress = 0;
+  gWdArmed = false;                                  // a native command ends the show, its watchdog with it
   gExpectDark = false; gExpectNative = false;
   gExpectButton = code; gButtonFrom = gNow; gButtonPasses = 0;
   gPresses++;
@@ -164,6 +172,11 @@ static void step(uint32_t ms = 1) {
   // light, not the contract's onset: the observers start counting afresh.
   if (gPressed) { gPressed = false; for (Onsets& o : gObs) o.n = 0; }
   serialEventRun();
+  // L2: the watchdog must have fired by now (it is looked at once a frame; a slow pass is 40 ms).
+  if (gWdArmed && gNow - gLastAddressed >= gWdMs + 80) {
+    if (gWdSure && g_u.inShow) { gWdLate++; broke("the watchdog is late"); }
+    gWdArmed = false;
+  }
   // Show mode ended with no line saying so, and no native command (which ends it in this pass, or
   // in the next on the I2C build): the panel goes back to native.
   gPassesSincePress++;
@@ -240,7 +253,8 @@ static std::string randomLine() {
     case 12: snprintf(b, sizeof b, "%s%sX", cls, unit); break;
     case 13: {
       const char* mode = pick({ "show", "show", "idle", "stop" });
-      snprintf(b, sizeof b, "%s%sM:v=%s", cls, unit, mode); break;
+      const char* wd = pick({ "", "", ",wd=1", ",wd=2" });
+      snprintf(b, sizeof b, "%s%sM:v=%s%s", cls, unit, mode, wd); break;
     }
     case 14: snprintf(b, sizeof b, "%s%sV:n=%u,k=%04x", cls, unit, r6, r9); break;
     case 15: snprintf(b, sizeof b, "%s%sQ:r=%s", cls, unit, pick({ "0", "2", "", "zz", "100" })); break;

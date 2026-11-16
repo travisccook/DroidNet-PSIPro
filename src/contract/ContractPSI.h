@@ -127,6 +127,7 @@ static uint8_t           g_scoreMem[sizeof(ScoreEntry) * PSI_SCORE_CAP];
 static ScoreEntry* const g_score = (ScoreEntry*)(void*)g_scoreMem;
 
 static ContractEffect g_lastEffect = CE_NONE;      // forces firstTime when the rendered look changes
+static uint32_t       g_lastLineMs = 0;            // L2: the last well-formed line addressed to this board
 // S6 and the give-back. g_owned: the contract holds the panel (a look, a dark baseline or a pulse),
 // so the owner's own 3P state below is saved and is put back when the panel is given back.
 static bool    g_owned        = false;
@@ -566,7 +567,7 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
       break;
 
     case CV_MODE:
-      if (pr.mode == 's')      _boundary('s', 0);
+      if (pr.mode == 's')      _boundary('s', pr.hasWd ? pr.wd : 0);   // L2: wd=<s> arms the watchdog
       else if (pr.mode == 'i') _boundary('i', 0);
       break;
 
@@ -614,10 +615,12 @@ inline void contractPulseTick() {
 }
 
 // Called inside the 25 ms loop gate. Returns true when the contract owns the frame (so the native
-// runPattern path is skipped). Score, accent, envelope, then render.
+// runPattern path is skipped). Watchdog, score, accent, envelope, then render.
 inline bool contractLoopTick() {
   _serviceYield();                                     // L6: a native command since the last pass
   uint32_t now = millis();
+  // L2: wd seconds with no well-formed line addressed to this board, in show mode: as M:v=idle.
+  if (contractWatchdogExpired(g_u, g_lastLineMs, now)) _boundary('i', 0);
 
   BeatPos bp;                                          // ONE beat position for the whole tick
   if (g_clock.running) {
@@ -688,9 +691,11 @@ inline void parseContract(const char* cmd) {
   ParsedContract p;
   if (!contractParse(cmd + 1, p)) return;              // +1 skips the leading '!'
   if (!contractAddressed(p.cls, p.unit)) return;       // fail-silent for other boards and units
+  const uint32_t now = millis();
+  g_lastLineMs = now;                                  // L2: any verb, an unanswered wildcard Q included
   // A scored line is stored with the CRC of its bytes after '!', as received.
   const uint16_t crc = (p.verb == CV_ANIMATE && p.params.hasAt) ? contractCrc16(cmd + 1) : 0;
-  applyContract(p, crc, millis());
+  applyContract(p, crc, now);
 }
 
 // ---- I2C DEFERRAL: get the contract OUT of the interrupt handler -------------------------

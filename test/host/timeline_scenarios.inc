@@ -580,6 +580,40 @@ static void a_native_vu_mode_walks_after_a_show() {
 }
 
 
+// ---- L2: the host-silence watchdog ----------------------------------------------------------------
+static void watchdog_gives_the_panel_back() {
+  boot();
+  at(1000, "!**M:v=show,wd=2"); at(1100, "!P*A:i=solid,c=00ff00");
+  runTo(4000);
+  CHECK(shown(2900).allAre(GREEN), "inside wd the look holds");
+  CHECK(swipeAt(3900), "2 s of silence must end the show (swipe back)");
+}
+// Any well-formed line addressed to the board is a keepalive, a wildcard Q that is never answered
+// included. A line for another board, or for the other PSI, is not.
+static void watchdog_is_fed_by_any_addressed_line() {
+  boot();
+  at(1000, "!**M:v=show,wd=2"); at(1100, "!P*A:i=solid,c=00ff00");
+  for (uint32_t t = 2500; t < 9000; t += 1500) at(t, "!**Q");
+  runTo(9000);
+  CHECK(shown(8900).allAre(GREEN), "a line every 1.5 s keeps a wd=2 show alive");
+}
+static void watchdog_is_not_fed_by_another_boards_lines() {
+  boot();                                              // a front PSI
+  at(1000, "!**M:v=show,wd=2"); at(1100, "!P*A:i=solid,c=00ff00");
+  for (uint32_t t = 2000; t < 6000; t += 500) { at(t, "!PRQ"); at(t + 100, "!L*A:i=solid,c=ffffff"); at(t + 200, "!P*garbage"); }
+  runTo(6000);
+  CHECK(shown(2900).allAre(GREEN), "inside wd the look holds");
+  CHECK(swipeAt(3900) && swipeAt(5900), "lines for the rear PSI, for the logics, and malformed ones do not feed it");
+}
+// X leaves the watchdog armed: a host that blacks the dome out and then dies still gives it back.
+static void x_leaves_the_watchdog_armed() {
+  boot();
+  at(1000, "!**M:v=show,wd=2"); at(1100, "!P*A:i=solid,c=00ff00"); at(2000, "!P*X");
+  runTo(5000);
+  CHECK(shown(3900).lit == 0, "X is dark while the host is only just silent");
+  CHECK(swipeAt(4900), "2 s after the last line the board is given back, although X was the last word");
+}
+
 // ---- S9: one limit for every path (the field gate, at the place every frame leaves) --------------
 // The hostile streams are test_property.cpp's. These four show the rule itself.
 // A relight right after a blackout: the dark is immediate, the light waits until 340 ms after the
@@ -750,6 +784,10 @@ static const Scenario kScenarios[] = {
   {"no_accent_on_a_native_section", no_accent_on_a_native_section},
   {"a_meter_with_no_level_feed_walks", a_meter_with_no_level_feed_walks},
   {"a_native_vu_mode_walks_after_a_show", a_native_vu_mode_walks_after_a_show},
+  {"watchdog_gives_the_panel_back", watchdog_gives_the_panel_back},
+  {"watchdog_is_fed_by_any_addressed_line", watchdog_is_fed_by_any_addressed_line},
+  {"watchdog_is_not_fed_by_another_boards_lines", watchdog_is_not_fed_by_another_boards_lines},
+  {"x_leaves_the_watchdog_armed", x_leaves_the_watchdog_armed},
   {"a_relight_right_after_x_is_held", a_relight_right_after_x_is_held},
   {"the_swipe_after_idle_is_held_too", the_swipe_after_idle_is_held_too},
   {"a_show_never_exceeds_the_ceiling", a_show_never_exceeds_the_ceiling},

@@ -33,7 +33,10 @@ static const char kRows[] PROGMEM =
   "11500|!**M:v=show\n"                // cp9  after the pulse: the swipe again
   "11600|!P*A:i=solid,c=00ff00\n"      // cp10 armed
   "12600|!**M:v=idle\n"                // cp11 all green
-  "14600|\n";                          // cp12 2 s after idle: the swipe
+  "14600|!**M:v=show,wd=2\n"           // cp12 2 s after idle: the swipe
+  "14700|!P*A:i=solid,c=00ff00\n"      // cp13 armed, with a 2 s watchdog
+  "16000|\n"                           // cp14 1.3 s of silence: the look holds
+  "17500|\n";                          // cp15 2.8 s of silence: the watchdog gave the panel back
 static const char* gRow = kRows;
 static uint8_t gCp = 0;
 
