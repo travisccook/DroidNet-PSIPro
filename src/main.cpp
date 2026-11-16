@@ -284,7 +284,8 @@
 
 // Include the various libraries that we need.
 // DroidNet: every frame passes the contract's S9 field gate on its way out (ContractPSI.h,
-// contractFrameScale). With no contract activity the gate only watches: the scale is unchanged.
+// contractFrameScale). With no contract activity the gate only watches: every frame is sent, at
+// the scale it came with.
 // Named BEFORE preamble.h, whose functions.h is the first to include <FastLED.h>.
 // (PSI_NO_CONTRACT: a build without the contract layer has no gate, and show() is upstream's.)
 #ifndef PSI_NO_CONTRACT

@@ -70,7 +70,7 @@ inline void (*g_frame_hook)(const CRGB* leds, int n, uint8_t scale) = nullptr;
 
 #ifdef PSI_FRAME_GATE
 #define PSI_FRAME_GATE_WIRED 1             // ContractPSI.h refuses to build without it
-uint8_t PSI_FRAME_GATE(const CRGB* leds, uint8_t n, uint8_t scale);   // src/contract/ContractPSI.h
+int PSI_FRAME_GATE(const CRGB* leds, uint8_t n, uint8_t scale);       // src/contract/ContractPSI.h
 #endif
 struct CFastLED {
   CRGB* m_leds = nullptr;
@@ -82,7 +82,11 @@ struct CFastLED {
   void clear() { if (m_leds) memset((void*)m_leds, 0, (size_t)m_n * sizeof(CRGB)); }
   void show(uint8_t scale) {
 #ifdef PSI_FRAME_GATE                      // the same hook, at the same place, as include/FastLED.h
-    if (m_leds && m_n > 0) scale = PSI_FRAME_GATE(m_leds, (uint8_t)m_n, scale);
+    if (m_leds && m_n > 0) {
+      const int gated = PSI_FRAME_GATE(m_leds, (uint8_t)m_n, scale);
+      if (gated < 0) return;                 // a held frame is not sent: the panel keeps what it shows
+      scale = (uint8_t)gated;
+    }
 #endif
     if (g_frame_hook) g_frame_hook(m_leds, m_n, scale);
   }

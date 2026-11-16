@@ -523,14 +523,21 @@ static void test_fx_helpers() {
 }
 
 static void test_fx_spatial_helpers() {
-  // fxHead: (elapsed / fxStepMs(speed)) % N. At speed=255, fxStepMs==30, so
-  // head advances one position every 30ms and wraps at N. Exact vectors
-  // captured by running the real implementation (clang++ host build).
+  // fxHead: (elapsed / fxCometStepMs(speed, N)) % N: the head advances one position a step and
+  // wraps at N.
+  // CA1.6: a lap of the comet is never under 680 ms (FX_CYCLE_MIN_MS). On 10 positions that is
+  // a step of 68 ms at the top speed (it was 30: a 300 ms lap); on 23 and more the step is
+  // fxStepMs() as before.
+  CHECK(fxCometStepMs(255, 10) == 68 && fxCometStepMs(255, 8) == 85 && fxCometStepMs(255, 7) == 98);
+  CHECK(fxCometStepMs(255, 23) == 30 && fxCometStepMs(255, 28) == 30 && fxCometStepMs(0, 8) == fxStepMs(0) && fxCometStepMs(80, 8) == fxStepMs(80));
+  for (int n = 1; n <= 64; n++) for (int sp = 0; sp < 256; sp += 5)
+    CHECK(fxCometStepMs((uint8_t)sp, n) * (uint32_t)n >= FX_CYCLE_MIN_MS && fxCometStepMs((uint8_t)sp, n) >= fxStepMs((uint8_t)sp));
   CHECK(fxHead(0, 255, 10) == 0);
-  CHECK(fxHead(30, 255, 10) == 1);
-  CHECK(fxHead(299, 255, 10) == 9);   // just before the 10th wrap
-  CHECK(fxHead(300, 255, 10) == 0);   // wrapped exactly 10 steps
-  CHECK(fxHead(310, 255, 10) == 0);   // still within step 10's window
+  CHECK(fxHead(68, 255, 10) == 1);
+  CHECK(fxHead(679, 255, 10) == 9);   // just before the 10th wrap
+  CHECK(fxHead(680, 255, 10) == 0);   // wrapped exactly 10 steps
+  CHECK(fxHead(700, 255, 10) == 0);   // still within step 10's window
+  CHECK(fxHead(60, 255, 28) == 2 && fxHead(840, 255, 28) == 0);
 
   // fxCometBright: 255 at the head, linear falloff to 0 across
   // trail=max(2,2N/5); for N=10, trail=4. Exact bytes captured by running

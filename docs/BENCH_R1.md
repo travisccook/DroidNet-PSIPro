@@ -9,11 +9,11 @@ claim about R1 is about the host, the cross-compiler and the simulator.
 | | `PSIPro` (default) | `PSIPro-i2c` |
 | --- | --- | --- |
 | Intake | serial header | serial header and I2C (address 22) |
-| Contract layer (the light show) | yes, v1.3, shared core CA1.5 | **no**: a `!` line means nothing to it |
+| Contract layer (the light show) | yes, v1.3, shared core CA1.6 | **no**: a `!` line means nothing to it |
 | Looks | solid, off, flash, pulse, scan, sparkle, rainbow, meter, `native:<n>` | native modes only |
 | Stand-ins | comet, chase, wipe draw as scan; twinkle as sparkle; gradient, colorcycle as solid | none |
 | WDP caps | `droidnet.contract`, `contract.1.3s` | none |
-| Flash | 27,866 B (97.2 %) | 16,888 B (58.9 %) |
+| Flash | 28,150 B (98.2 %) | 16,960 B (59.2 %) |
 
 Both builds carry all 23 upstream modes and mode 22, the exact `millis()` credit, the 200 µs latch gap,
 the bounded command buffer and the WDP announce. The images are built from a clean checkout with
@@ -24,6 +24,18 @@ Known limits of R1, to have in mind while watching:
 - A pulse over the board's own look is on the panel for at least 170 ms, and for 340 ms when it made
   the panel brighter: the return to the board's look waits for the gate.
 - A look or a colour that follows another within 170 ms is held until then. The look before it stays up.
+- A frame the gate holds is not sent at all (core CA1.6): the panel keeps what it shows, for up to
+  340 ms, and the look then appears at its level. Nothing is shown dimmed in between.
+- The gate measures the whole panel. A look that moves by itself can light a part of the panel
+  just before a blackout and a full look light that part again: the meter's bars with no `L` feed,
+  or a meter restarted by a new colour, then `X` and a solid. In the host's random streams (27
+  seeds, 3,000 streams each) one part of the panel (a half, a quarter or a band) lit twice
+  104 ms apart at the closest, and never more than three times in one second;
+  each look by itself, and the scripts made for a part of the panel, keep to 340 ms. Closing it
+  takes a gate that knows regions (the logics fork has the same limit with its comet). Watch for
+  it at steps 12 and 22.
+- A look is taken to be on the panel from its first frame with an LED at 4 levels or more (of
+  255). At a brightness under 4 nothing the contract draws counts as a change of look.
 - The six strip and hue looks draw as stand-ins.
 - A droid that drives its PSI over I2C has no light show on that board.
 
@@ -52,11 +64,18 @@ Record for each step: pass or fail, what was seen, and a short phone video. Seri
 | 9 | Corrections (C1, C2): during the show, `!**C:ph=<ms>,beat=<n>` by hand a few times | No extra flash, no step back to the previous section | |
 | 10 | Watchdog (L2): stop sending | After 15 s the swipe returns | |
 | 11 | Idle restore (L1): `!**M:v=show`, `!P*A:i=native:15`, `!**M:v=idle`; then in a show `!P*X`; then in a show `0T1` | The swipe, not Knight Rider. Dark until `!**M:v=idle`. The swipe at once | |
-| 12 | The gate (S9, S11): in a show, `!P*A:i=solid,c=0000ff` and `!P*A:i=solid,c=ffffff` alternating as fast as they can be sent; then white, `!P*X`, white again at once | The colour changes about six times a second at most, never a flicker. The second white comes a third of a second after the first | |
+| 12 | The gate (S9, S11): in a show, `!P*A:i=solid,c=0000ff` and `!P*A:i=solid,c=ffffff` alternating as fast as they can be sent; then white, `!P*X`, white again at once | The colour changes about six times a second at most, never a flicker. The second white comes a third of a second after the first, and the panel is black until then, not dim | |
 | 13 | Native looks in a show (S10): `!P*A:i=native:15`, `!P*P:c=ffffff,d=100`, `!**B:b=40`, `!P*L:v=0`, `!P*A:i=native:92`, `!P*L:v=255` | Knight Rider at the show's level; the pulse draws nothing; dimmer; the VU meter keeps its own bars whatever `L` says | |
 | 14 | Stand-ins: `!P*A:i=comet,c=00ff00`, `!P*A:i=twinkle,c=00ff00`, `!P*A:i=gradient,c=00ff00` | A green scan; a green sparkle; solid green | |
 | 15 | Serial under load: with `!P*A:i=meter` running, the 16-line load burst back to back at 9600 baud, ten times | `!PFQ:r=0` reads `ok=1` every time | |
 | 16 | Scope, if available: PD4 | T0H 250 ns, T1H 750 ns, 1.25 µs bits, at least 280 µs low between frames | |
+| 22 | The meter and `L` (review finding 1): in a show, `!P*A:i=meter,s=255`, then `!P*L:v=255` and `!P*L:v=128` alternating every 50 ms for 10 s; then stop sending `L` and wait 3 s | The top half of the panel lights about three times a second at the most, never a flicker; it follows `L` (it is not stuck). With no `L` the bars walk by themselves, about six steps a second | |
+| 23 | A pulse over a mode that has ended (review finding 2): blank EEPROM (`0P1`), `0T19`, wait until the battle has ended and its last frame stands, `!P*P:c=ffffff,d=170`; then the same over `0T4` once it has faded | One white pulse, then the battle plays again from its start (short circuit: the fade again). White never stays on the panel, and `!**M:v=idle` is not needed to get the board back | |
+| 24 | The same mode again during a show: `0T19`, wait for its end, `!**M:v=show`, `!P*A:i=solid,c=ff0000`, `0T19` | The red goes and the battle plays | |
+| 25 | A `D` for another board (review finding 4): in a show with a solid look, `3D`, then `9A`; then `0D` | Nothing changes for `3D` and `9A`; `0D` ends the show and the swipe returns | |
+| 26 | A stale timing (review finding 5): `0T6\|1`, wait for the swipe, then `!**M:v=show`, `!P*A:i=native:22` | The processing sweep runs on, lap after lap; it does not restart every second | |
+| 27 | A look that comes up slowly (CA1.6): in a show at brightness 200 (`3P200` first, on a 3 A supply), `!P*A:i=off`, `!P*A:i=pulse,c=ff0000,s=0,b=80`, and 171 ms later `!P*A:i=solid,c=00ff00,b=80` | Red comes up for about a quarter of a second before the green: the green does not cut in on a red that has only just become visible | |
+| 28 | A timing sent to a running short circuit (review finding 7): `0T4`, and one second later `0T4\|20`; then `0T19` and `0T23\|2` during the battle | The fade goes on to its end as if nothing had been sent. The battle stops at its next step and the swipe returns, as upstream's does | |
 
 ## The I2C image
 
@@ -67,6 +86,8 @@ Record for each step: pass or fail, what was seen, and a short phone video. Seri
 | 19 | `0T6`, `0T15`, `0T0`, `0T1` from an I2C master at address 22 | Each mode runs | |
 | 20 | `!P*A:i=solid,c=ff0000`, `!**M:v=show`, `!P*X`, `!PFQ:r=0` over serial | Nothing changes on the panel and nothing is answered | |
 | 21 | `0T92` for 5 minutes beside a stopwatch, then `0T6\|5` | The timed mode ends after 5 s by the stopwatch | |
+| 29 | A mode command over I2C while another mode draws (review finding 3): `0T19` over serial, then `0T15` from the I2C master, twenty times, at random moments of the battle (start the battle again each time); the same with `0T6` then `0T15`, and `0T15` then `0T6` | Each time the new mode takes the panel and keeps it. Never one step of the new mode and then the old one again (that was the fault: the old mode went on under the new mode's number) | |
+| 30 | Steps 23 (without the `!` line: `0T19`, wait, `0T19` again) and 28 on this image | The battle plays again; as step 28 | |
 
 ## When it is done
 

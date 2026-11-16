@@ -1386,10 +1386,30 @@ static void a_stale_timing_does_not_cut_a_shows_native_look() {
   }
   CHECK(got[0][0] && !strcmp(got[0], got[1]), "native:22 in a show after 0T6|1 is not what it is without it (%s vs %s)", got[1], got[0]);
 }
-// Review, test quality (a). The gate has two measures. Dark, then blue, then white 171 ms later:
-// the brightest channel sees one onset (the blue), the luminance sees a second one (the white,
-// ten times the light). The white must wait until 340 ms after the blue lit.
-static void white_171_ms_after_blue_from_dark_waits_for_the_window() {
+// Review, test quality (a). The gate has two measures, and an onset of either is an onset. Blue,
+// lit for a second: the brightest channel is lit, the luminance is not. White: the luminance
+// lights (ten times the light). X, and white again 200 ms after the first white: the field lights
+// again, and it must wait until 340 ms after the WHITE lit. A gate with one measure never saw the
+// white light, counts from the blue, and lets the second white through at once.
+// (Under core CA1.5 the stimulus was dark, blue, white 171 ms later, and the white waited 340 ms
+// from the blue. CA1.6 makes one rise one onset: a measure that lights while the other is still
+// rising lights with it, so that white now comes at once, which the second check pins.)
+static void white_again_after_a_blackout_waits_for_the_whites_own_window() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=0000ff"); at(3000, "!P*A:i=solid,c=ffffff");
+  at(3100, "!P*X"); at(3200, "!P*A:i=solid,c=ffffff");
+  runTo(4200);
+  uint32_t first = 0, dark = 0, again = 0;
+  for (const Frame& f : between(3000, 4200)) {
+    const bool white = f.allAre(WHITE) && f.scale >= 100;
+    if (!first && white) first = f.t;
+    if (first && !dark && f.lit == 0) dark = f.t;
+    if (dark && !again && white) again = f.t;
+  }
+  CHECK(first != 0 && dark != 0 && again != 0, "white, black, white (t=%u, %u, %u)", first, dark, again);
+  CHECK(again >= first + 340 && again <= first + 340 + 27, "the second white at full level within a frame of 340 ms after the first lit (t=%u), saw t=%u", first + 340, again);
+}
+static void a_colour_that_brightens_within_a_rise_is_one_onset() {
   boot(0x00, 0x01, 200);
   at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=0000ff"); at(2171, "!P*A:i=solid,c=ffffff");
   runTo(3000);
@@ -1399,7 +1419,57 @@ static void white_171_ms_after_blue_from_dark_waits_for_the_window() {
     if (!white && f.allAre(WHITE) && f.scale >= 100) white = f.t;
   }
   CHECK(blue != 0 && white != 0, "blue, then white (blue t=%u, white t=%u)", blue, white);
-  CHECK(white >= blue + 340 && white <= blue + 340 + 27, "white at full level within a frame of 340 ms after the blue lit (t=%u), saw t=%u", blue + 340, white);
+  CHECK(white >= blue + 170 && white <= blue + 171 + 27, "white at full level 171 ms after the blue (t=%u), within a frame; saw t=%u", blue + 171, white);
+}
+// CA1.6: a frame the field gate holds is not sent. White, X, white again 100 ms later: until the
+// second white may light, the panel shows what it showed (black), not the white scaled down, which
+// lights every LED the frame lights, dimly.
+static void a_held_frame_is_not_sent() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=solid,c=ffffff"); at(2000, "!P*X"); at(2100, "!P*A:i=solid,c=ffffff");
+  runTo(3000);
+  uint32_t first = 0, back = 0; unsigned dim = 0;
+  for (const Frame& f : between(1100, 1999)) if (!first && f.allAre(WHITE) && f.scale >= 100) first = f.t;
+  for (const Frame& f : between(2000, 3000)) {
+    if (!back && f.lit != 0 && f.scale < 100) dim++;
+    if (!back && f.allAre(WHITE) && f.scale >= 100) back = f.t;
+  }
+  CHECK(first != 0 && back != 0, "white, then white again (t=%u, %u)", first, back);
+  CHECK(back >= 2100 && back <= 2100 + 27, "nothing holds the second white 1 s after the first (t=%u)", back);
+  // ...and inside the window: white, X 100 ms later, white 100 ms after that
+  at(4000, "!P*A:i=off"); at(5000, "!P*A:i=solid,c=ffffff"); at(5100, "!P*X"); at(5200, "!P*A:i=solid,c=ffffff");
+  runTo(6200);
+  first = back = 0; dim = 0; uint32_t black = 0;
+  for (const Frame& f : between(5000, 6200)) {
+    const bool white = f.allAre(WHITE) && f.scale >= 100;
+    if (!first && white) first = f.t;
+    if (first && !black && f.lit == 0) black = f.t;
+    if (black && !back && f.lit != 0 && !white) dim++;
+    if (black && !back && white) back = f.t;
+  }
+  CHECK(first != 0 && black != 0 && back != 0, "white, black, white (t=%u, %u, %u)", first, black, back);
+  CHECK(dim == 0, "%u lit frames under full level were sent while the white waited", dim);
+  CHECK(back >= first + 340 && back <= first + 340 + 27, "the white is back within a frame of 340 ms after it first lit (t=%u), saw t=%u", first + 340, back);
+}
+// CA1.6, from the Flthy fork: the look gate is taken by the frame at which a look can be seen (an
+// LED at 4 levels), not by the frame it was selected at. A slow red pulse at a third of the
+// brightness comes up through a few levels; green 171 ms after the pulse was selected must still
+// be 170 ms after the first frame in which the red could be seen.
+static void the_next_look_keeps_170_ms_from_the_frame_a_look_could_be_seen_at() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(2000, "!P*A:i=pulse,c=ff0000,s=0,b=80"); at(2171, "!P*A:i=solid,c=00ff00,b=80");
+  runTo(3200);
+  uint32_t red = 0, green = 0;
+  for (const Frame& f : between(2000, 3200)) {
+    unsigned top = 0;                      // the brightest LED, as it goes out
+    for (int i = 0; i < NUM_LEDS; i++) { unsigned m = f.px[i].r; if (f.px[i].g > m) m = f.px[i].g; if (f.px[i].b > m) m = f.px[i].b; m = (m * (f.scale + 1u)) >> 8; if (m > top) top = m; }
+    if (top < 4) continue;
+    if (!red && f.px[0].r && !f.px[0].g) red = f.t;
+    if (!green && f.px[0].g && !f.px[0].r) green = f.t;
+  }
+  CHECK(red > 2000 && green != 0, "red, then green (t=%u, %u)", red, green);
+  CHECK(red >= 2026, "the pulse cannot be seen in its first frame (first seen at t=%u): or this scenario shows nothing", red);
+  CHECK(green >= red + 170, "green %u ms after the red could first be seen (t=%u); it must be 170", green - red, red);
 }
 // Review, test quality (b). A C that seeks between a solid section and a scan section every 90 ms
 // would restart the scan each time if sections were applied at once: the scan would never leave
@@ -1593,7 +1663,10 @@ static const Scenario kScenarios[] = {
   {"l_cannot_blink_half_the_panel", l_cannot_blink_half_the_panel},
   {"a_d_for_another_board_does_not_end_the_show", a_d_for_another_board_does_not_end_the_show},
   {"a_stale_timing_does_not_cut_a_shows_native_look", a_stale_timing_does_not_cut_a_shows_native_look},
-  {"white_171_ms_after_blue_from_dark_waits_for_the_window", white_171_ms_after_blue_from_dark_waits_for_the_window},
+  {"white_again_after_a_blackout_waits_for_the_whites_own_window", white_again_after_a_blackout_waits_for_the_whites_own_window},
+  {"a_colour_that_brightens_within_a_rise_is_one_onset", a_colour_that_brightens_within_a_rise_is_one_onset},
+  {"a_held_frame_is_not_sent", a_held_frame_is_not_sent},
+  {"the_next_look_keeps_170_ms_from_the_frame_a_look_could_be_seen_at", the_next_look_keeps_170_ms_from_the_frame_a_look_could_be_seen_at},
   {"a_seek_storm_does_not_freeze_the_look", a_seek_storm_does_not_freeze_the_look},
   {"play_at_once_after_send_accents_when_the_look_may_change", play_at_once_after_send_accents_when_the_look_may_change},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},

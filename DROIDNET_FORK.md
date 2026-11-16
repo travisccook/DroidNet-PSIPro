@@ -17,13 +17,13 @@ build has no contract layer.
   Flthy HPs). This is the tightest of the three and the pacing item.
 - **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), clean-room WS2812 driver (`include/FastLED.h`).
   `platformio.ini` is checked in and builds out of the box. `pio run` (serial-only, shipped default,
-  the build with the contract layer) links at 27,866 B of 28,672 B (97.2%). `pio run -e PSIPro-i2c`
-  links at 16,888 B (58.9%): it has the I2C intake and **no contract layer** (`PSI_NO_CONTRACT`),
-  because the two do not fit this part together (29,536 B). `run.sh` stage 9b fails a build over
+  the build with the contract layer) links at 28,150 B of 28,672 B (98.2%). `pio run -e PSIPro-i2c`
+  links at 16,960 B (59.2%): it has the I2C intake and **no contract layer** (`PSI_NO_CONTRACT`),
+  because the two do not fit this part together (29,840 B). `run.sh` stage 9b fails a build over
   28,416 B (serial-only) or 28,160 B (I2C), under 256 B or 128 B of worst-case stack headroom, or
   with any soft-float routine linked. R1 is built without six contract looks
   (`PSI_NO_STRIP_LOOKS`: comet, chase, wipe, gradient, colorcycle, twinkle draw as scan, sparkle or
-  solid), which are 1,242 B: with them the image is 29,108 B. The total also includes mode 22
+  solid), which are 1,264 B: with them the image is 29,414 B. The total also includes mode 22
   ("processing sweep"), a fork-added demo animation that is not one of the 23 upstream modes — it
   exists to measure the marginal cost of a new one: 94 B. All 23 upstream modes (0-21
   and 92) ship in both builds; every upstream mode's animation except the four deliberate native
@@ -62,12 +62,13 @@ bash test/host/run.sh
 
 What it runs, in order: the shared core's unit tests and its fuzz model (and that the shared files
 are the commit in `src/contract/CORE_PIN`); the WDP announce, for each build; the animation VM's
-bytecode; 36 golden captures of the native modes (35 of them on the I2C build too); 78 timelines
-against upstream v1.7 on the same mocks, on both builds; the contract scenarios
+bytecode; 36 golden captures of the native modes (35 of them on the I2C build too); 91 timelines
+against upstream v1.7 on the same mocks, on both builds, and 447 more on the I2C build with a
+command from inside a `show()`; the contract scenarios
 (`test_timeline.cpp`: the firmware's own `src/main.cpp`, scripted wire lines, assertions on the
-frames it latches): 93 on the default build, 5 on the build without the contract layer, 95 on each
+frames it latches): 104 on the default build, 6 on the build without the contract layer, 106 on each
 of two builds no environment links (every look; the contract with I2C); contract S9 and S11 as a
-property of the default build under 36 hostile scripts and 1,500 random streams
+property of the default build under 44 hostile scripts and 1,500 random streams
 (`test_property.cpp`); the scale and HSV oracles; the cross-compile of both builds with the flash,
 stack and no-float gates; and five simavr probes (`test/simavr/README.md`). There is no mock of the
 board API.
@@ -88,17 +89,26 @@ The default, serial-only build. The I2C build has no contract layer.
   Every return to the board's own look waits until an onset and a change of look are allowed
   (340 ms after the field last lit or got brighter, 170 ms after its last change), the panel
   keeping what it shows.
-- **Native take-over:** a native `T` or `D` command addressed to the PSI ends the show and runs.
+- **Native take-over:** a native `T` or `D` command addressed to the PSI ends the show and runs (a
+  `D` or an `A` for another board does not). A mode whose program has ended and holds its last
+  frame (the lightsaber battle under `alwaysOn`) plays again when it gets the panel back.
 - **Score:** 16 sections, `b=` and every-N accents carried, overflow is a bad load.
   `V:n=,k=` checks the load; `Q:r=<n>` is answered routed (`;S0!PFq:ver=1.3,rel=1,cap=,n=,ok=,bpm=`).
-- **Limits (S9, S11, core CA1.5):** tempo 30 to 300 BPM; accents and the pump no faster than every
+- **Limits (S9, S11, core CA1.6):** tempo 30 to 300 BPM; accents and the pump no faster than every
   340 ms. Every frame the contract draws is measured in `FastLED.show()` by brightest channel and
-  by luminance and passes the core's field gate (`contractFieldAsk`, `contractFieldTell`): at
-  most three dark-to-lit swings of the whole field a second in either measure, with a tenth of the
-  ceiling for a step, and never above the ceiling. A lit frame of another look or colour waits
-  for the look gate (`contractLookGate`, 170 ms after the field's last change); a section waits
-  170 ms after the last look change (`contractSectionMayApply`); the same look applied again does
-  not restart (`contractLookSame`).
+  by luminance, as the driver will scale it, and passes the core's field gate (`contractFieldAsk`,
+  `contractFieldTell`): at most three dark-to-lit swings of the whole field a second in either
+  measure, with a tenth of the ceiling for a step, and never above the ceiling. A frame the gate
+  holds is not sent (the hook returns -1 and the panel keeps what it shows); it is not scaled
+  down. A frame of another look or colour waits for the look gate, 170 ms after the field's last
+  change: asked before the frame is drawn (`contractLookAllowed`), taken by the frame that is sent,
+  by its brightest LED (`contractLookGateAt`: 4 levels or more). A section waits 170 ms after the
+  last look change (`contractSectionMayApply`); the same look applied again does not restart
+  (`contractLookSame`). `L` goes through the core's level hold (`contractLevelOffer`,
+  `contractLevelDue`, taken where the meter is redrawn): up at most once in 340 ms, down at once;
+  the meter with no `L` redraws every 170 ms at the fastest. The gate is the whole field's: a part
+  of the panel can still light twice inside 340 ms when a look that moves by itself is followed
+  by a blackout and a full look (`docs/BENCH_R1.md`).
 - **Native modes a show may select (S10):** 0 to 22 and 92, without 2, 3 and 5. They run as stock:
   their frames are never altered. All of them draw at `brightness()`, so all of them dim with
   `b=`/`B`. Their edges ask the gate (`contractNativeMayStart`): before a `native:<n>` starts,
@@ -106,8 +116,9 @@ The default, serial-only build. The I2C build has no contract layer.
   brightness. What the gate is told is what the layer measures, since every frame passes its
   hook: for a mode whose field does not swing fast, each frame as it is (`contractFieldTell`;
   the level the core's recipe would tell, the brightness, is not what most modes put on the
-  field: 3 % to 100 % of it); for Leia (6) and Knight Rider (15), once, at their first lit frame
-  (`contractNativeStarted`), with their darkest frame told before whoever draws next; for a mode
+  field: 3 % to 100 % of it); for Leia (6) and Knight Rider (15), once, at the first frame with an
+  LED at 4 levels (`contractNativeStarted`, level and luminance), with their darkest frame told
+  before whoever draws next; for a mode
   off the list that a command started, nothing, and the field is taken as dark and just lit when
   the contract draws over it (`contractNativeEnded`, `known = false`). `L` feeds the contract's
   `meter` look only, never a native VU mode. The scenario
@@ -124,12 +135,12 @@ The default, serial-only build. The I2C build has no contract layer.
 
 | | PSIPro (serial-only, the contract) | PSIPro-i2c (I2C, no contract) |
 | --- | --- | --- |
-| flash | 27,866 B of 28,672 (97.2%); gate 28,416 | 16,888 B (58.9%); gate 28,160 |
-| SRAM | 1,618 B of 2,560 (63.2%) | 1,216 B (47.5%) |
-| worst-case stack, sound bound | 463 B of 942 B | 312 B of 1,344 B |
-| stack headroom | 479 B; floor 256 | 1,032 B; floor 128 |
+| flash | 28,150 B of 28,672 (98.2%); gate 28,416 | 16,960 B (59.2%); gate 28,160 |
+| SRAM | 1,630 B of 2,560 (63.7%) | 1,217 B (47.5%) |
+| worst-case stack, sound bound | 446 B of 930 B | 312 B of 1,343 B |
+| stack headroom | 484 B; floor 256 | 1,031 B; floor 128 |
 | soft-float routines linked | none | none |
-| shared core | CA1.5, RSeries `cea4921` | not linked |
+| shared core | CA1.6, RSeries `17bb425` | not linked |
 
 `millis()` against Timer1 in simavr, 16 s a look (1 ms of `millis()` is 62 ppm), and the longest
 single pass of `loop()`:

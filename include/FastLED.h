@@ -263,7 +263,7 @@ struct WS2812 {};
 #if defined(__AVR__)  // WS2812 controller: AVR-only (pin access + cycle-exact bit-bang + timer)
 #ifdef PSI_FRAME_GATE
 #define PSI_FRAME_GATE_WIRED 1             // ContractPSI.h refuses to build without it
-uint8_t PSI_FRAME_GATE(const CRGB* leds, uint8_t n, uint8_t scale);   // src/contract/ContractPSI.h
+int PSI_FRAME_GATE(const CRGB* leds, uint8_t n, uint8_t scale);       // src/contract/ContractPSI.h
 #endif
 
 class CFastLED {
@@ -304,8 +304,14 @@ public:
     if (!m_leds || m_n <= 0) return;
 #ifdef PSI_FRAME_GATE
     // DroidNet contract v1.3 S9: the one place every frame leaves the board. The gate may lower
-    // the master scale of this frame; it never raises it and never touches the pixels.
-    scale = PSI_FRAME_GATE(m_leds, (uint8_t)m_n, scale);
+    // the master scale of a frame the contract drew (to the owner's brightness), or hold the frame:
+    // then nothing is sent and the panel keeps what it shows. It never raises the scale and never
+    // touches the pixels.
+    {
+      const int gated = PSI_FRAME_GATE(m_leds, (uint8_t)m_n, scale);
+      if (gated < 0) return;
+      scale = (uint8_t)gated;
+    }
 #endif
     // Stage the frame: per-channel scale8 into GRB wire order, interrupts still on.
     uint8_t *w = sWire;

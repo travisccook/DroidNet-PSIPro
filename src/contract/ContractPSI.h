@@ -44,10 +44,12 @@
 //     A pulse with no show overlays the native look and returns to it (L3). A native T or D
 //     command ends a show (L6).
 //   * The gate (S9, S11): every frame the contract draws is measured by brightest channel and by
-//     luminance and passed through the core's field gate in FastLED.show() (contractFrameScale);
-//     a lit frame of another look or colour waits for the core's look gate (contractLoopTick);
-//     a section waits its 170 ms (contractSectionMayApply). Native looks (S10) are told to the
-//     gate once at each edge and never frame by frame.
+//     luminance and passed through the core's field gate in FastLED.show() (contractFrameScale):
+//     a frame the gate holds is not sent, and the panel keeps what it shows. A frame of another
+//     look or colour waits for the core's look gate, asked before it is drawn (contractLoopTick)
+//     and taken by the frame that is sent, by its brightest LED; a section waits its 170 ms
+//     (contractSectionMayApply). Native looks (S10) are never changed: the gate is told what
+//     they put on the LEDs.
 //   * The accent overlay is ONE primitive with two triggers: verb P (live) and the board's own
 //     per-beat score edge (a scored A's ae=/ac=/ad=). Same code path, same look.
 //   * Verb L feeds the contract's own meter look (A:i=meter) and nothing else, honouring the VU
@@ -335,7 +337,6 @@ inline bool contractYieldForD(int address) {
 // sees it and runs as stock (S10): its bars are its own random walk, which no line can empty and
 // refill. With no L for 2 s the random walk runs under the contract's meter too, so a meter look
 // with no level feed still moves.
-static uint8_t  g_levelRows = 0;                       // rows dark in every column: 0 full .. 6 empty
 static bool     g_levelFed = false;
 static bool     g_meterMine = false;                   // VUMeter() is running for the contract's meter look
 static uint32_t g_levelMs  = 0;
@@ -347,15 +348,16 @@ inline bool contractHoldsLevels() {
 
 // ---- S9 and S11: one limit for every path ---------------------------------------------------
 // Called by FastLED.show() for EVERY frame, as the last thing before it goes out (the hook is
-// PSI_FRAME_GATE, set in main.cpp), and returns the scale to send.
+// PSI_FRAME_GATE, set in main.cpp), and returns the scale to send it at, or -1: do not send it.
 //   * A frame the contract DRAWS (its looks, the overlay, X's dark) is measured twice: its field
 //     level (the mean over the LEDs of each LED's brightest channel, times the master scale) and
 //     its luminance (the same with the core's Rec.709 weights, so a change of colour counts). The
 //     core's field gate is ASKED with both: a dark-to-lit swing in either is let through only
-//     340 ms after the last one, and until then the frame is scaled down. Then the gate is TOLD
-//     what goes out, measured again at the scale it goes out at. The frame is also never brighter
-//     than the ceiling. An accent overlay still up when its section gives way to a native:<n> one
-//     is the contract's own drawing.
+//     340 ms after the last one, and until then the frame is HELD: it is not sent, and the panel
+//     keeps what it shows. A frame that is sent is TOLD to the gate as it is, and takes the look
+//     gate by its brightest LED. The frame is also never brighter than the ceiling. An accent
+//     overlay still up when its section gives way to a native:<n> one is the contract's own
+//     drawing.
 //   * A frame of a native look is never changed (S10: native looks run as stock), whether the
 //     owner started the look or a show selected it from the allow-list. The gate governs its
 //     EDGES, and is told at each: when the look starts, at what level, and when a show moves
@@ -378,23 +380,27 @@ inline bool contractHoldsLevels() {
 #ifndef PSI_FRAME_GATE_WIRED
 #error "FastLED.h was included before main.cpp named PSI_FRAME_GATE: frames would skip the S9 gate"
 #endif
-static uint8_t g_mLevel, g_mLum;                       // what _measure() found
+static uint8_t g_mLevel, g_mLum, g_mPeak;              // what _measure() found (peak: the brightest LED)
+static uint32_t g_drawSig;                             // the look of the frame the contract is drawing (contractLookSig)
 static PSI_NOINLINE void _measure(const CRGB* l, uint8_t n, uint8_t scale) {
   uint16_t sum = 0, sumY = 0;                          // 48 * 255 fits
+  uint8_t peak = 0;
   const uint16_t k = (uint16_t)scale + 1u;
   for (uint8_t i = 0; i < n; i++) {
     const uint8_t r = (uint8_t)((l[i].r * k) >> 8), g = (uint8_t)((l[i].g * k) >> 8), b = (uint8_t)((l[i].b * k) >> 8);
     uint8_t m = r;
     if (g > m) m = g;
     if (b > m) m = b;
+    if (m > peak) peak = m;
     sum += m;
     sumY += contractLuminance(r, g, b);
   }
-  g_mLevel = (uint8_t)(sum / n); g_mLum = (uint8_t)(sumY / n);
+  g_mLevel = (uint8_t)(sum / n); g_mLum = (uint8_t)(sumY / n); g_mPeak = peak;
 }
-uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
+int contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
   const bool drawn = g_owned && (g_u.base != CB_NATIVE || g_u.pulseActive);     // the contract drew this frame itself
   if (drawn && scale > g_u.ceil) scale = g_u.ceil;
+  int out = scale;
   _measure(l, n, scale);
   const uint32_t now = millis();
 #ifdef PSI_ENABLE_I2C
@@ -409,15 +415,19 @@ uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
   }
   if (!drawn) {                                        // a native look's frame: never changed
     if (!g_owned && !g_u.inShow) g_u.ceil = scale;     // no show: the step follows the owner's level
-    if (g_edgeKind == 1 && level != 0) {
-      // The look that took the panel is lit, for the first time: its start, as the gate hears
-      // it. A mode whose frames are reported has changed the look (S11) and its light is told
-      // below. Leia and Knight Rider are told once, here (S10), by the level of this frame.
-      if (reports) contractLookForced(g_u, contractLookSigNative(g_edgeCode), now);
-      else         contractNativeStarted(g_u, g_edgeCode, level, now);
+    if (g_edgeKind == 1 && g_mPeak >= LOOK_MIN_LEVEL) {
+      // The look that took the panel can be seen, for the first time: its start, as the gate
+      // hears it. That is the first frame with an LED at 4 levels (CA1.6), not the first whose
+      // field level is above nothing: the processing sweep starts with two LEDs of 48, a field
+      // level of 0 and a colour anyone can see, and a meter at a brightness of 3 has a field level
+      // of 1 and shows none. S4 has to run from the frame that can be seen. A mode whose
+      // frames are reported has its light told below. Leia and Knight Rider are told once, here
+      // (S10), by the two figures of this frame.
+      if (!reports) contractNativeStarted(g_u, g_edgeCode, level, lum, now);
+      contractLookForced(g_u, contractLookSigNative(g_edgeCode), now);
       g_edgeKind = 0;
     } else if (g_edgeKind == 2) {
-      if (!reports) contractNativeLevel(g_u, level, now);
+      if (!reports) contractNativeLevel(g_u, level, lum, now);
       g_edgeKind = 0;
     }
     // A mode whose frames are reported: the gate hears what is on the LEDs, as it is. (The level
@@ -433,17 +443,24 @@ uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
     }
   } else {
     g_edgeKind = 0;                                    // a native look that never lit owes the gate nothing
-    const uint8_t ask = contractFieldAsk(g_u, level, lum, now);
-    if (ask != 255) {
-      scale = (uint8_t)(((uint16_t)scale * ask) / 255u);                        // rounds down
-      _measure(l, n, scale);                           // what goes out, as it goes out
+    // A frame the field gate would hold is NOT SENT (CA1.6): the panel keeps what it shows. Sent
+    // scaled down, as it was at first, it kept the field's level legal and still lit, dimly,
+    // every part of the panel the frame lights: half a meter, back from dark, had lit again.
+    // The look gate (S4, S11) was ASKED before this frame was drawn, and is TAKEN here, by the
+    // frame that is sent and by its brightest LED (CA1.6): a frame with no LED at 4 levels shows
+    // no colour, and the 170 ms run from the first frame that does. (A sparkle's first frame is
+    // black, and its first LED lights a step later: taken when the look was selected, the gate
+    // let the next look follow 26 ms after that LED.)
+    if (contractFieldAsk(g_u, level, lum, now) != 255) out = -1;
+    else {
+      contractLookGateAt(g_u, g_drawSig, g_mPeak, now);
+      contractFieldTell(g_u, level, lum, now);
     }
-    contractFieldTell(g_u, g_mLevel, g_mLum, now);
   }
 #ifdef PSI_ENABLE_I2C
   SREG = sreg;
 #endif
-  return scale;
+  return out;
 }
 
 // ---- the looks this build has ----------------------------------------------------
@@ -565,15 +582,25 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
 #endif
     case CE_SPARKLE: vmContractSparkle(d, col);                     break;
     case CE_METER:                                                          // level[] fed by verb L
+      // The top rows are a region of the panel like any other, and the gate sees only the whole
+      // field (review finding 1): L alternating between half and full blinked the top half ten
+      // times a second, and with no level feed the meter's random walk at 20 ms a step did the same.
+      //   * Fed by L: the level is the core's (CA1.6, contractLevelOffer / contractLevelDue). A
+      //     higher one is taken at most once in 340 ms and a fall at once, so no row lights more
+      //     than three times a second through L. It is taken where the bars are redrawn, so a
+      //     level that is taken is a level shown (taken on every pass, a raise was mostly undone
+      //     by the next lower L before the meter drew it).
+      //   * Not fed: the walk is the board's own, redrawn every 170 ms at the fastest (the native
+      //     meter: every 250 ms) whatever s= asks for, so a row that goes dark and lights again
+      //     does it 340 ms after it last lit.
+      // main.cpp's VUMeter() counts the rows that are DARK: v=255 -> 0 (full), v=0 -> 6 (empty).
       g_meterMine = true;
-      if (contractHoldsLevels()) for (uint8_t c = 0; c < COLUMNS; c++) level[c] = g_levelRows;
-      // The bars are redrawn every 170 ms at the fastest (the native meter: every 250 ms), whatever
-      // s= asks for (review finding 1). The top rows are a region of the panel like any other, and
-      // the gate sees only the whole field: at 20 ms a step, L alternating between half and full
-      // blinked the top half ten times a second, and with no level feed the random walk did the
-      // same. Drawn 170 ms apart at the least, a region that goes dark and lights again does it
-      // 340 ms after it last lit.
-      VUMeter(d < STROBE_MIN_STATE_MS ? (uint16_t)STROBE_MIN_STATE_MS : d, 0, 0);
+      if (contractHoldsLevels()) {
+        if (checkDelay()) contractLevelDue(g_u, millis());
+        const uint8_t rows = (uint8_t)(LEDS_PER_COLUMN - ((uint16_t)g_u.level * LEDS_PER_COLUMN) / 255u);
+        for (uint8_t c = 0; c < COLUMNS; c++) level[c] = rows;
+      } else if (d < STROBE_MIN_STATE_MS) d = STROBE_MIN_STATE_MS;
+      VUMeter(d, 0, 0);
       g_meterMine = false;
       break;
     case CE_NATIVE:  runPattern(g_u.nativeCode);                    break;
@@ -701,9 +728,7 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
       break;
 
     case CV_LEVEL: {                                   // feed the contract's meter look from Studio energy
-      // honor the inversion (main.cpp VUMeter: level[c] > i => pixel OFF): high energy => LOW level
-      uint8_t v = pr.hasLevel ? pr.level : 0;
-      g_levelRows = (uint8_t)(LEDS_PER_COLUMN - ((uint16_t)v * LEDS_PER_COLUMN) / 255u);   // v=255 -> 0 (full), v=0 -> 6 (empty)
+      contractLevelOffer(g_u, pr.hasLevel ? pr.level : 0);   // taken where the meter is drawn (contractLevelDue)
       g_levelMs = now;
       g_levelFed = true;
       break;
@@ -877,7 +902,9 @@ inline bool contractLoopTick() {
   // showed lit comes 170 ms after the field's last change at the earliest, whichever path asked
   // for it (an accent between two looks, a section, a look after a native one). Until then the
   // frame that is up stays up. Black is not a look: a blackout is never held.
-  if (eff != CE_OFF && effBright != 0 && !contractLookGate(g_u, contractLookSig(eff, col), now)) return true;
+  // (Asked here; taken by the frame that is sent, in contractFrameScale().)
+  g_drawSig = contractLookSig(eff, col);
+  if (eff != CE_OFF && effBright != 0 && !contractLookAllowed(g_u, g_drawSig, now)) return true;
   if (g_nativeUnknown) {
     // S10: the contract draws again, from this frame, where a mode that is not on the allow-list
     // was. It may have been flashing: the field is taken as dark and just lit, and the contract's

@@ -283,12 +283,13 @@ if cmp -s <(frames "$GOLD/standin_rainbow.psig") <(frames "$GOLD/standin_solid.p
 echo "      6 stand-ins identical to the looks they draw."
 
 echo "[6b] upstream differential: Neil's PSIPro v1.7 and the fork on the same mocks"
-# 78 scripted timelines (mode after mode, |timing, alwaysOn, rear jumper, brightness commands)
+# 91 scripted timelines (mode after mode, |timing, alwaysOn, rear jumper, brightness commands)
 # through test/host/upstream-v1.7/PSIPro.ino and through src/main.cpp as each of the two
-# environments builds it (with the contract layer; with the I2C intake and without it). Each row states whether the
-# visible frame sequence must be identical or is a known, explained difference; either way a row
-# that changes sides fails. The goldens above are captured from the fork itself; this is the stage
-# that ties them to upstream.
+# environments builds it (with the contract layer; with the I2C intake and without it), and 447
+# more through upstream and the I2C build, with an I2C command that lands inside a show() (every
+# pair of modes). Each row states whether the visible frame sequence must be identical or is a known,
+# explained difference; either way a row that changes sides fails. The goldens above are captured
+# from the fork itself; this is the stage that ties them to upstream.
 bash diff_upstream.sh "$T" "$CXX_SAN"
 
 echo "[6c] timeline scenarios: the firmware on the mocks, scripted wire timelines"
@@ -320,13 +321,16 @@ for bin in psi_timeline psi_timeline_nocontract psi_timeline_all psi_timeline_i2
 done
 
 echo "[6e] contract S9 as a property: hostile and random line streams, the frames measured"
-# test_property.cpp: 36 hostile profiles x 8 rounds and 1500 random streams, each in a fresh copy
+# test_property.cpp: 44 hostile profiles x 8 rounds and 1500 random streams, each in a fresh copy
 # of the firmware, as the default environment builds it (the one with the contract layer).
 # Dark-to-lit onsets (at most 3 a second, never two inside 340 ms; on a native look's frames, the
 # ones a contract edge led to), counted by seven observers of the brightest channel and three of
-# luminance; changes of colour (never two inside 170 ms), by five; nothing above the owner's
-# brightness, dark after X, native after idle, a native command keeps the panel, and no line
-# writes into a native look.
+# luminance, and by the spec's own two-measure rule written out; changes of colour (never two
+# inside 170 ms), by six, one of them at the core's own line (an LED at 4 levels); the regions of
+# the panel (the whole, halves, quarters, bands: asserted in the profiles, measured in the random
+# streams); nothing above the owner's brightness, dark after X, native after idle, a native command
+# keeps the panel, no line writes into a native look, and the contract's light never stays on a
+# panel it has given back.
 for cfg in "-DPSI_NO_STRIP_LOOKS"; do
   # shellcheck disable=SC2086
   "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w $cfg \
