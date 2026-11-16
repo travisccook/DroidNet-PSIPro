@@ -124,6 +124,35 @@ static void the_owners_3p_survives_a_show() {
   CHECK(shown(1900).scale == 50, "the ceiling is the owner's 3P 50, saw %u", shown(1900).scale);
   CHECK(shown(2900).scale == 50, "after the show the swipe is back at the owner's 50, saw %u", shown(2900).scale);
 }
+// The owner changes the brightness DURING a show. The show in progress keeps the ceiling it armed
+// with, but the owner's value is not lost: a Resend arms with it, and the board is given back at it.
+static void the_owners_3p_mid_show_is_kept() {
+  boot();                                              // EEPROM brightness 20
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=solid,c=00ff00"); at(2000, "3P80");
+  at(3000, "!**M:v=show"); at(3100, "!P*A:i=solid,c=00ff00"); at(4000, "!**M:v=idle");
+  at(6000, "!**M:v=show"); at(6100, "!P*A:i=solid,c=00ff00"); at(7000, "3P0"); at(8000, "!**M:v=idle");
+  runTo(9000);
+  CHECK(shown(1900).scale == 20, "the show arms at the owner's 20, saw %u", shown(1900).scale);
+  CHECK(shown(2900).allAre(GREEN) && shown(2900).scale == 20, "3P80 mid-show: this show keeps its ceiling, saw %u", shown(2900).scale);
+  CHECK(shown(3900).allAre(GREEN) && shown(3900).scale == 80, "a Resend arms with the owner's 80, saw %u", shown(3900).scale);
+  CHECK(shown(5900).lit == 48 && shown(5900).scale == 80, "after M:v=idle the swipe is at the owner's 80, saw %u", shown(5900).scale);
+  CHECK(shown(7900).allAre(GREEN) && shown(7900).scale == 80, "3P0 mid-show: this show keeps its ceiling, saw %u", shown(7900).scale);
+  CHECK(shown(8900).lit == 48 && shown(8900).scale == 20, "3P0 gave the EEPROM value back: the swipe is at 20, saw %u", shown(8900).scale);
+}
+// ...and the pot, which the contract never writes: turned mid-show, it is what a Resend and the
+// give-back see.
+static void the_pot_turned_mid_show_is_kept() {
+  boot(0x00, 0x00, 20, true, 300);                     // brightness from the pot
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=solid,c=00ff00");
+  at(4000, "!**M:v=show"); at(4100, "!P*A:i=solid,c=00ff00"); at(5000, "!**M:v=idle");
+  runTo(2000);
+  const uint8_t before = shown(1900).scale;
+  g_mock_analog = 700;                                 // the owner turns the pot up
+  runTo(7000);
+  CHECK(before > 0 && shown(3900).scale == before, "the show keeps the ceiling it armed with (%u), saw %u", before, shown(3900).scale);
+  CHECK(shown(4900).allAre(GREEN) && shown(4900).scale > before, "a Resend arms with the pot as it is now: %u, was %u", shown(4900).scale, before);
+  CHECK(shown(6900).lit == 48 && shown(6900).scale == shown(4900).scale, "and the swipe comes back at it (%u)", shown(6900).scale);
+}
 
 // ---- L1, L3, L4, L5, L6: lifecycle ------------------------------------------------------------
 static void show_keeps_the_swipe_until_its_first_line() {
@@ -1051,6 +1080,8 @@ static const Scenario kScenarios[] = {
   {"scored_b_is_carried", scored_b_is_carried},
   {"the_ceiling_is_taken_when_the_show_arms", the_ceiling_is_taken_when_the_show_arms},
   {"the_owners_3p_survives_a_show", the_owners_3p_survives_a_show},
+  {"the_owners_3p_mid_show_is_kept", the_owners_3p_mid_show_is_kept},
+  {"the_pot_turned_mid_show_is_kept", the_pot_turned_mid_show_is_kept},
   {"show_keeps_the_swipe_until_its_first_line", show_keeps_the_swipe_until_its_first_line},
   {"a_retired_d_does_not_end_a_look", a_retired_d_does_not_end_a_look},
   {"a_resent_show_waits_for_its_own_seed", a_resent_show_waits_for_its_own_seed},

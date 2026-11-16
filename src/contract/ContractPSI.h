@@ -218,6 +218,18 @@ static PSI_NOINLINE void _givePanelBack() {
 }
 static inline void _holdPanel() { _takePanel(); g_tookLook = true; }
 
+// The owner sent 3P (the native volatile-brightness command) while the contract holds the panel.
+// main.cpp has just written the 3P pair, which is the pair the show's frames ride on: take the
+// owner's value into the saved copy, so that it is what a Resend arms with and what the panel is
+// given back at. (The show in progress keeps the ceiling it armed with: S6. The next tick puts
+// the show's level back in the pair.) The pot and the EEPROM value need nothing: the contract
+// never writes them, and _ownerBri() reads them live.
+inline void contractOwnerSet3P() {
+  if (!g_owned) return;
+  g_ownerTempOn  = useTempInternalBrightness;
+  g_ownerTempVal = tempGlobalBrightnessValue;
+}
+
 // L1: the three boundaries. Each runs the core's ONE reset, then its own display action.
 static PSI_NOINLINE void _boundary(char kind, uint8_t wdSec) {    // 's'how, 'x' stop, 'i'dle
   const uint8_t ceil = _ownerBri();

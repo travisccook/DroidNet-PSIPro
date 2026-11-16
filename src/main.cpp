@@ -1379,6 +1379,7 @@ void doPcommand(int address, int argument)
         if (argument > 200) tempGlobalBrightnessValue = 200;
         else tempGlobalBrightnessValue = argument;
       }
+      contractOwnerSet3P();   // DroidNet: during a contract show the owner's 3P is kept, not lost
       
       break;
     default:
