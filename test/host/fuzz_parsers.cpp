@@ -403,6 +403,7 @@ struct Model {
   bool hasAt = false;          int32_t atBeat = -1;
   bool hasAm = false;          uint8_t accentMode = 0;
   bool hasBpm = false;         uint16_t bpm = 0;
+  bool bpmBad = false;                                // CA1.2: a bpm= that is not all digits
   bool hasPh = false;          uint32_t phMs = 0;
   bool hasBpb = false;         uint8_t bpb = 4;
   bool hasBeat = false;        int32_t beatAnchor = 0;
@@ -456,6 +457,19 @@ static unsigned model_sat(const std::string& v, unsigned maxV) {
   }
   if (neg) return 0;
   return acc > maxV ? maxV : (unsigned)acc;
+}
+// CA1.2: bpm= and r= are taken only as one or more decimal digits and nothing else (no sign, no
+// space, no trailing byte). Up to CA1.1 they went through model_sat, so an empty or damaged bpm=
+// was 0, which is Hold, and a damaged r= was route 0.
+static bool model_all_digits(const std::string& v) {
+  if (v.empty()) return false;
+  for (char c : v) if (c < '0' || c > '9') return false;
+  return true;
+}
+// CA1.2: at= and beat= are clamped to +/- CONTRACT_BEAT_MAX (written out here: 10^9).
+static int32_t model_beat(const std::string& v) {
+  const long long b = oracle_i32(v.c_str());
+  return (int32_t)(b > 1000000000LL ? 1000000000LL : (b < -1000000000LL ? -1000000000LL : b));
 }
 // k=<hhhh>: exactly four hex digits, either case.
 static bool model_hex4(const std::string& v, uint16_t& out) {
@@ -546,17 +560,18 @@ static Model model_parse_params(const std::string& s) {
     else if (k == "d")    { m.hasDur = true;     m.durMs = impl_spec_u32(v.c_str()); }
     else if (k == "b")    { m.hasBright = true;  m.bright = (uint8_t)model_sat(v, 255); }
     else if (k == "m")    { m.hasBeatMod = true; m.beatMod = (uint8_t)model_sat(v, 255); }
-    else if (k == "at")   { m.hasAt = true;      m.atBeat = oracle_i32(v.c_str()); }
+    else if (k == "at")   { m.hasAt = true;      m.atBeat = model_beat(v); }
     else if (k == "am")   { m.hasAm = true;      { unsigned a = model_sat(v, 255);          // v1.3: a mode above 4 is
                               m.accentMode = (uint8_t)(a > 4 ? 0 : a); } }         // no accent, never a wrap
     else if (k == "v")    { m.hasLevel = true;   m.level = (uint8_t)model_sat(v, 255);
                             // v1.3 S5: exactly "show" or "idle" -- no prefix match, no
                             // whitespace skip. (It used to sniff v[0], so "stop" meant show.)
                             if (v == "show") m.mode = 's'; else if (v == "idle") m.mode = 'i'; }
-    else if (k == "bpm")  { m.hasBpm = true;     m.bpm = (uint16_t)model_sat(v, 65535); }
+    else if (k == "bpm")  { if (model_all_digits(v)) { m.hasBpm = true; m.bpm = (uint16_t)model_sat(v, 65535); }
+                            else m.bpmBad = true; }     // QUIRK (pinned): a bad bpm= marks the line even if a good one follows
     else if (k == "ph")   { m.hasPh = true;      m.phMs = impl_spec_u32(v.c_str()); }
     else if (k == "bpb")  { m.hasBpb = true;     m.bpb = (uint8_t)model_sat(v, 255); }
-    else if (k == "beat") { m.hasBeat = true;    m.beatAnchor = oracle_i32(v.c_str()); }
+    else if (k == "beat") { m.hasBeat = true;    m.beatAnchor = model_beat(v); }
     else if (k == "ae")   { int nc; ContractEffect e = model_effect(v, nc);
                             if (e != CE_NONE && accentEffectAllowed(e)) {
                               m.hasAccentFx = true; m.accentFx = e; } }
@@ -570,7 +585,8 @@ static Model model_parse_params(const std::string& s) {
     else if (k == "k")    { uint16_t x; if (model_hex4(v, x)) { m.hasK = true; m.k = x; } }
     else if (k == "an")   { m.hasAn = true;    m.an = (uint8_t)model_sat(v, 255); }
     else if (k == "ap")   { m.hasAp = true;    m.ap = (uint8_t)model_sat(v, 255); }
-    else if (k == "r")    { m.hasRoute = true; m.route = (uint8_t)model_sat(v, 99); }
+    else if (k == "r")    { const unsigned r = model_all_digits(v) ? model_sat(v, 65535) : 65535u;   // the LAST r= decides
+                            m.hasRoute = r <= 99; m.route = (uint8_t)(m.hasRoute ? r : 0); }
     // every other key (including "sw") is parsed and ignored -- forward-compatible
   }
   return m;
@@ -579,7 +595,7 @@ static bool model_eq(const Model& m, const ContractParams& p, std::string& why) 
 #define F(f) if (m.f != p.f) { why = "field " #f; return false; }
   F(hasEffect) F(effect) F(nativeCode) F(hasColor) F(hasSpeed) F(speed)
   F(hasDur) F(durMs) F(hasBright) F(bright) F(hasBeatMod) F(beatMod)
-  F(hasAt) F(atBeat) F(hasAm) F(accentMode) F(hasBpm) F(bpm) F(hasPh) F(phMs)
+  F(hasAt) F(atBeat) F(hasAm) F(accentMode) F(hasBpm) F(bpm) F(bpmBad) F(hasPh) F(phMs)
   F(hasBpb) F(bpb) F(hasBeat) F(beatAnchor) F(hasLevel) F(level) F(mode)
   F(hasAccentFx) F(accentFx) F(hasAccentColor) F(hasAccentDur) F(accentDurMs)
   F(hasWd) F(wd) F(hasN) F(n) F(hasK) F(k) F(hasAn) F(an) F(hasAp) F(ap) F(hasRoute) F(route)
@@ -700,7 +716,8 @@ static void section_F_random_lines(long iters) {
   static const char* V[] = { "solid","comet","scan","native:5","native:","off","twinkle",
                              "ff0000","0080ff","ffff","zz","0","1","255","-1","-99999999999",
                              "4294967296","2147483648"," 7","show","idle","","=","solid=x",
-                             "ff0000=1","2550","2551" };
+                             "ff0000=1","2550","2551","120","99","100","+5","12x","2147483647",
+                             "-2147483648","1000000000","1000000001","-1000000001" };
   static const char CLS[] = "LPH*", UN[] = "FRT*", VB[] = "APCBLXMQV";
   static const char JUNK[] = ",=: \t\r\n!*x0-";
   for (long i = 0; i < iters / 2; i++) {
@@ -1065,6 +1082,50 @@ static void section_J_target_independence() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// SECTION K — beat arithmetic at the limits, under UBSan (CA1.2)
+// ---------------------------------------------------------------------------
+// at= and beat= used to reach the clock as any int32, and four expressions (beatPosAt's
+// offset + elapsed beats, the every-N phase subtraction, the section-progress difference, a
+// fork's "atBeat + 9999" end sentinel) overflowed a signed int at the ends of the range. They are
+// clamped at parse now. This section drives every beat expression of the core with the extreme
+// values a LINE can produce; this stage is built with -fsanitize=undefined, so an overflow fails it.
+static void section_K_beat_limits() {
+  static const char* B[] = { "2147483647", "-2147483648", "99999999999", "-99999999999", "1000000000",
+                             "-1000000000", "1000000001", "0", "-1", "5" };
+  static const char* PH[] = { "0", "4294967295", "2147483648", "2147483647", "-1" };
+  static const uint32_t T[] = { 0u, 1u, 0x7FFFFFFFu, 0x80000000u, 0xFFFFFFFFu, 123456789u };
+  for (const char* at : B) for (const char* beat : B) for (const char* ph : PH) {
+    char line[128];
+    ParsedContract a, c;
+    snprintf(line, sizeof line, "LFA:i=solid,at=%s,am=2,an=16,ap=15,m=200", at);
+    CHECK(contractParse(line, a));
+    snprintf(line, sizeof line, "**C:bpm=300,ph=%s,bpb=12,beat=%s", ph, beat);
+    CHECK(contractParse(line, c));
+    CHECK(a.params.atBeat >= -CONTRACT_BEAT_MAX && a.params.atBeat <= CONTRACT_BEAT_MAX);
+    CHECK(c.params.beatAnchor >= -CONTRACT_BEAT_MAX && c.params.beatAnchor <= CONTRACT_BEAT_MAX);
+    for (uint32_t t0 : T) for (uint32_t dt : T) {
+      BeatClock bc;
+      CHECK(beatClockSeed(bc, c.params, t0) == CS_SEEK);
+      const uint32_t now = t0 + dt;
+      const BeatPos bp = beatPosAt(bc, now);
+      const uint8_t every = accentEveryFrom(a.params);
+      const int32_t end = a.params.atBeat + 9999;                    // what a fork writes for "no next section"
+      const float prog = beatSectionProgress(bp.beatIndex, a.params.atBeat, end);
+      (void)beatSectionProgress(bp.beatIndex, -CONTRACT_BEAT_MAX, CONTRACT_BEAT_MAX);
+      for (uint8_t am = 0; am <= 4; am++) {
+        (void)beatAccentFires(am, bp, bc, every);
+        (void)beatAccentAmount(am, bp, 200, prog, bc, every);
+      }
+      (void)accentEdgeAfterSeed(bc, now);
+      ContractParams nudge; nudge.hasBeat = true; nudge.beatAnchor = a.params.atBeat;   // a bare re-anchor across the range
+      (void)beatClockSeed(bc, nudge, now);
+      ScoreEntry e[2]; e[0].atBeat = -CONTRACT_BEAT_MAX; e[1].atBeat = a.params.atBeat;
+      (void)scoreActiveIndex(e, 2, bp.beatIndex);
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   // A parser that hangs is a parser that bricks the board's serial loop. If any input in this
   // file makes contractParse() spin, we die here instead of hanging a CI job forever.
@@ -1086,6 +1147,7 @@ int main(int argc, char** argv) {
   section_H_slices();
   section_I_tables();
   section_J_target_independence();
+  section_K_beat_limits();
 
   printf("%s  %ld/%ld checks passed  (seed 0x%016llx, %ld numeric + %ld line iterations)\n",
          g_fail ? "FAILURES" : "OK", g_total - g_fail, g_total,

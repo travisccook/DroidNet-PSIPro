@@ -571,6 +571,39 @@ static void a_native_vu_mode_walks_after_a_show() {
   CHECK(kinds >= 3, "the native VU meter moves again 2 s after the show's last L (saw %u shapes)", kinds);
 }
 
+
+// ---- core revision CA1.2: what a line may and may not do ---------------------------------------
+// A scored line delivered twice (a mesh retry) changes nothing: the section that is playing does
+// not restart. A DIFFERENT line for the same beat replaces the entry, and the look follows.
+static void a_repeated_scored_line_changes_nothing() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=scan,c=00ff00,s=200,at=0"); at(1100, "!**C:bpm=120,bpb=4,beat=0");
+  at(2000, "!P*A:i=scan,c=00ff00,s=200,at=0");        // the same bytes again
+  at(4000, "!P*A:i=solid,c=ff00ff,at=0");             // another line for beat 0
+  runTo(5000);
+  uint32_t start = 0;                                 // the section's own time zero: its first lit frame
+  for (const Frame& f : between(1100, 1300)) if (f.lit) { start = f.t; break; }
+  CHECK(start != 0, "the scan section starts");
+  unsigned bad = 0;
+  for (const Frame& f : between(2030, 3900)) {
+    const int want = fxScanPos(f.t - start, 200, COLUMNS, false);
+    const int led = psiLed((uint8_t)want, 2);
+    if (led >= 0 && f.px[led].g != 255) bad++;
+  }
+  CHECK(bad == 0, "after the repeat the scan carries on from where it was (%u frames off its own timeline)", bad);
+  CHECK(shown(4900).allAre(MAGENTA), "a different line for the same beat replaces the section");
+}
+// S1: a bpm= that is not a plain number makes the whole C ignored, so a corrupted byte can neither
+// stop a show (bpm=0 is Pause) nor move it.
+static void a_bpm_that_is_not_a_number_is_ignored() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=solid,c=ff00ff,at=0"); at(1002, "!P*A:i=solid,c=00ffff,at=4");
+  at(1100, "!**C:bpm=120,bpb=4,beat=0");              // beat 4 lands at 3100
+  at(2000, "!**C:bpm=,beat=0"); at(2010, "!**C:bpm=-0"); at(2020, "!**C:bpm=0x"); at(2030, "!**C:bpm=12a,beat=0");
+  runTo(4000);
+  CHECK(shown(3000).allAre(MAGENTA) && shown(3200).allAre(CYAN), "the clock ran on: section 2 starts at 3100 as seeded");
+}
+
 #ifdef PSI_ENABLE_I2C
 // ---- the I2C build: the TWI interrupt only queues ------------------------------------------------
 // A contract line from an I2C master is copied in the interrupt and applied by loop(): nothing is
@@ -648,6 +681,8 @@ static const Scenario kScenarios[] = {
   {"no_accent_on_a_native_section", no_accent_on_a_native_section},
   {"a_meter_with_no_level_feed_walks", a_meter_with_no_level_feed_walks},
   {"a_native_vu_mode_walks_after_a_show", a_native_vu_mode_walks_after_a_show},
+  {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},
+  {"a_bpm_that_is_not_a_number_is_ignored", a_bpm_that_is_not_a_number_is_ignored},
 #ifdef PSI_ENABLE_I2C
   {"an_i2c_contract_line_is_applied_by_loop", an_i2c_contract_line_is_applied_by_loop},
   {"an_i2c_native_command_takes_the_panel_back", an_i2c_native_command_takes_the_panel_back},

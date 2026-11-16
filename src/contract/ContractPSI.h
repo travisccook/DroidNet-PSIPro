@@ -437,7 +437,7 @@ static PSI_NOINLINE void _applyLook(ContractLookPatch lp, uint32_t now) {
 }
 
 // ---- verb dispatch ----------------------------------------------------------
-PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
+PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint16_t lineCrc, uint32_t now) {
   if (pr.hasAt) {                                      // a scored section: stored, not shown
     ScoreEntry e;
     e.atBeat     = pr.atBeat;
@@ -453,7 +453,9 @@ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
       e.accentColor = pr.hasAccentColor ? pr.accentColor : e.color;
       e.accentDur10 = pr.hasAccentDur ? (uint8_t)(pr.accentDurMs / 10u) : 18;   // 18 => 180 ms
     }
-    scoreAccept(g_u, g_score, PSI_SCORE_CAP, e, 0);
+    // The entry keeps the CRC of its line: the core tells a line delivered twice (which changes
+    // nothing, the playing section included) from a new line for the same beat (which replaces).
+    scoreAccept(g_u, g_score, PSI_SCORE_CAP, e, lineCrc);
     // A new score invalidates the beat edge the last one accented (a resend re-anchors).
     g_u.lastAccentBeat = BEAT_NONE;
     return;
@@ -462,11 +464,11 @@ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
   _applyLook(lookPatchFrom(pr), now);
 }
 
-inline void applyContract(const ParsedContract& p, uint32_t now) {
+inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t now) {
   const ContractParams& pr = p.params;
   switch (p.verb) {
     case CV_ANIMATE:
-      _applyAnimate(pr, now);
+      _applyAnimate(pr, lineCrc, now);
       break;
 
     case CV_PULSE: {                                   // one-shot accent; outside a show it overlays the native look (L3)
@@ -632,7 +634,9 @@ inline void parseContract(const char* cmd) {
   ParsedContract p;
   if (!contractParse(cmd + 1, p)) return;              // +1 skips the leading '!'
   if (!contractAddressed(p.cls, p.unit)) return;       // fail-silent for other boards and units
-  applyContract(p, millis());
+  // A scored line is stored with the CRC of its bytes after '!', as received.
+  const uint16_t crc = (p.verb == CV_ANIMATE && p.params.hasAt) ? contractCrc16(cmd + 1) : 0;
+  applyContract(p, crc, millis());
 }
 
 // ---- I2C DEFERRAL: get the contract OUT of the interrupt handler -------------------------

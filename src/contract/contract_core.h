@@ -35,6 +35,10 @@ static const uint16_t ACCENT_DUR_DEFAULT_MS = 180;  // ad= absent
 static const uint16_t ACCENT_DUR_MAX_MS = 2550;     // S5: P d= and ad= ceiling (255 * 10 ms)
 static const uint8_t  ACCENT_EVERY_MAX = 16;        // an= 1..16
 static const uint8_t  CONTRACT_ROUTE_MAX = 99;      // Q:r= 0..99
+// at= and beat= are clamped to +/- this at parse. Every sum and difference of beat indices the
+// core and the forks compute then stays inside an int32, whatever a line carries (a clock running
+// 24 days at 300 BPM adds under 11 million beats to its anchor).
+static const int32_t  CONTRACT_BEAT_MAX = 1000000000L;
 static const uint8_t  CONTRACT_QUERY_MAX = 48;      // section 10: "!<cls><unit>q:...<CR>" at most
 static const uint8_t  CONTRACT_REPLY_MAX = 57;      // ...and with its route prefix (";W99,;S0")
 
@@ -56,6 +60,7 @@ struct ContractParams {
   bool hasAt = false;      int32_t atBeat = -1;
   bool hasAm = false;      uint8_t accentMode = 0;
   // clock params (Plan 2): parsed here but unused in Phase-1
+  bool bpmBad = false;     // bpm= was there but empty, signed or not all digits: the C is ignored whole (S1)
   bool hasBpm = false;     uint16_t bpm = 0;
   bool hasPh = false;      uint32_t phMs = 0;
   bool hasBpb = false;     uint8_t bpb = 4;
@@ -272,6 +277,19 @@ inline uint16_t _parseSatU16(const char* s, uint16_t maxV) {
   return m > (uint32_t)maxV ? maxV : (uint16_t)m;
 }
 inline uint8_t _parseSatU8(const char* s, uint8_t maxV) { return (uint8_t)_parseSatU16(s, maxV); }
+// A value that is one or more decimal digits and nothing else. bpm= and r= are taken ONLY in this
+// form: for them a damaged value must not turn into a meaning (bpm= with no number used to parse
+// as 0, which is Hold; r=zz as route 0, which is "reply to me").
+inline bool _allDigits(const char* s, size_t len) {
+  if (len == 0) return false;
+  for (size_t i = 0; i < len; i++) if (s[i] < '0' || s[i] > '9') return false;
+  return true;
+}
+// at= / beat=: inside +/- CONTRACT_BEAT_MAX.
+inline int32_t _parseBeat(const char* s) {
+  const int32_t b = _parseI32(s);
+  return b > CONTRACT_BEAT_MAX ? CONTRACT_BEAT_MAX : (b < -CONTRACT_BEAT_MAX ? -CONTRACT_BEAT_MAX : b);
+}
 // k=<hhhh>: exactly four hex digits.
 inline bool _parseHex4(const char* s, size_t len, uint16_t& out) {
   if (len != 4) return false;
@@ -309,7 +327,7 @@ inline void _applyParam(ContractParams& pr, const char* k, size_t kl, const char
     case K_D:    pr.hasDur = true;     pr.durMs = _parseU32(v); break;
     case K_B:    pr.hasBright = true;  pr.bright = _parseSatU8(v, 255); break;
     case K_M:    pr.hasBeatMod = true; pr.beatMod = _parseSatU8(v, 255); break;
-    case K_AT:   pr.hasAt = true;      pr.atBeat = _parseI32(v); break;
+    case K_AT:   pr.hasAt = true;      pr.atBeat = _parseBeat(v); break;
     case K_AM:   pr.hasAm = true;      pr.accentMode = _parseSatU8(v, 255);
                  if (pr.accentMode > 4) pr.accentMode = 0;              // an unknown mode is no accent
                  break;
@@ -321,10 +339,13 @@ inline void _applyParam(ContractParams& pr, const char* k, size_t kl, const char
       if (word == 0) pr.mode = 's'; else if (word == 1) pr.mode = 'i';
       break;
     }
-    case K_BPM:  pr.hasBpm = true;     pr.bpm = _parseSatU16(v, 65535u); break;
+    case K_BPM:  // S1: digits only. Anything else marks the line; beatClockSeed() then ignores it whole.
+                 if (_allDigits(v, vl)) { pr.hasBpm = true; pr.bpm = _parseSatU16(v, 65535u); }
+                 else pr.bpmBad = true;
+                 break;
     case K_PH:   pr.hasPh = true;      pr.phMs = _parseU32(v); break;
     case K_BPB:  pr.hasBpb = true;     pr.bpb = _parseSatU8(v, 255); break;
-    case K_BEAT: pr.hasBeat = true;    pr.beatAnchor = _parseI32(v); break;
+    case K_BEAT: pr.hasBeat = true;    pr.beatAnchor = _parseBeat(v); break;
     // ---- v1.2 accent overlay (ae/ac/ad)
     case K_AE: {
       // native:<n> and the stateful effects are rejected here (see accentEffectAllowed)
@@ -347,7 +368,12 @@ inline void _applyParam(ContractParams& pr, const char* k, size_t kl, const char
     case K_WD:   pr.hasWd = true;      pr.wd = _parseSatU8(v, 255); break;
     case K_N:    pr.hasN = true;       pr.n = _parseSatU8(v, 255); break;
     case K_K: { uint16_t k16; if (_parseHex4(v, vl, k16)) { pr.hasK = true; pr.k = k16; } break; }
-    case K_R:    pr.hasRoute = true;   pr.route = _parseSatU8(v, CONTRACT_ROUTE_MAX); break;
+    case K_R: {  // section 10: a number 0..99 and nothing else. Any other r= is no route: the Q gets no reply.
+      const uint16_t route = _allDigits(v, vl) ? _parseSatU16(v, 65535u) : 65535u;
+      pr.hasRoute = route <= CONTRACT_ROUTE_MAX;
+      pr.route = pr.hasRoute ? (uint8_t)route : 0;
+      break;
+    }
     default: break;   // "sw" (swing) and any unknown key: parsed-and-ignored (forward-compatible)
   }
 }
@@ -414,7 +440,8 @@ inline BeatPos beatPosAt(const BeatClock& bc, uint32_t nowMs) {
 }
 
 // What a C line did.
-//   CS_IGNORED  nothing changed (S1: a bpm outside 30..300, or a bare re-anchor with no clock running).
+//   CS_IGNORED  nothing changed (S1: a bpm outside 30..300 or not a number, or a bare re-anchor with
+//               no clock running).
 //   CS_SEEK     a new timeline: the line carried bpm=, or it moved the position by a beat or more.
 //   CS_NUDGE    a bare re-anchor (no bpm=) that moved the position by less than one beat: the
 //               host's periodic drift correction. C1 and C2 treat it differently from a seek.
@@ -425,6 +452,7 @@ enum ContractSeed : uint8_t { CS_IGNORED = 0, CS_SEEK = 1, CS_NUDGE = 2, CS_HOLD
 
 // Seed/adjust the clock from a parsed C command received at nowMs.
 inline ContractSeed beatClockSeed(BeatClock& bc, const ContractParams& pr, uint32_t nowMs) {
+  if (pr.bpmBad) return CS_IGNORED;                       // S1: a bpm= that is not a number: the WHOLE line, its ph=/beat= too
   if (pr.hasBpm && pr.bpm == 0) { bc.running = false; return CS_HOLD; }                // C6
   if (pr.hasBpm && (pr.bpm < CONTRACT_BPM_MIN || pr.bpm > CONTRACT_BPM_MAX)) return CS_IGNORED;   // S1: the WHOLE line
   if (!pr.hasBpm && !bc.running) return CS_IGNORED;      // a bare re-anchor neither starts nor resumes a clock
@@ -861,6 +889,7 @@ struct ContractUnitState {
   uint16_t       pulseDurMs = 0;
   uint32_t       pulseStartMs = 0;
   uint32_t       pulseLastMs = 0;       // SAFETY ANCHOR (the strobe cool-down): survives a reset
+  uint8_t        pulseBright = 255;     // the overlay's own brightness fraction (P's b=): never the base look's
   // ---- the score cursor, and the load check
   uint8_t        scoreLen = 0;          // entries held (the table itself is the fork's, sized by its cap)
   int8_t         curSection = -1;
@@ -871,6 +900,10 @@ struct ContractUnitState {
   int32_t        lastAccentBeat = BEAT_NONE;
   // ---- L2
   uint8_t        wdSec = 0;             // 0 = no watchdog
+  // ---- S9: the field gate (contractFieldGate). SAFETY ANCHORS: all three survive a reset.
+  uint32_t       fieldOnsetMs = 0;      // when the field last lit, or last got brighter while lit
+  uint8_t        fieldRef = 0;          // lit: the brightest level since it lit. Not lit: the darkest since it fell.
+  bool           fieldLit = false;
 };
 
 // S6: the level a brightness fraction gives under a ceiling. 255 is the ceiling itself, 128 half
@@ -880,14 +913,17 @@ inline uint8_t contractLevel(uint8_t ceil, uint8_t fraction) {
 }
 
 // L1: THE show reset. `ceiling` is the board's own brightness right now (S6).
-// Two timers are kept on purpose: the strobe cool-down and the live-look hold. A reset that
-// cleared them would be a way straight through the photosensitivity cap (X, then P, repeated).
-// A failed load check (loadOk == 2) is kept too; contractOnShow() is what clears it.
+// The safety anchors are kept on purpose: the strobe cool-down, the live-look hold and the field
+// gate (S9). A reset that cleared them would be a way straight through the photosensitivity cap
+// (X, then P, repeated). A failed load check (loadOk == 2) is kept too; contractOnShow() is what
+// clears it.
 inline void contractShowReset(ContractUnitState& s, uint8_t ceiling) {
-  const uint32_t keepPulse = s.pulseLastMs, keepApply = s.lastApplyMs;
-  const uint8_t  keepOk = (s.loadOk == 2) ? 2 : 0;
+  const uint32_t keepPulse = s.pulseLastMs, keepApply = s.lastApplyMs, keepOnset = s.fieldOnsetMs;
+  const uint8_t  keepOk = (s.loadOk == 2) ? 2 : 0, keepRef = s.fieldRef;
+  const bool     keepLit = s.fieldLit;
   s = ContractUnitState();
   s.pulseLastMs = keepPulse; s.lastApplyMs = keepApply; s.loadOk = keepOk;
+  s.fieldOnsetMs = keepOnset; s.fieldRef = keepRef; s.fieldLit = keepLit;
   s.ceil = ceiling;
 }
 // M:v=show[,wd=<s>]: reset and arm. base stays CB_NONE: the native idle look keeps running until
@@ -946,6 +982,92 @@ inline bool liveLookDue(ContractUnitState& s, uint32_t nowMs, ContractLookPatch&
   return true;
 }
 
+// ===== v1.3 S9: ONE LIMIT FOR EVERY PATH — THE FIELD GATE =====
+// S2 bounds the beat-driven changes and S4 the live looks, each on its own path. A host can still
+// make a display flash by combining paths, or through one that has no limit of its own: a relight
+// after X, B, a meter following L, a C that seeks between a lit and a dark section, a tempo re-seed
+// that restarts the pump, two scored sections whose pumps meet at the seam. S9 closes all of them
+// in ONE place, and at the place that counts: on the light a unit is about to put out.
+//
+// A fork renders its frame, measures the FIELD LEVEL (0..255: the mean over the unit's LEDs of
+// each LED's brightest channel, so a red field counts like a white one), and passes it through
+//     allowed = contractFieldGate(state, level, now);
+// before the frame leaves. When allowed < level it scales the frame down to `allowed`.
+//
+// The rule. A change of at least a STEP (a quarter of the unit's ceiling) is a swing; smaller
+// changes are a look's own texture and pass. The unit is either LIT or not:
+//   * LIT. The gate follows the level up, and each new peak is the end of the onset so far. A
+//     fall of a step or more below the peak makes the unit not lit. A fall is never delayed: a
+//     blackout is always immediate.
+//   * NOT LIT. The gate follows the level down (the trough). A rise of a step or more above the
+//     trough is an ONSET, and an onset is allowed only 2 * STROBE_MIN_STATE_MS (340 ms) after
+//     the field last lit or last got brighter. Until then the unit may show no more than one
+//     step less one above its trough.
+// So, for ANY observer who calls the field dark below one level and lit above another at least a
+// step higher: two dark-to-lit onsets are never less than 340 ms apart, which is at most three
+// in any second. (Why "last got brighter" and not "last lit": an onset is over when the light
+// stops rising. Timing from its start would let a slow rise be followed too closely.)
+//
+// What it costs a look: nothing, unless it swings the whole field by a quarter of the ceiling
+// more often than every 340 ms. The looks that could are held to the floor already (S2, S4, S8);
+// the gate squares off the fastest of them a little (a pulse faster than about 1.8 cycles a
+// second rises in a step instead of a ramp) and never makes anything brighter.
+//
+// Six bytes of state a unit. The state survives every reset (contractShowReset).
+inline uint8_t contractFieldStep(uint8_t ceil) { return (uint8_t)(ceil / 4u + 1u); }
+inline uint8_t contractFieldGate(ContractUnitState& s, uint8_t level, uint32_t nowMs) {
+  const uint8_t step = contractFieldStep(s.ceil);
+  if (s.fieldLit) {
+    if (level > s.fieldRef) { s.fieldRef = level; s.fieldOnsetMs = nowMs; }           // still rising
+    else if ((uint8_t)(s.fieldRef - level) >= step) { s.fieldLit = false; s.fieldRef = level; }   // a fall
+    return level;
+  }
+  if (level < s.fieldRef) s.fieldRef = level;                                         // the trough
+  if ((uint8_t)(level - s.fieldRef) < step) return level;
+  if (strobeCoolDownExpired(s.fieldOnsetMs, nowMs, 2 * STROBE_MIN_STATE_MS)) {
+    s.fieldLit = true; s.fieldRef = level; s.fieldOnsetMs = nowMs;
+    return level;
+  }
+  return (uint8_t)(s.fieldRef + step - 1u);                                           // held
+}
+// ASK WITHOUT TELLING: what contractFieldGate() would return for `level` now, with no change to
+// the state. For light a fork cannot scale after the fact, see below.
+inline uint8_t contractFieldAllowed(const ContractUnitState& s, uint8_t level, uint32_t nowMs) {
+  if (s.fieldLit) return level;
+  const uint8_t step = contractFieldStep(s.ceil);
+  const uint8_t trough = level < s.fieldRef ? level : s.fieldRef;
+  if ((uint8_t)(level - trough) < step) return level;
+  if (strobeCoolDownExpired(s.fieldOnsetMs, nowMs, 2 * STROBE_MIN_STATE_MS)) return level;
+  return (uint8_t)(trough + step - 1u);
+}
+// A NATIVE LOOK is light the fork does not draw, cannot measure, and often cannot scale. It goes
+// through the same gate, by the level the fork knows it by: 0 for a native blackout, the
+// brightness the fork runs it at where it sets one (the logics), the ceiling otherwise. In two
+// steps, because the gate must only ever be TOLD about light that reached the LEDs:
+//   1. ASK, before handing the LEDs over: contractFieldAllowed(s, level, now) >= level. If not,
+//      this would be an onset inside the window: the fork keeps what it is showing and asks again
+//      on a later pass. (contractFieldMayLight() asks for a native look at the ceiling.)
+//   2. TELL, at the moment the native look is actually on the LEDs: contractFieldGate(s, level, then).
+// A fork that told the gate at step 1 and then did not show the look after all (a later line
+// changed its mind before the frame) would leave the gate believing in a peak that never was,
+// and a later, smaller rise could then slip through unmarked.
+inline bool contractFieldMayLight(const ContractUnitState& s, uint32_t nowMs) {
+  return contractFieldAllowed(s, s.ceil, nowMs) >= s.ceil;
+}
+// Light the fork did not choose and cannot hold back is on the LEDs: someone's button started a
+// native look. There is nothing to allow. The gate records it, so that what the CONTRACT does
+// next keeps its distance from it.
+inline void contractFieldForced(ContractUnitState& s, uint8_t level, uint32_t nowMs) {
+  if (contractFieldGate(s, level, nowMs) < level) { s.fieldLit = true; s.fieldRef = level; s.fieldOnsetMs = nowMs; }
+}
+
+// The accent overlay: is it still up at nowMs? Takes it down when its time is over. ONE definition
+// of the expiry, for the fork's render and for its tick (the tick is what hands the LEDs back).
+inline bool contractOverlayUp(ContractUnitState& s, uint32_t nowMs) {
+  if (s.pulseActive && (uint32_t)(nowMs - s.pulseStartMs) >= s.pulseDurMs) s.pulseActive = false;
+  return s.pulseActive;
+}
+
 // ===== v1.3: SCORE CAPACITY, LOAD VERIFICATION, QUERY (spec sections 6, 7, 10) =====
 
 // CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no reflection, no final XOR; "123456789" is
@@ -973,13 +1095,22 @@ inline ScoreInsert scoreInsertEx(ScoreEntry* entries, uint8_t& n, uint8_t cap, c
   n++;
   return SI_INSERTED;
 }
-// A scored A line for this unit: store it with the CRC of its line. false: the table was full —
-// the entry is NOT stored and the load is marked bad, which verb V then reports (overflow is an
-// error, not a silent drop). A line delivered twice replaces itself and changes nothing.
+// A scored A line for this unit: store it with the CRC of its line. false: it was NOT stored.
+//   * The table was full: the load is marked bad, which verb V then reports (overflow is an
+//     error, not a silent drop).
+//   * The unit failed its load check (loadOk == 2): it stays on its native look until the next
+//     M:v=show, so every scored line until then is dropped. (A line that arrives late, after the
+//     V, must not start half a show.)
+// A line delivered twice replaces itself and changes NOTHING, the section cursor included: a
+// re-sent load does not restart the section that is playing.
 inline bool scoreAccept(ContractUnitState& s, ScoreEntry* entries, uint8_t cap, ScoreEntry e, uint16_t lineCrc) {
+  if (s.loadOk == 2) return false;
   e.crc = lineCrc;
+  uint8_t i = 0;
+  while (i < s.scoreLen && entries[i].atBeat < e.atBeat) i++;
+  const bool again = i < s.scoreLen && entries[i].atBeat == e.atBeat && entries[i].crc == lineCrc;
   if (scoreInsertEx(entries, s.scoreLen, cap, e) == SI_FULL) { s.overflow = true; return false; }
-  s.curSection = -1; s.pinForward = false;               // indices moved: re-evaluate the cursor
+  if (!again) { s.curSection = -1; s.pinForward = false; }   // the table changed: re-evaluate the cursor
   return true;
 }
 // k: the XOR of the held entries' line CRCs. Independent of arrival order and of duplicates.
@@ -1075,12 +1206,14 @@ inline int fxScanPos(uint32_t elapsed, uint8_t speed, int N, bool wrap) {
 // other code is dropped whole. The lists live here, not in the forks' render layers, so the
 // generated vector file can carry them and Studio's vocabulary is tested against the firmware's
 // own list.
-// RSeries logics (LogicEngine sequence ids): 0..24 without the text effects 15..18 (they need a
-// message), plus the fork's custom effects 101..105. Not 25 (one past the engine's effect table,
-// an out-of-bounds call), not 99 (RANDOM can pick anything), not 100 (the bitmap needs an SD card),
-// not 106 (the contract's own renderer).
+// RSeries logics (LogicEngine sequence ids): 0..24 without Leia (3) and the text effects 15..18
+// (they need a message), plus the fork's custom effects 101..105. Not 3: the stock Leia effect
+// sets its own brightness, 50..255, every frame (LogicEngine.h, LogicLeiaEffect), past the owner's
+// ceiling and deaf to verb B (S6). Not 25 (one past the engine's effect table, an out-of-bounds
+// call), not 99 (RANDOM can pick anything), not 100 (the bitmap needs an SD card), not 106 (the
+// contract's own renderer).
 inline bool nativeAllowedLogics(int code) {
-  return (code >= 0 && code <= 14) || (code >= 19 && code <= 24) || (code >= 101 && code <= 105);
+  return (code >= 0 && code <= 14 && code != 3) || (code >= 19 && code <= 24) || (code >= 101 && code <= 105);
 }
 // PSI Pro (its mode numbers): 0..22 and 92, WITHOUT Flash (2), Alarm (3) and Scream (5), which are
 // full-field white at 8.3 and 4 Hz — past the strobe floor this contract holds everywhere else.
