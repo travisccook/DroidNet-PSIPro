@@ -265,6 +265,23 @@ echo "    disable both and the I2C build fails. There used to be a third leg her
 echo "    CONTRACT_SLIM, that dropped five native modes to make room; those five are"
 echo "    now permanent PROGMEM bytecode (include/psi_vm.h), all 23 upstream modes"
 echo "    ship, and CONTRACT_SLIM is gone."
+
+echo "[9b] flash and stack gates"
+# Flash: what the linker placed (text + data) against a ceiling below the board's 28,672 B, so the
+# next change has room. Stack: the SOUND worst-case bound from stack_report.py (the linked ELF, not
+# -fstack-usage) must leave this many bytes below the static data. A change that fails a gate needs
+# a decision, not a smaller gate.
+AVR_BIN="${AVR_BIN:-$HOME/.platformio/packages/toolchain-atmelavr/bin}"
+gate() {  # <env> <max flash B> <min stack headroom B>
+  elf="../../.pio/build/$1/firmware.elf"
+  flash=$("$AVR_BIN/avr-size" "$elf" | awk 'NR==2 {print $1 + $2}')
+  head=$(python3 stack_report.py --elf "$elf" --objdump "$AVR_BIN/avr-objdump" \
+         | sed -n 's/^ *HEADROOM *\(-\{0,1\}[0-9]*\) B.*/\1/p')
+  echo "    $1: flash $flash B (limit $2), sound stack headroom ${head:-none} B (floor $3)"
+  if [ "$flash" -gt "$2" ] || [ -z "$head" ] || [ "$head" -lt "$3" ]; then echo "FAIL: $1 is over a gate"; exit 1; fi
+}
+gate PSIPro 28416 256
+gate PSIPro-i2c 28160 128
 fi   # PlatformIO present
 
 echo "[10] simavr: millis() rate per look, WS2812 waveform, CPU cost -- optional"

@@ -62,9 +62,13 @@ JS rainbow-parity vectors — are preserved. No divergence, no STOP.
 
 ## 4. WS2812 timing — objdump cycle-count over the linked ELF
 
-simavr is not packaged for this host (no Homebrew formula), so the proof is the
-**cycle-count over the real linked `firmware.elf`**, not the source. The emitter is
-emitted verbatim (ATmega32U4 @ 16 MHz, 62.5 ns/cycle, PD4):
+Two derivations. The first is the **cycle-count over the real linked `firmware.elf`**, below. The
+second was added on 2026-11-16: PlatformIO ships simavr (`pio pkg install -g --tool
+platformio/tool-simavr`; an earlier version of this report said it was not available), and
+`test/simavr/wave` traces PD4 while the driver sends three frames. `test/simavr/check_wave.py`
+checks T0H, T1H, the bit period and the bytes on the wire against the frame on every
+`test/host/run.sh`. Both give the same numbers. The emitter is emitted verbatim (ATmega32U4 @
+16 MHz, 62.5 ns/cycle, PD4):
 
 | Symbol | ELF cycles | Time | WS2812 spec window | In spec |
 | --- | --- | --- | --- | --- |
@@ -127,11 +131,18 @@ flash-bound board. `contract_core.h` byte-identical at every commit.
 | Difference | Evidence | Effect |
 | --- | --- | --- |
 | No temporal dithering | FastLED disables it < 100 fps (`FastLED.cpp:58`); firmware ~40 fps | **None** — FastLED's dither is already inert here; output is identical |
-| No min-refresh busy-wait | FastLED uses `CMinWait<10>` ≈ 10 µs (< WS2812 ~50 µs reset); firmware frame cadence is `millis()`-gated to ≥ tens of ms | **None at top level.** The only sub-reset show pairs are Neil's intentional transient-black frames (`clear();show();…fill;show()`), identical under FastLED |
+| No min-refresh busy-wait | FastLED uses `CMinWait<10>` ≈ 10 µs (< WS2812 ~50 µs reset); firmware frame cadence is `millis()`-gated to ≥ tens of ms | **Measured, 2026-11-16:** two `show()` calls in one tick are 107 µs apart in simavr (the staging loop and nothing else). That covers the original WS2812's 50 µs reset and not the 280 µs of later WS2812B revisions. The pairs are common: Neil's transient-black frames (`clear();show();…fill;show()`) in Leia, Knight Rider and the title scan, and the VM's `OP_SHOWLIVE`. Stock FastLED's gap is not known to be longer. **Bench item**; an explicit gap is planned (v1.3 plan, Task 16) |
 | T1H 750 ns vs FastLED 875 ns | §4 | Different in-spec waveform, same data — **bench-confirm acceptance** |
 | Interrupt window +~27 µs | §5 | 1.9 % longer mask than FastLED; no byte loss shown |
 | SRAM +65 B | §7 | Within budget (max 64.6 % on i2c) |
-| millis clock-correction approximate | mirrors FastLED (`clockless_trinket.h:130`); adds back masked time beyond one queued tick | Sub-ms; does not affect rendered frames |
+| millis clock-correction approximate | mirrors FastLED (`clockless_trinket.h:130`); adds back masked time beyond one queued tick | **Wrong for the beat clock, measured 2026-11-16.** The credit is a flat 416 µs a frame, but the 26 ms render gate phase-locks each frame to timer 0, so a frame loses exactly 0 or 1,024 µs. Whenever a frame is shown every tick, `millis()` runs about 1.6 % fast or 2.3 % slow, depending on the look (`test/simavr/millis`). Rendered frames are unaffected; a clock derived from `millis()` is not. Stock FastLED has the same flaw. Replaced by an exact credit (v1.3 plan, Task 6) |
+
+## What simavr added (2026-11-16)
+
+`test/host/run.sh` stage 10 runs three probes in simavr (`test/simavr/README.md`): the firmware's
+`millis()` against Timer1 for each contract look, the waveform on PD4, and the cost of the
+per-frame math. simavr models the timer, the interrupt mask and the pin; it does not model the
+LEDs, the crystal or the bus, so the list below stands.
 
 ## What only real hardware can confirm
 

@@ -631,8 +631,9 @@ def main():
 
     tc = os.path.expanduser("~/.platformio/packages/toolchain-atmelavr/bin")
     objdump = args.objdump or os.path.join(tc, "avr-objdump")
-    readelf = os.path.join(tc, "avr-readelf")
-    size = os.path.join(tc, "avr-size")
+    # The other tools come from wherever the objdump in use lives, so --objdump moves all three.
+    readelf = os.path.join(os.path.dirname(objdump), "avr-readelf")
+    size = os.path.join(os.path.dirname(objdump), "avr-size")
     for t in (objdump, readelf):
         if not os.path.exists(t):
             alt = shutil.which(os.path.basename(t))
@@ -869,7 +870,7 @@ def main():
             "indirect_bound": ind_best, "indirect_worst": ind_who,
             "address_taken": sorted(taken),
             "isrs": {k: v[0] for k, v in isrs.items()},
-            "path": [{"fn": a, "own": b} for a, b in sync_path],
+            "path": [{"fn": e[0], "own": e[1]} for e in sync_path],
         }, indent=2))
         return 0 if (head > 0 and sound) else 1
 
