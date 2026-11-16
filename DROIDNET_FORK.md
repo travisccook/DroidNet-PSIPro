@@ -57,8 +57,10 @@ bash test/host/run.sh
 ```
 
 1. `contract_core.h` parser + effect-math unit tests — **341/341 checks**.
-2. `ContractPSI.h` firmware-layer type-check against `test/host/mock_psi.h`, a mock of the MaxPSI
-   board API (plus the score-native / frame-latch / score-clear / build-ramp / scale guards).
+2. Timeline scenarios (`test/host/test_timeline.cpp`, `timeline_scenarios.inc`): the firmware's own
+   `src/main.cpp` on host mocks of the hardware, fed scripted wire lines, with assertions on the
+   frames it latches. The contract layer has no mock of the board API any more; its guards (score,
+   frame latch, build ramp, accents, the query ack, the I2C deferral) run on the real code.
 
 The list above predates most of the harness; `bash test/host/run.sh` has grown well past those two
 checks (golden-frame parity against Neil's animation code, parser fuzzing, and a real AVR

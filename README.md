@@ -208,8 +208,9 @@ driver — today's figures are in the bullets above. Re-derive any of this yours
 `python3 test/host/stack_report.py --elf .pio/build/PSIPro-i2c/firmware.elf` rather than trusting
 this table as it ages.)
 
-Two guards keep it that way: a behavioural one (`compile_contract.cpp` A11 — the ISR entry point must
-not render or apply anything) and a **static** one in `run.sh`, because the behavioural test alone
+Two guards keep it that way: a behavioural one (the timeline scenario
+`an_i2c_contract_line_is_applied_by_loop`, run on the I2C build — the ISR entry point must not
+render or apply anything) and a **static** one in `run.sh`, because the behavioural test alone
 cannot catch someone "simplifying" `receiveEvent()` back to a direct `parseContract()` call — the
 queue would still pass its own test while the hazard quietly returned.
 

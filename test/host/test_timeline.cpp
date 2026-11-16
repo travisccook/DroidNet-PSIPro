@@ -28,7 +28,7 @@ struct Frame {
     return true;
   }
 };
-struct Ev { uint32_t t; std::string line; };
+struct Ev { uint32_t t; std::string line; bool i2c; };
 
 static std::vector<Frame> g_frames;
 static std::vector<Ev> g_evs;
@@ -47,14 +47,24 @@ static void boot(uint8_t ee0 = 0x00, uint8_t ee1 = 0x01, uint8_t ee2 = 20, bool 
   g_frame_hook = hook;
   setup();
 }
-static void at(uint32_t t, const char* line) { g_evs.push_back({t, line}); }
+static void at(uint32_t t, const char* line) { g_evs.push_back({t, line, false}); }
+#ifdef PSI_ENABLE_I2C
+// A line from an I2C master at time t. The receive callback runs between two loop passes, as the
+// TWI interrupt would run it.
+static void atI2c(uint32_t t, const char* line) { g_evs.push_back({t, std::string(line) + "\r", true}); }
+#endif
 static void runTo(uint32_t t) {
   while (g_now < t) {
     g_now++; g_mock_millis = g_now;
     // The mock's RX buffer is 512 bytes for the life of the process and never rewinds; rewind it
     // whenever the firmware has drained it, or a long timeline silently loses its later lines.
     if (Serial1.rxHead == Serial1.rxTail) Serial1.rxHead = Serial1.rxTail = 0;
-    for (const Ev& e : g_evs) if (e.t == g_now) { Serial1.feed(e.line.c_str()); Serial1.feed("\r"); }
+    for (const Ev& e : g_evs) if (e.t == g_now) {
+#ifdef PSI_ENABLE_I2C
+      if (e.i2c) { Wire.feed(e.line.c_str()); receiveEvent((int)e.line.size()); continue; }
+#endif
+      Serial1.feed(e.line.c_str()); Serial1.feed("\r");
+    }
     loop(); serialEventRun();
   }
 }
@@ -69,6 +79,17 @@ static const Frame& shown(uint32_t t) {
 static std::vector<Frame> between(uint32_t a, uint32_t b) {
   std::vector<Frame> out;
   for (const Frame& x : g_frames) if (x.t >= a && x.t <= b) out.push_back(x);
+  return out;
+}
+// Times at which the panel BECAME one solid colour (a frame that is all `rgb` after one that is not).
+static std::vector<uint32_t> onsets(uint32_t a, uint32_t b, uint32_t rgb) {
+  std::vector<uint32_t> out; bool was = false;
+  for (const Frame& x : g_frames) {
+    if (x.t > b) break;
+    const bool is = x.allAre(rgb);
+    if (x.t >= a && is && !was) out.push_back(x.t);
+    was = is;
+  }
   return out;
 }
 #define CHECK(cond, ...) do { if (!(cond)) { printf("  FAIL %s:%d: ", __func__, __LINE__); printf(__VA_ARGS__); printf("\n"); g_fails++; } } while (0)

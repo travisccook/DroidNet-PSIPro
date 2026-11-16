@@ -751,8 +751,8 @@ void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime)
 
     // Set a default start level for each column.
     // Contract verb L drives level[] from Studio energy, so skip the random seed
-    // while the contract is armed (keeps the meter tracking L, not noise).
-    if (!g_contractArmed) {
+    // while the contract holds the panel (keeps the meter tracking L, not noise).
+    if (!contractHoldsLevels()) {
       for (int i=0; i< COLUMNS; i++)
       {
         level[i] = random(0, 6);
@@ -781,8 +781,8 @@ void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime)
     updateLed = 1;
 
     // calc the next position of the bars.
-    // Suppressed while the contract is armed: verb L owns level[] (Studio energy).
-    if (!g_contractArmed)
+    // Suppressed while the contract holds the panel: verb L owns level[] (Studio energy).
+    if (!contractHoldsLevels())
     for (int y = 0; y < COLUMNS; y++)
     {
       byte upDown = random(0, 2);
@@ -1243,6 +1243,8 @@ void doTcommand(int address, int argument, int timing)
     return;
   }
 
+  contractYieldToNative();   // DroidNet: a native command addressed to this PSI ends a contract show (L6)
+
   if (timing != 0){
     DEBUG_PRINT_LN("Timing Value received in command");
     timingReceived = true;
@@ -1283,6 +1285,7 @@ void doDcommand(int address)
   DEBUG_PRINT_LN(address); 
   */
 
+  contractYieldToNative();   // DroidNet: as doTcommand
   runPattern(defaultPattern);
 }
 

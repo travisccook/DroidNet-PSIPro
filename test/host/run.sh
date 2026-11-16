@@ -13,7 +13,7 @@
 #   1c. wdp_fork.h: this fork's real WDP identity builds its line, front and rear
 #   1d. the WDP announce in the firmware: main.cpp + mocks (TX room, the Q ack, the jumper, the seed)
 #   2. psi_vm.h decode-walk test (every VM program: known ops, in-bounds arities, reaches OP_END)
-#   3. ContractPSI.h firmware-layer type-check against a mock of the MaxPSI board API
+#   3. (retired: the firmware-layer guards are timeline scenarios now, stage 6c, on the real main.cpp)
 #   4. command-buffer width guard (the v1.2 accent keys push a scored line past 63 chars)
 #   5. parser fuzz + differential (ASan/UBSan)
 #   6. golden-frame parity against the committed captures (test/host/golden/)
@@ -97,16 +97,6 @@ echo "[2/9] psi_vm.h decode-walk test"
 "$CXX_SAN" -std=c++17 -O1 -fsigned-char -fsanitize=address,undefined \
         -I . -I native_mocks test_psi_vm.cpp -o "$T/psi_vm_decode"
 "$T/psi_vm_decode"
-echo "[3/9] ContractPSI.h firmware type-check"
-# BOTH configurations. This fork is serial-only by default (include/config.h, I2C INTAKE),
-# and I2C is an opt-in -D. An option nobody compiles is an option that rots, so check both:
-# the serial-only build is what ships, and the I2C build is what anyone with a MarcDuino on
-# the bus will flash. Guard A11 (the ISR deferral) only exists in the I2C config.
-"$CXX_HOST" -std=c++17 -Wall -Wextra compile_contract.cpp -o "$T/psi_fw_syntax"
-"$T/psi_fw_syntax"
-"$CXX_HOST" -std=c++17 -Wall -Wextra -D PSI_ENABLE_I2C compile_contract.cpp -o "$T/psi_fw_syntax_i2c"
-"$T/psi_fw_syntax_i2c"
-
 echo "[4/9] command-buffer width guard"
 # buildCommand() (src/main.cpp) DROPS every byte past CMD_MAX_LENGTH-1 and terminates
 # there — an over-long line is SILENTLY TRUNCATED and then parsed as if complete. The
@@ -136,7 +126,8 @@ echo "CMD_MAX_LENGTH >= $need in preamble.h + config.h (worst v1.2 line ${#worst
 # .bss (~190-230 B a level against 1,076 B of headroom; three levels overflow). The contract path
 # is therefore DEFERRED: the ISR calls contractQueueFromISR() and loop() calls
 # contractServicePending().
-# compile_contract.cpp's A11 guard proves the BEHAVIOUR of the queue, but it cannot see someone
+# The timeline scenario an_i2c_contract_line_is_applied_by_loop (stage 6c, I2C build) proves the
+# BEHAVIOUR of the queue, but it cannot see someone
 # "simplifying" main.cpp's ISR back to a direct parseContract() call — the queue would still pass
 # its own test while the hazard quietly returned. So pin the call site itself. (Comments are
 # stripped first: the ISR's comment block legitimately explains why parseContract is NOT there.)
@@ -251,9 +242,21 @@ bash diff_upstream.sh "$T" "$CXX_SAN"
 echo "[6c] timeline scenarios: the firmware on the mocks, scripted wire timelines"
 # src/main.cpp verbatim, a scripted timeline of wire lines, assertions on the frames show() latched
 # and on the bytes written to Serial1. One scenario per process (the firmware keeps static state).
+# Built twice, as the two environments are: serial-only, and I2C without the strip looks. The I2C
+# run adds the scenarios that feed a line through the TWI receive callback.
 "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
     -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline"
-for s in $("$T/psi_timeline" --list); do "$T/psi_timeline" "$s"; done
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
+    -DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline_i2c"
+for bin in psi_timeline psi_timeline_i2c; do
+  n=0
+  for s in $("$T/$bin" --list); do
+    "$T/$bin" "$s" > "$T/scenario.out" 2>&1 || { cat "$T/scenario.out"; echo "FAIL: $bin $s"; exit 1; }
+    n=$((n + 1))
+  done
+  echo "      $bin: $n scenarios ok"
+done
 
 echo "[7/9] scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock"
 # include/FastLED.h replaced FastLED with a from-scratch WS2812 driver. The 31 goldens
@@ -337,10 +340,12 @@ gate PSIPro 28416 256
 gate PSIPro-i2c 28160 128
 fi   # PlatformIO present
 
-echo "[10] simavr: millis() rate per look, WS2812 waveform, CPU cost -- optional"
-# The host mocks have an ideal clock and a free show(). These three probes run real AVR code in
+echo "[10] simavr: millis() rate per look, the show lifecycle, WS2812 waveform, CPU cost -- optional"
+# The host mocks have an ideal clock and a free show(). These four probes run real AVR code in
 # simavr (test/simavr/README.md): the firmware's millis() against Timer1 for each contract look,
-# the WS2812 waveform on PD4, and the cost of the per-frame math.
+# the firmware through a show, X, idle, a native take-over and a pulse (what the panel returns to
+# depends on when upstream's loop samples its pattern state, so it is checked on the real timer
+# too), the WS2812 waveform on PD4, and the cost of the per-frame math.
 SIMAVR="${SIMAVR:-$HOME/.platformio/packages/tool-simavr/bin/simavr}"
 if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
   simrun() {  # <project> <seconds> <log> [simavr args...]: build, run until the timeout, clean the log
@@ -353,6 +358,8 @@ if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
   simrun millis 240 "$T/millis.txt"
   # 1000 ppm is a fifth of the contract's +/-0.5 % clock budget; the exact credit measures under 400.
   python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 1000
+  simrun lifecycle 45 "$T/lifecycle.txt"
+  python3 ../simavr/check_lifecycle.py "$T/lifecycle.txt"
   simrun wave 8 "$T/wave.txt" -o "$T/wave.vcd" -at "led=trace@0x2b/0x10"
   python3 ../simavr/check_wave.py "$T/wave.vcd" --min-gap-us 50
   simrun bench 30 "$T/bench.txt"
