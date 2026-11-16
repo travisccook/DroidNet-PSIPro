@@ -1,0 +1,45 @@
+diff --git a/test/host/golden_native.cpp b/test/host/golden_native.cpp
+index 6296b41..36ad139 100644
+--- a/test/host/golden_native.cpp
++++ b/test/host/golden_native.cpp
+@@ -86,18 +86,30 @@ int main(int argc, char** argv) {
+ 
+   g_frame_hook = frameHook;  // capture setup()-time frames too
+   setup();
+-  char line[32];
+-  snprintf(line, sizeof line, "%s\r", cmd);
+-  // --at 0 (the default): feed before the clock starts, exactly as every golden
+-  // was originally captured. --at N>0: let the DEFAULT pattern run first and feed
+-  // the command on the tick the clock first reaches N — needed for modes like
+-  // FadeOut (0T4) that only transform whatever is already painted in leds[]; fed
+-  // at boot they would dim an all-black, never-painted buffer into a degenerate
+-  // all-black capture.
+-  if (atMs == 0) Serial1.feed(line);
++  // --cmd is one line fed at --at, or a script "<ms>@<line>;<ms>@<line>..." (lines hold no ';').
++  // An item at 0 ms is fed before the clock starts, as every single-command golden always was.
++  struct Ev { unsigned long t; char line[128]; };
++  static Ev evs[16];
++  int nev = 0;
++  if (strchr(cmd, '@')) {
++    char buf[512];
++    snprintf(buf, sizeof buf, "%s", cmd);
++    for (char* tok = strtok(buf, ";"); tok && nev < 16; tok = strtok(nullptr, ";")) {
++      char* atp = strchr(tok, '@');
++      if (!atp) { fprintf(stderr, "bad script item %s\n", tok); return 2; }
++      evs[nev].t = strtoul(tok, 0, 10);
++      snprintf(evs[nev].line, sizeof evs[nev].line, "%s\r", atp + 1);
++      nev++;
++    }
++  } else {
++    evs[0].t = atMs;
++    snprintf(evs[0].line, sizeof evs[0].line, "%s\r", cmd);
++    nev = 1;
++  }
++  for (int i = 0; i < nev; i++) if (evs[i].t == 0) Serial1.feed(evs[i].line);
+   for (uint32_t t = 1; t <= durMs; t++) {
+     g_mock_millis = t;
+-    if (atMs && t == atMs) Serial1.feed(line);
++    for (int i = 0; i < nev; i++) if (evs[i].t == t) Serial1.feed(evs[i].line);
+     loop();
+     serialEventRun();  // the Arduino core calls this after every loop()
+   }

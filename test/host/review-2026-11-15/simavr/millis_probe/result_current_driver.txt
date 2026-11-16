@@ -1,0 +1,28 @@
+probe start
+shows=1 pre_us=0 millis_ms=7801 true_us=7676936 err_ppm=16160
+shows=1 pre_us=150 millis_ms=7801 true_us=7675648 err_ppm=16331
+shows=1 pre_us=300 millis_ms=7806 true_us=7681556 err_ppm=16200
+shows=1 pre_us=450 millis_ms=7807 true_us=7988756 err_ppm=-22751
+shows=1 pre_us=520 millis_ms=7806 true_us=7987532 err_ppm=-22726
+shows=1 pre_us=600 millis_ms=7807 true_us=7988560 err_ppm=-22727
+shows=1 pre_us=700 millis_ms=7801 true_us=7982440 err_ppm=-22729
+shows=1 pre_us=850 millis_ms=7805 true_us=7987612 err_ppm=-22861
+shows=1 pre_us=1000 millis_ms=7806 true_us=7681440 err_ppm=16215
+shows=1 pre_us=1200 millis_ms=7806 true_us=7681484 err_ppm=16209
+shows=1 pre_us=1500 millis_ms=7806 true_us=7988780 err_ppm=-22879
+shows=1 pre_us=1700 millis_ms=7805 true_us=7986516 err_ppm=-22727
+shows=1 pre_us=2000 millis_ms=7807 true_us=7682496 err_ppm=16206
+shows=2 pre_us=0 millis_ms=7811 true_us=7868264 err_ppm=-7277
+shows=2 pre_us=150 millis_ms=7812 true_us=7870208 err_ppm=-7395
+shows=2 pre_us=300 millis_ms=7811 true_us=7867920 err_ppm=-7234
+shows=2 pre_us=450 millis_ms=7811 true_us=7869972 err_ppm=-7493
+shows=2 pre_us=520 millis_ms=7811 true_us=7868864 err_ppm=-7353
+shows=2 pre_us=600 millis_ms=7811 true_us=7868876 err_ppm=-7355
+shows=2 pre_us=700 millis_ms=7812 true_us=7870944 err_ppm=-7488
+shows=2 pre_us=850 millis_ms=7812 true_us=7869972 err_ppm=-7366
+shows=2 pre_us=1000 millis_ms=7813 true_us=7871000 err_ppm=-7368
+shows=2 pre_us=1200 millis_ms=7814 true_us=7870920 err_ppm=-7231
+shows=2 pre_us=1500 millis_ms=7813 true_us=7871024 err_ppm=-7371
+shows=2 pre_us=1700 millis_ms=7811 true_us=7869900 err_ppm=-7484
+shows=2 pre_us=2000 millis_ms=7813 true_us=7870004 err_ppm=-7243
+probe done

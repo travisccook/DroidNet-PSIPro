@@ -1,0 +1,19 @@
+warmup: millis=130 true_us=4294832652 err_ppm=-999969
+@WDP1 {"type":"PSI Front","fw":"probe00","caps":["droidnet.contract"]}.
+idle-swipe: millis=8130 true_us=8000016 err_ppm=16247
+solid: millis=8130 true_us=8000004 err_ppm=16249
+solid+pump: millis=8132 true_us=8000000 err_ppm=16500
+@WDP1 {"type":"PSI Front","fw":"probe00","caps":["droidnet.contract"]}.
+scored-comet+accent: millis=8130 true_us=8000012 err_ppm=16248
+twinkle: millis=7819 true_us=8000004 err_ppm=-22625
+wipe+pump: millis=7819 true_us=8000008 err_ppm=-22625
+chase: millis=7818 true_us=8000004 err_ppm=-22750
+@WDP1 {"type":"PSI Front","fw":"probe00","caps":["droidnet.contract"]}.
+gradient: millis=8128 true_us=8000000 err_ppm=16000
+colorcycle: millis=8130 true_us=8000008 err_ppm=16248
+meter: millis=8014 true_us=8000012 err_ppm=1748
+@WDP1 {"type":"PSI Front","fw":"probe00","caps":["droidnet.contract"]}.
+scan: millis=7994 true_us=8000016 err_ppm=-751
+native1: millis=8131 true_us=8000020 err_ppm=16372
+native15: millis=7993 true_us=8000016 err_ppm=-876
+fwprobe done

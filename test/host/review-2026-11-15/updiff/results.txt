@@ -1,0 +1,87 @@
+--- sanity
+SAME        0T6 from boot
+SAME        swipe 60 s
+SAME        swipe rear seed 7
+--- |timing on every mode (command at 2000 ms)
+SAME-dedup  0T2|3 (raw frames up=339 fork=383)
+SAME-dedup  0T3|3 (raw frames up=324 fork=368)
+SAME        0T4|3
+SAME-dedup  0T5|3 (raw frames up=324 fork=368)
+SAME-dedup  0T6|3 (raw frames up=378 fork=422)
+SAME-dedup  0T7|3 (raw frames up=307 fork=351)
+SAME-dedup  0T8|3 (raw frames up=312 fork=356)
+SAME-dedup  0T9|3 (raw frames up=310 fork=354)
+SAME-dedup  0T10|3 (raw frames up=312 fork=356)
+SAME-dedup  0T11|3 (raw frames up=307 fork=351)
+SAME-dedup  0T12|3 (raw frames up=321 fork=365)
+SAME-dedup  0T13|3 (raw frames up=321 fork=365)
+SAME        0T14|3
+SAME-dedup  0T15|3 (raw frames up=324 fork=368)
+DIFF        0T19|3  distinct frames up=23 fork=35; first diff at distinct frame 13:
+      up:   2002 20 ff0000ff0000ff0000ff0000ff0000ff0000ff0000ff0000ff0000ff0000ff
+      fork: 2262 20 00000000000000000000000000000000000000000000000000000000000000
+SAME-dedup  0T20|3 (raw frames up=307 fork=351)
+SAME        0T21|3
+SAME        0T92|3
+--- mode to mode
+SAME        0T6 @1000 -> 0T15 @2300
+SAME        0T2 @1000 -> 0T19 @2300
+SAME        0T13 @1000 -> 0T12 @2300
+SAME        0T8 @1000 -> 0T8 @2300
+SAME        0T15 @1000 -> 0T6 @2300
+SAME        0T19 @1000 -> 0T20 @2300
+SAME        0T20 @1000 -> 0T4 @2300
+SAME        0T7 @1000 -> 0T9 @2300
+SAME-dedup  0T11 @1000 -> 0T2 @2300 (raw frames up=993 fork=999)
+SAME        0T12 @1000 -> 0T21 @2300
+SAME        0T21 @1000 -> 0T12 @2300
+SAME        0T4 @1000 -> 0T8 @2300
+DIFF        0T9 @1000 -> 0T14 @2300  distinct frames up=35 fork=35; first diff at distinct frame 15:
+      up:   2300 20 909497909497ff0000ff0000909497909497ff0000909497ff0000ff0000ff
+      fork: 2548 20 909497909497ff0000ff0000909497909497ff0000909497ff0000ff0000ff
+SAME        0T14 @1000 -> 0T10 @2300
+SAME        0T10 @1000 -> 0T0 @2300
+SAME        0T0 @1000 -> 0T7 @2300
+SAME        0T15 @1000 -> 0T15 @2300
+SAME        0T6 @1000 -> 0T6 @2300
+SAME        0T3 @1000 -> 0T16 @2300
+SAME        0T16 @1000 -> 0T13 @2300
+--- interrupted by D / A
+SAME-dedup  0T6 -> 0D -> 0T6 (raw frames up=318 fork=325)
+SAME        0T15 -> 0A -> 0T10
+--- alwaysOn=1, 60 s
+SAME        alwaysOn 0T2
+DIFF        alwaysOn 0T4  distinct frames up=84 fork=59; first diff at distinct frame 49:
+      up:   12168 20 0000000000000000000000000000000000000000000000000000000000000
+      fork: 12168 20 0000000000000000000000000000000000000000000000000000000000000
+SAME        alwaysOn 0T6
+SAME        alwaysOn 0T7
+SAME        alwaysOn 0T8
+SAME        alwaysOn 0T9
+SAME        alwaysOn 0T10
+SAME        alwaysOn 0T11
+SAME        alwaysOn 0T12
+SAME        alwaysOn 0T14
+SAME        alwaysOn 0T15
+SAME        alwaysOn 0T19
+SAME        alwaysOn 0T20
+SAME        alwaysOn 0T21
+--- alwaysOn=1, then 0P0 at 40 s
+SAME        alwaysOn 0T15, 0P0
+SAME        alwaysOn 0T10, 0P0
+SAME        alwaysOn 0T8, 0P0
+SAME        alwaysOn 0T7, 0P0
+DIFF        alwaysOn 0T4, 0P0  distinct frames up=118 fork=59; first diff at distinct frame 49:
+      up:   12168 20 0000000000000000000000000000000000000000000000000000000000000
+      fork: 12168 20 0000000000000000000000000000000000000000000000000000000000000
+SAME        alwaysOn 0T12, 0P0
+SAME        alwaysOn 0T6, 0P0
+--- rear jumper, seed 99
+SAME        rear 0T4
+SAME        rear 0T9
+SAME-dedup  rear 0T12 (raw frames up=431 fork=448)
+SAME        rear 0T13
+SAME        rear 0T21
+--- brightness
+SAME        0T6, 3P80, 3P0
+SAME        pot path 0T15

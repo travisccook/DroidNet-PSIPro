@@ -1,0 +1,649 @@
+diff --git a/include/FastLED.h b/include/FastLED.h
+index 7d98ad7..7dd23a7 100644
+--- a/include/FastLED.h
++++ b/include/FastLED.h
+@@ -314,28 +314,37 @@ public:
+     // driver removes that route structurally; see the interrupt-budget note below.
+     const uint8_t sreg = SREG;
+     cli();
++    // Exact millis() credit (v1.3 C4). Timer0 runs at clk/64 (4 us a tick) and overflows every
++    // 256 ticks; the hardware can queue ONE overflow while interrupts are masked. Count the
++    // overflows the frame spans from TCNT0 itself and credit every one the hardware cannot queue.
++    const uint8_t pending = TIFR0 & _BV(TOV0);   // one already queued on entry (ISR context)
++    const uint8_t t0 = TCNT0;
+     emitFrame(sWire, nbytes);
+-    SREG = sreg;
+-
+-    // Clock correction, matching FastLED-on-AVR (clockless_trinket.h:130-159, active
+-    // because FASTLED_ALLOW_INTERRUPTS==0 and NO_CLOCK_CORRECTION is undefined): the
+-    // frame masked interrupts for ~nbytes*10 us (8 bits * 1.25 us/bit). One timer0
+-    // overflow (~1024 us) is queued by hardware and serviced the instant interrupts
+-    // return, so only the masked time BEYOND that one tick is lost to millis(). Add it
+-    // back through a microsecond accumulator. Same intent as FastLED; both approximate.
+-    {
+-      extern volatile unsigned long timer0_millis;  // Arduino core wiring.c, non-static
+-      static uint16_t carry_us = 0;
+-      uint16_t frame_us = (uint16_t)nbytes * 10u;   // 144 -> 1440 us
+-      if (frame_us > 1024u) {
+-        carry_us += (uint16_t)(frame_us - 1024u);   // ~416 us/frame
+-        while (carry_us >= 1000u) { carry_us -= 1000u; timer0_millis += 1u; }
+-      }
++    const uint8_t t1 = TCNT0;
++    // The frame is nbytes * 163 cycles (7 bits of 20 cy + one of 23 cy a byte) = kFrameTicks
++    // timer ticks, between 256 and 511 for 48 LEDs: one wrap for certain, a second when TCNT0
++    // ended below where it started.
++    uint8_t lost = (uint8_t)(kFrameTicks >> 8) + (t1 < t0 ? 1 : 0);
++    if (!pending) lost--;                        // the hardware keeps one for the ISR
++    if (lost) {
++      extern volatile unsigned long timer0_millis;          // Arduino core wiring.c, non-static
++      extern volatile unsigned long timer0_overflow_count;  // keeps micros() in step
++      static uint8_t fract = 0;                  // 8 us units, as wiring.c's own timer0_fract
++      do {
++        timer0_millis += 1u;                     // one overflow = 1.024 ms
++        timer0_overflow_count += 1u;
++        fract += 3u;
++        if (fract >= 125u) { fract -= 125u; timer0_millis += 1u; }
++      } while (--lost);
+     }
++    SREG = sreg;                                 // interrupts return only after the credit
+   }
+ 
+ private:
+   static const int kMaxLeds = 48;  // == NUM_LEDS (config.h is included after this header)
++  // Masked frame length in timer0 ticks (64 CPU cycles each): 144 bytes * 163 cycles = 366.
++  static const uint16_t kFrameTicks = (uint16_t)(((uint32_t)kMaxLeds * 3u * 163u) / 64u);
++  static_assert(kFrameTicks > 256 && kFrameTicks < 512, "the lost-overflow count assumes one or two wraps");
+ 
+   // Staged GRB wire bytes. +1 spare: the emitter preloads the NEXT byte at each byte
+   // boundary before testing the counter, so on the final byte it reads one byte past
+diff --git a/include/config.h b/include/config.h
+index 1e24ac5..2b7d3fe 100644
+--- a/include/config.h
++++ b/include/config.h
+@@ -179,10 +179,18 @@ CRGB rearSecondaryOffColor = CRGB::Black;     // Off Black
+ #define JUMP_FRONT_REAR 14
+ #endif
+ 
++// DroidNet: the front/rear jumper, read straight from the port on the Pro Micro (Arduino pin 14 is
++// PB3). digitalRead() costs 212 B of flash here for this one pin; the read is otherwise the same.
++#if defined(__AVR_ATmega32U4__) && (JUMP_FRONT_REAR == 14)
++  #define psiJumperOpen() ((PINB & _BV(PB3)) != 0)
++#else
++  #define psiJumperOpen() (digitalRead(JUMP_FRONT_REAR) != 0)
++#endif
++
+ // Set the colors based on the pin being jumpered to ground.
+ 
+ CRGB primary_color() {
+-  if (digitalRead(JUMP_FRONT_REAR)) {
++  if (psiJumperOpen()) {
+     return frontPrimaryColor;
+   } else {
+     return rearPrimaryColor;
+@@ -190,7 +198,7 @@ CRGB primary_color() {
+ }
+ 
+ CRGB secondary_color() {
+-  if (digitalRead(JUMP_FRONT_REAR)) {
++  if (psiJumperOpen()) {
+     return frontSecondaryColor;
+   } else {
+     return rearSecondaryColor;
+@@ -198,7 +206,7 @@ CRGB secondary_color() {
+ }
+ 
+ CRGB secondary_off_color() {
+-  if (digitalRead(JUMP_FRONT_REAR)) {
++  if (psiJumperOpen()) {
+     return frontSecondaryOffColor;
+   } else {
+     return rearSecondaryOffColor;
+@@ -291,7 +299,8 @@ byte I2CAdress = 22;
+ // Addressible LED Array
+ // -1 = no LED in that grid space
+ 
+-  int8_t ledMatrix[COLUMNS][LEDS_PER_COLUMN] = {
++// DroidNet: in flash, not SRAM (60 B back). Read with psiLed(column, row).
++  const int8_t ledMatrix[COLUMNS][LEDS_PER_COLUMN] PROGMEM = {
+     { -1, -1, 23, 24, -1, -1, },
+     { -1,  6, 22, 25, 41, -1, },
+     {  5,  7, 21, 26, 40, 42, },
+@@ -305,6 +314,10 @@ byte I2CAdress = 22;
+   };
+ 
+ 
++static inline int8_t psiLed(uint8_t column, uint8_t row) {
++  return (int8_t)pgm_read_byte(&ledMatrix[column][row]);
++}
++
+ // Command processing stuff
+ // maximum number of characters in a command (95 chars since we need the null termination)
+ //
+@@ -326,7 +339,7 @@ char cmdString[CMD_MAX_LENGTH];
+ #define POT_AVG_SIZE 30
+ // Change this if you get flicker.  A larger number will reduce POT noise.
+ #define POT_VARIANCE_LEVEL 2
+-uint16_t POTReadings[POT_AVG_SIZE];
++uint8_t POTReadings[POT_AVG_SIZE];   // DroidNet: was uint16_t; a reading is 0-199 (30 B back)
+ uint8_t POTIndex = 0;
+ unsigned long POTSum = 0;
+ uint8_t POTCount = 0;
+diff --git a/include/psi_vm.h b/include/psi_vm.h
+index af74a75..3fd84a0 100644
+--- a/include/psi_vm.h
++++ b/include/psi_vm.h
+@@ -841,7 +841,8 @@ const uint8_t vmc_process[] PROGMEM = {
+ enum {
+   VMF_CLEAR         = 0x01,  // allOFF(true)-style blackout+show on entry
+   VMF_ONESHOT       = 0x02,  // OP_END stops (hold last frame if alwaysOn, else restore)
+-  VMF_IGNORE_TIMING = 0x04,  // pattern ignores a received command timing (FadeOut)
++  VMF_IGNORE_TIMING = 0x04,  // pattern ignores a received command timing (FadeOut, lightsaber)
++  VMF_IMMEDIATE     = 0x08,  // first frame shows on entry, not after the previous mode's delay (rebel)
+ };
+ 
+ struct VmProg {
+@@ -869,7 +870,7 @@ const VmProg vmProgs[] PROGMEM = {
+   { vmc_swscan,    5, 0,  0 },                       // VMP_SWSCAN   (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
+   { vmc_knight,    5, 0,  0 },                       // VMP_KNIGHT   (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
+   { vmc_radar,     6, 0,  VMF_CLEAR },               // VMP_RADAR    (mode 8)  — was radar(0xff0000, 250, 6, 0)
+-  { vmc_rebel,     0, 5,  0 },                       // VMP_REBEL    (mode 14) — was displayMatrixColor(rebel, ..., true, 5)
++  { vmc_rebel,     0, 5,  VMF_IMMEDIATE },                     // VMP_REBEL    (mode 14) — was displayMatrixColor(rebel, ..., true, 5)
+   { vmc_pulse,     3, 0,  VMF_CLEAR },               // VMP_PULSE    (mode 9 rear) — was Pulse(100, 3, 0)
+   { vmc_disco,    30, 4,  VMF_CLEAR },               // VMP_DISCO4   (mode 12) — was DiscoBall(150, 30, 3, CRGB::Grey, 4)
+   { vmc_disco,     0, 0,  VMF_CLEAR },               // VMP_DISCOINF (mode 13) — was DiscoBall(150, 0, 3, CRGB::Grey, 0)
+@@ -877,7 +878,7 @@ const VmProg vmProgs[] PROGMEM = {
+   { vmc_iheartu,   3, 0,  VMF_CLEAR },               // VMP_IHEARTU  (mode 7)  — was i_heart_u(500, 3, 0)
+   { vmc_redheart,  3, 0,  VMF_CLEAR },               // VMP_REDHEART (mode 9 front) — was red_heart(500, 3, 0)
+   { vmc_march,    42, 47, VMF_CLEAR },               // VMP_MARCH    (mode 11) — was march(0xffffff, 552, 42, 47)
+-  { vmc_saber,     0, 0,  VMF_CLEAR | VMF_ONESHOT }, // VMP_SABER    (mode 19) — was lightsaberBattle(250)
++  { vmc_saber,     0, 0,  VMF_CLEAR | VMF_ONESHOT | VMF_IGNORE_TIMING }, // VMP_SABER    (mode 19) — was lightsaberBattle(250)
+   { vmc_swintro,   4, 10, VMF_CLEAR },               // VMP_SWINTRO  (mode 20) — was StarWarsIntro(500, 4, 0xC8AA00, 10)
+   { vmc_process,   3, 0,  VMF_CLEAR },               // VMP_PROCESS  (mode 22) — fork addition, no native equivalent; see vmc_process's comment
+ };
+@@ -952,7 +953,7 @@ static void vmShowDelay(uint16_t d) {
+ // everything down; re-read from the live file, not trusted from the brief):
+ //   randRow = random(0, LEDS_PER_COLUMN);
+ //   randCol = random(0, COLUMNS);
+-//   ledIndex = ledMatrix[randCol][randRow];
++//   ledIndex = psiLed(randCol, randRow);
+ //   if (ledIndex != -1) leds[ledIndex] = color;
+ // — ROW drawn before COLUMN, one full row+col pair PER sparkle, interleaved
+ // across the numSparkles loop (draw1-row, draw1-col, draw2-row, draw2-col,
+@@ -970,7 +971,7 @@ static void vmSparkleDraw(uint8_t n, CRGB col) {
+   while (n--) {
+     int randRow = random(0, LEDS_PER_COLUMN);
+     int randCol = random(0, COLUMNS);
+-    int8_t ledIndex = ledMatrix[randCol][randRow];
++    int8_t ledIndex = psiLed(randCol, randRow);
+     if (ledIndex != -1) leds[ledIndex] = col;
+   }
+ }
+@@ -1236,6 +1237,7 @@ inline void vmPlay(uint8_t progId) {
+     g_vmDone     = false;
+     globalPatternLoops = g_vmDescLoops;
+     if (g_vmFlags & VMF_IGNORE_TIMING) timingReceived = false;
++    if (g_vmFlags & VMF_IMMEDIATE) set_delay(0);
+     if ((g_vmRuntime != 0) && (!timingReceived)) set_global_timeout(g_vmRuntime);
+     if (timingReceived) set_global_timeout(commandTiming);
+     if (g_vmFlags & VMF_CLEAR) {
+diff --git a/src/contract/ContractPSI.h b/src/contract/ContractPSI.h
+index 4690a01..a4d7cd9 100644
+--- a/src/contract/ContractPSI.h
++++ b/src/contract/ContractPSI.h
+@@ -110,12 +110,20 @@ static ContractEffect g_effect        = CE_SOLID;
+ static ContractEffect g_lastEffect    = CE_NONE;   // forces firstTime on an effect switch
+ static CRGB           g_contractColor = CRGB(0, 0, 255);
+ static uint8_t        g_speed         = 128;
+-static uint8_t        g_bright        = SAFE_MAX_BRIGHTNESS;
++static uint8_t        g_bright        = 255;        // contract dim (b= / B); rendered as min(g_bright, g_ceiling)
+ static uint8_t        g_beatMod       = 0;
+ static int            g_nativeCode    = 1;          // native:<n> escape hatch target
+ static uint32_t       g_animDeadline  = 0;          // 0 == hold; else millis() when the look expires
+ static uint32_t       g_effectStartMs = 0;
+ static bool           g_contractArmed = false;      // gates runContractAnim() vs runPattern()
++// v1.3 L1/S6. g_showMode: M:v=show armed show mode (X keeps it, M:v=idle and a native command end it).
++// g_owned: the contract holds the panel (a show, a live look, or a pulse over the native look), so
++// the owner's brightness state below is saved and must be put back when the panel is given back.
++static bool           g_showMode      = false;
++static bool           g_owned         = false;
++static uint8_t        g_ceiling       = 0;          // S6: the owner's brightness() when the panel was taken
++static bool           g_ownerTempOn   = false;      // the owner's own 3P state, restored on give-back
++static uint8_t        g_ownerTempVal  = 0;
+ 
+ // The accent overlay — own deadline, always retriggers. Armed by verb P (live) and by
+ // the board's own beat edge (scored, v1.2). g_pulseFx is the EFFECT it renders:
+@@ -137,7 +145,15 @@ static BeatClock  g_clock;
+ // default 2 = pump on every beat (downbeat-emphasized) so a live A with m>0 but no
+ // am= still breathes; an explicit am= (incl. a section's am=0 calm) overrides it.
+ static uint8_t    g_activeAccentMode = 2;
+-static ScoreEntry g_score[8];
++#ifndef PSI_SCORE_CAP
++#define PSI_SCORE_CAP 12                               // v1.3 section 6; reported as cap= in the Q reply
++#endif
++// Raw .bss storage, not `ScoreEntry g_score[N]`: ScoreEntry carries default member initialisers,
++// so an array of it is constant-initialised and its whole image is stored in flash (.data) to be
++// copied to SRAM at boot. Entries are only ever read below g_scoreCount, and scoreInsert() writes
++// a whole entry, so the initial bytes are never observed.
++static uint8_t    g_scoreMem[sizeof(ScoreEntry) * PSI_SCORE_CAP];
++static ScoreEntry* const g_score = (ScoreEntry*)(void*)g_scoreMem;
+ static int        g_scoreCount = 0;
+ static int        g_scoreIndex = -1;
+ // beat span of the active score section, for the am=3 ("build") ramp. Set on every
+@@ -202,12 +218,68 @@ static char* _fmtHex8(char* p, uint8_t v) {             // 2-digit ZERO-PADDED L
+ inline bool contractAddressed(char cls, char unit) {
+   if (cls != 'P' && cls != '*') return false;         // not a PSI class
+   if (unit == '*') return true;                        // any PSI
+-  bool isFront = (digitalRead(JUMP_FRONT_REAR) != 0);  // HIGH (pulled up) => front
++  bool isFront = (psiJumperOpen() != 0);  // HIGH (pulled up) => front
+   if (unit == 'F') return isFront;
+   if (unit == 'R') return !isFront;
+   return false;                                        // 'T' (HP) never matches PSI
+ }
+ 
++// ---- v1.3 ownership, ceiling and the one show reset ---------------------------
++// S6: the ceiling is the board's own brightness at the moment the contract takes the panel. Read
++// BEFORE the 3P override is touched, so it is the pot, the EEPROM value or the owner's own 3P.
++static PSI_NOINLINE void _takePanel() {
++  if (g_owned) return;
++  g_ownerTempOn  = useTempInternalBrightness;
++  g_ownerTempVal = tempGlobalBrightnessValue;
++  g_ceiling = brightness();
++  if (g_ceiling > SAFE_MAX_BRIGHTNESS) g_ceiling = SAFE_MAX_BRIGHTNESS;
++  g_owned = true;
++}
++// L1 "gives the board back completely": the owner's brightness state returns, and nothing the show
++// selected stays selected: the default pattern (swipe) runs next, whatever native:<n> the show used.
++static PSI_NOINLINE void _givePanelBack() {
++  g_contractArmed = false;
++  g_showMode = false;
++  if (!g_owned) return;
++  useTempInternalBrightness = g_ownerTempOn;
++  tempGlobalBrightnessValue = g_ownerTempVal;
++  lastPSIeventCode = defaultPattern;
++  patternRunning = false;
++  timingReceived = false;
++  g_owned = false;
++}
++// L1: the SAME reset for M:v=show, M:v=idle and X. Baseline look is dark (CE_OFF).
++static uint8_t  g_wdSec = 0;                         // L2 watchdog, seconds (0 = none)
++static uint32_t g_wdLastMs = 0;                      // millis() of the last well-formed addressed line
++static PSI_NOINLINE void _showReset() {
++  scoreClear(g_scoreCount, g_scoreIndex);
++  g_clock.running = false;
++  g_animDeadline = 0;
++  g_pulseActive = false;
++  g_lastAccentBeat = BEAT_NONE;
++  g_effect = CE_OFF;
++  g_lastEffect = CE_NONE;
++  g_contractColor = primary_color();                   // the board's own colour (front blue, rear green)
++  g_speed = 128;
++  g_beatMod = 0;
++  g_activeAccentMode = 2;
++  g_bright = 255;
++}
++// S7: the native codes a show may select. Upstream modes 0-21 and 92 and the fork's 22, less 2, 3
++// and 5: Flash and Alarm/Scream are full-field white at 8.3 Hz and 4 Hz, past the strobe cap.
++static PSI_NOINLINE bool _nativeAllowed(int n) {
++  if (n == 92) return true;
++  return n >= 0 && n <= 22 && n != 2 && n != 3 && n != 5;
++}
++// A native T/A/D command addressed to this PSI ends the show and takes the panel (main.cpp calls
++// this before it runs the command). The native command then sets its own pattern state.
++inline void contractYieldToNative() {
++  if (!g_owned && !g_contractArmed) return;
++  _showReset();
++  g_wdSec = 0;
++  _givePanelBack();
++}
++
+ // ---- rainbow (newly authored; ignores color per contract §6) ----------------
+ static uint8_t g_rainbowHue = 0;
+ static inline void _renderRainbow(uint16_t delayMs) {
+@@ -364,7 +436,7 @@ static inline bool _fireAccent(ContractEffect fx, const CRGB& c, uint32_t durMs,
+   g_pulseStartMs  = now;
+   g_pulseDeadline = now + durMs;
+   g_pulseActive   = true;
+-  g_contractArmed = true;
++  _takePanel();                                        // L3: a pulse may overlay the native look
+   return true;
+ }
+ 
+@@ -373,6 +445,8 @@ static inline bool _fireAccent(ContractEffect fx, const CRGB& c, uint32_t durMs,
+ // (which folds into parseContract()) it made that one function big enough to spill the
+ // register allocator. Emitting it separately is -106 B. See the PSI_NOINLINE note above.
+ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
++  // S7: a native code off the allow-list makes the whole line a no-op.
++  if (pr.hasEffect && pr.effect == CE_NATIVE && !_nativeAllowed(pr.nativeCode)) return;
+   // Phase-2: an A carrying at= schedules a section instead of applying now.
+   if (pr.hasAt) {
+     ScoreEntry e;
+@@ -391,13 +465,16 @@ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint32_t now) {
+       e.accentColor = pr.hasAccentColor ? pr.accentColor : e.color;
+       e.accentDur10 = pr.hasAccentDur ? (uint8_t)(pr.accentDurMs / 10u) : 18;   // 18 => 180 ms
+     }
+-    g_scoreCount = scoreInsert(g_score, g_scoreCount, 8, e);
++    g_scoreCount = scoreInsert(g_score, g_scoreCount, PSI_SCORE_CAP, e);
+     g_lastAccentBeat = BEAT_NONE;                      // a score load starts a NEW show: no stale edge
+     return;
+   }
++  // With nothing on the panel to patch, an A that names no look changes nothing.
++  if (!pr.hasEffect && !g_contractArmed) return;
++  _takePanel();
+   if (pr.hasColor)   g_contractColor = _scaled(pr.color);
+   if (pr.hasSpeed)   g_speed   = pr.speed;
+-  if (pr.hasBright)  g_bright  = _clampBright(pr.bright);
++  if (pr.hasBright)  g_bright  = pr.bright;
+   if (pr.hasBeatMod) g_beatMod = pr.beatMod;
+   if (pr.hasAm)      g_activeAccentMode = pr.accentMode;
+   if (pr.hasEffect) {
+@@ -431,7 +508,7 @@ inline void applyContract(const ParsedContract& p) {
+       // as it did in v1.1 (a cool-down-coalesced P changed nothing at all).
+       if (_fireAccent(fx, pr.hasColor ? _scaled(pr.color) : g_contractColor,
+                       pr.hasDur ? pr.durMs : 120, now) && pr.hasBright) {
+-        g_bright = _clampBright(pr.bright);
++        g_bright = pr.bright;
+       }
+       break;
+     }
+@@ -444,13 +521,9 @@ inline void applyContract(const ParsedContract& p) {
+       g_lastAccentBeat = BEAT_NONE;
+       break;
+ 
+-    case CV_BRIGHT: {                                  // VOLATILE ride only (never 2P/EEPROM)
+-      uint8_t b = _clampBright(pr.hasBright ? pr.bright : (pr.hasLevel ? pr.level : g_bright));
+-      g_bright = b;
+-      useTempInternalBrightness = true;                // 3P volatile path (main.cpp:2562-2585)
+-      tempGlobalBrightnessValue = b;
++    case CV_BRIGHT:                                    // a dim under the ceiling; never the 2P/EEPROM path
++      g_bright = pr.hasBright ? pr.bright : (pr.hasLevel ? pr.level : g_bright);
+       break;
+-    }
+ 
+     case CV_LEVEL: {                                   // feed the VU meter from Studio energy
+       // honor the inversion (main.cpp:1714): high energy => LOW level => tall bottom bar
+@@ -461,31 +534,27 @@ inline void applyContract(const ParsedContract& p) {
+       break;
+     }
+ 
+-    case CV_STOP:                                      // blackout + de-energize + idle
+-      g_contractArmed = false;
+-      g_pulseActive = false;
+-      g_clock.running = false;
+-      scoreClear(g_scoreCount, g_scoreIndex);          // a show's sections must NOT leak into the next
+-      g_lastAccentBeat = BEAT_NONE;                    // ...nor a beat edge (see BEAT_NONE)
+-      useTempInternalBrightness = false;               // release volatile brightness back to native
+-      allOFF(true, 0);
++    case CV_STOP:                                      // L1: reset, black out, stay in the same mode
++      _showReset();
++      if (g_showMode) {                                // in a show: dark, and it stays dark
++        g_contractArmed = true;
++      } else {                                         // not in a show: one black frame, then native
++        allOFF(true, 0);
++        _givePanelBack();
++      }
+       break;
+ 
+     case CV_MODE:
+-      if (pr.mode == 's') {                            // show: hold the contract baseline
++      if (pr.mode == 's') {                            // L1: reset, then arm show mode (baseline dark)
++        _showReset();
++        _takePanel();
+         g_contractArmed = true;
+-        g_lastEffect = CE_NONE;
++        g_showMode = true;
+         g_effectStartMs = now;
+-        // M:v=show is the FIRST line of a load burst, and Studio's Resend re-sends that burst
+-        // with no intervening X — so show entry means "a FRESH show". Without this, show B's
+-        // sections merge into show A's and, past the 8-entry cap, are dropped silently.
+-        scoreClear(g_scoreCount, g_scoreIndex);
+-        g_lastAccentBeat = BEAT_NONE;                  // ...and no beat edge survives the boundary
+-      } else if (pr.mode == 'i') {                     // idle: hand back to native autonomy
+-        g_contractArmed = false;
+-        scoreClear(g_scoreCount, g_scoreIndex);        // parity with X and with the Logics fork
+-        g_lastAccentBeat = BEAT_NONE;
+-        useTempInternalBrightness = false;
++      } else if (pr.mode == 'i') {                     // L1: reset, then give the board back completely
++        _showReset();
++        g_wdSec = 0;
++        _givePanelBack();
+       }
+       break;
+ 
+@@ -537,6 +606,7 @@ inline void contractPulseTick() {
+   // this reason. The PSI was the only board of the three still comparing an absolute deadline.
+   if (g_pulseActive && (int32_t)(millis() - g_pulseDeadline) >= 0) {
+     g_pulseActive = false;
++    if (!g_contractArmed) { _givePanelBack(); return; }  // L3: the native look returns
+     firstTime = true;                                  // re-init the native state machines the base look uses
+     // Do NOT touch g_lastEffect / g_effectStartMs here. Clearing g_lastEffect made
+     // runContractAnim() re-stamp g_effectStartMs = millis() on the very next frame, i.e.
+@@ -550,7 +620,7 @@ inline void contractPulseTick() {
+ // (so the native runPattern path is skipped). Drives beat-clock, score, envelope,
+ // then renders. Returns false when idle (native autonomy runs).
+ inline bool contractLoopTick() {
+-  if (!g_contractArmed) return false;
++  if (!g_contractArmed && !g_pulseActive) return false;
+   uint32_t now = millis();
+ 
+   // deadline: a finite-duration look reverts to idle swipe when it elapses.
+@@ -559,9 +629,11 @@ inline bool contractLoopTick() {
+   // and hand the panel back to native autonomy mid-show. (g_animDeadline == 0 still means
+   // "hold, no deadline", so the && guard is load-bearing and stays.)
+   if (g_animDeadline && (int32_t)(now - g_animDeadline) >= 0) {
+-    g_contractArmed = false;
+-    useTempInternalBrightness = false;
+-    return false;
++    g_animDeadline = 0;
++    if (!g_showMode) { _givePanelBack(); return false; }   // a timed live look outside a show
++    g_effect = CE_OFF;                                 // in a show: dark, then the scored section again
++    g_lastEffect = CE_NONE;
++    g_scoreIndex = -1;
+   }
+ 
+   // Phase-2 score: switch looks on beat boundaries (shared-core scoreActiveIndex)
+@@ -614,7 +686,8 @@ inline bool contractLoopTick() {
+   // v1.2: while the accent overlay is up it renders at the unit's CEILING, un-pumped —
+   // an accent that dipped with the envelope would be backwards (the PSI was the only
+   // board that did this), and a scored accent must land at the same level on all three.
+-  uint8_t effBright = g_bright;
++  uint8_t effBright = (g_bright < g_ceiling) ? g_bright : g_ceiling;   // S6
++  uint8_t ceilBright = effBright;
+   if (!g_pulseActive && g_clock.running && g_beatMod && g_activeAccentMode) {
+     BeatPos bp = beatPosAt(g_clock, now);
+     // am=3 ("build") scales the accent by progress THROUGH THE SECTION. Passing a
+@@ -626,10 +699,10 @@ inline bool contractLoopTick() {
+     if (g_scoreIndex >= 0 && g_sectionEnd > g_sectionStart)
+       prog = (float)(bp.beatIndex - g_sectionStart) / (float)(g_sectionEnd - g_sectionStart);
+     uint8_t env = beatAccentAmount(g_activeAccentMode, bp, g_beatMod, prog);
+-    effBright = envBright(g_bright, g_beatMod, env);
++    effBright = envBright(ceilBright, g_beatMod, env);
+   }
+   useTempInternalBrightness = true;                    // 3P volatile path only
+-  tempGlobalBrightnessValue = _clampBright(effBright);
++  tempGlobalBrightnessValue = effBright;
+ 
+   runContractAnim();
+   return true;
+diff --git a/src/main.cpp b/src/main.cpp
+index a16584d..c64200d 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -543,7 +543,7 @@ void allOFF(bool showLED, unsigned long runtime=0)
+ 
+ void fill_column(uint8_t column, CRGB color, uint8_t scale_brightness=0) {
+   for (int i = 0; i < LEDS_PER_COLUMN; i++) {
+-    int8_t ledIndex = ledMatrix[column][i];
++    int8_t ledIndex = psiLed(column, i);
+     if (ledIndex != -1) {
+       leds[ledIndex] = color;
+       if (scale_brightness != 0) leds[ledIndex] %= scale_brightness;
+@@ -566,14 +566,14 @@ void fill_half_column(uint8_t column, uint8_t half, CRGB color) {
+   }
+ 
+   for (int i = start; i < end_col; i++) {
+-    int8_t ledIndex = ledMatrix[column][i];
++    int8_t ledIndex = psiLed(column, i);
+     if (ledIndex != -1) leds[ledIndex] = color;
+   }
+ }
+ 
+ void fill_row(uint8_t row, CRGB color, uint8_t scale_brightness=0) {
+   for (int i = 0; i < COLUMNS; i++) {
+-    int8_t ledIndex = ledMatrix[i][row];
++    int8_t ledIndex = psiLed(i, row);
+     if (ledIndex != -1) {
+       leds[ledIndex] = color;
+       if (scale_brightness != 0) leds[ledIndex] %= scale_brightness;
+@@ -771,7 +771,7 @@ void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime)
+     for (int c = 0; c < COLUMNS; c++)
+     {
+       for (int i = 0; i < LEDS_PER_COLUMN; i++) {
+-        int8_t ledIndex = ledMatrix[c][i];
++        int8_t ledIndex = psiLed(c, i);
+         if (ledIndex != -1) {
+           if (level[c] > i) leds[ledIndex] = CRGB::Black;
+         }
+@@ -938,7 +938,7 @@ void runPattern(int pattern) {
+       vmPlay(VMP_RADAR);
+       break;
+     case 9:              //   = Flashing red heart (front) / Pulse trace (rear)
+-      vmPlay(digitalRead(JUMP_FRONT_REAR) ? VMP_REDHEART : VMP_PULSE);
++      vmPlay(psiJumperOpen() ? VMP_REDHEART : VMP_PULSE);
+       break;
+     case 10:              //  10 = Star Wars Animation — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
+       vmPlay(VMP_SWSCAN);
+@@ -1236,13 +1236,15 @@ void doTcommand(int address, int argument, int timing)
+   // This prevents overriding any timing parameters that may be in use, for an invalid
+   // command.
+   if (!((address == 0) || 
+-      ((digitalRead(JUMP_FRONT_REAR)) && (address == 4)) || 
+-      ((!digitalRead(JUMP_FRONT_REAR)) && (address == 5))))
++      ((psiJumperOpen()) && (address == 4)) || 
++      ((!psiJumperOpen()) && (address == 5))))
+   {
+     DEBUG_PRINT("Address "); DEBUG_PRINT(address); DEBUG_PRINT_LN(" not a valid PSI.  Ignoring");
+     return;
+   }
+ 
++  contractYieldToNative();   // DroidNet: a native command addressed to this PSI ends a contract show
++
+   if (timing != 0){
+     DEBUG_PRINT_LN("Timing Value received in command");
+     timingReceived = true;
+@@ -1255,12 +1257,12 @@ void doTcommand(int address, int argument, int timing)
+   }
+   
+   // If we are the front PSI, respond to 0 or 4
+-  if ((digitalRead(JUMP_FRONT_REAR)) && (address == 4))
++  if ((psiJumperOpen()) && (address == 4))
+   {
+     runPattern(argument);
+   }
+   // If we are the rear PSI, respond to 0 or 5
+-  else if ((!digitalRead(JUMP_FRONT_REAR)) && (address == 5))
++  else if ((!psiJumperOpen()) && (address == 5))
+   {
+     runPattern(argument);
+   }
+@@ -1283,6 +1285,7 @@ void doDcommand(int address)
+   DEBUG_PRINT_LN(address); 
+   */
+ 
++  contractYieldToNative();   // DroidNet: as doTcommand
+   runPattern(defaultPattern);
+ }
+ 
+diff --git a/test/host/compile_contract.cpp b/test/host/compile_contract.cpp
+index 95e0130..02ddb03 100644
+--- a/test/host/compile_contract.cpp
++++ b/test/host/compile_contract.cpp
+@@ -169,11 +169,11 @@ int main() {
+       printf("FAIL: X did not clear the score (count=%d index=%d)\n", g_scoreCount, g_scoreIndex);
+       return 1;
+     }
+-    for (int i = 0; i < 8; i++) {                      // fill show #1 to cap
++    for (int i = 0; i < PSI_SCORE_CAP; i++) {                      // fill show #1 to cap
+       char c[40]; snprintf(c, sizeof(c), "!P*A:i=solid,c=0000ff,at=%d", i * 4);
+       parseContract(c);
+     }
+-    if (g_scoreCount != 8) { printf("FAIL: score did not fill to cap\n"); return 1; }
++    if (g_scoreCount != PSI_SCORE_CAP) { printf("FAIL: score did not fill to cap\n"); return 1; }
+     parseContract("!PFM:v=idle");
+     if (g_scoreCount != 0 || g_scoreIndex != -1) {
+       printf("FAIL: M:v=idle did not clear the score (count=%d index=%d)\n", g_scoreCount, g_scoreIndex);
+@@ -599,8 +599,8 @@ int main() {
+     parseContract("!**X");
+     parseContract("!P*A:i=solid,c=000000,d=0");         // d=0: no stale anim deadline
+     uint32_t t0 = _mock_millis;
+-    parseContract("!**C:bpm=120,bpb=4,beat=0");         // anchor = now, 500 ms/beat
+     parseContract("!**M:v=show");
++    parseContract("!**C:bpm=120,bpb=4,beat=0");         // anchor = now, 500 ms/beat (v1.3: the seed follows the reset)
+     parseContract("!P*A:i=solid,c=ff0000,at=0");
+     parseContract("!P*A:i=solid,c=800080,at=200");
+     if (g_scoreCount != 2) { printf("FAIL: show A did not load (count=%d)\n", g_scoreCount); return 1; }
+@@ -614,6 +614,7 @@ int main() {
+     }
+ 
+     parseContract("!**M:v=show");                       // ---- the Resend. No stop. ----
++    parseContract("!**C:bpm=120,bpb=4,beat=210");       // v1.3 L1: the reset stopped the clock; Play re-seeds it
+     if (g_scoreCount != 0 || g_scoreIndex != -1) {
+       printf("FAIL: M:v=show did not CLEAR the score (count=%d index=%d) — Studio's Resend "
+              "sends v=show and then the new sections, so show B is now merging into show A\n",
+@@ -645,16 +646,17 @@ int main() {
+     parseContract("!**X");
+     parseContract("!P*A:i=solid,c=000000,d=0");
+     t0 = _mock_millis;
+-    parseContract("!**C:bpm=120,bpb=4,beat=0");
+     parseContract("!**M:v=show");
+-    for (int i = 0; i < 8; i++) {                       // show A: fill the 8-entry table
++    parseContract("!**C:bpm=120,bpb=4,beat=0");
++    for (int i = 0; i < PSI_SCORE_CAP; i++) {                       // show A: fill the 8-entry table
+       char c[40]; snprintf(c, sizeof(c), "!P*A:i=solid,c=ff0000,at=%d", i * 10);
+       parseContract(c);
+     }
+-    if (g_scoreCount != 8) {                            // non-vacuous: the table really IS full
++    if (g_scoreCount != PSI_SCORE_CAP) {                            // non-vacuous: the table really IS full
+       printf("FAIL: show A did not fill the score to cap (count=%d)\n", g_scoreCount); return 1;
+     }
+     parseContract("!**M:v=show");                       // ---- the Resend. No stop. ----
++    parseContract("!**C:bpm=120,bpb=4,beat=0");         // v1.3 L1: as above
+     parseContract("!P*A:i=solid,c=00ff00,at=5");
+     parseContract("!P*A:i=solid,c=0000ff,at=15");
+     if (g_scoreCount != 2) {
+diff --git a/test/host/mock_psi.h b/test/host/mock_psi.h
+index f74e384..4bb8d36 100644
+--- a/test/host/mock_psi.h
++++ b/test/host/mock_psi.h
+@@ -50,6 +50,7 @@ inline uint32_t millis() { return _mock_millis; }
+ // addressing jumper (config.h:102 for ARDUINO_AVR_PRO)
+ #define JUMP_FRONT_REAR 12
+ inline int digitalRead(int) { return 1; }   // HIGH default (pulled up) => front
++#define psiJumperOpen() (digitalRead(JUMP_FRONT_REAR) != 0)   // config.h: the jumper read
+ 
+ struct CHSV {
+   uint8_t h = 0, s = 0, v = 0;
+@@ -75,8 +76,14 @@ static int     level[10] = {0};
+ static bool    useTempInternalBrightness = false;
+ static uint8_t tempGlobalBrightnessValue = 20;
+ static bool    firstTime = false;
++// v1.3: what _givePanelBack() resets (main.cpp globals) and the owner's brightness the ceiling reads.
++static int     lastPSIeventCode = 1;
++static uint8_t defaultPattern = 1;
++static bool    patternRunning = false;
++static bool    timingReceived = false;
++static uint8_t mock_ownerBright = 200;      // the pot/EEPROM value: 200 keeps the envelope vectors' numbers
+ 
+-inline uint8_t brightness() { return useTempInternalBrightness ? tempGlobalBrightnessValue : 20; }
++inline uint8_t brightness() { return useTempInternalBrightness ? tempGlobalBrightnessValue : mock_ownerBright; }
+ 
+ // FastLED facade (only .show(brightness)/.clear() are called by the fork layer)
+ struct _FastLED {
+@@ -84,6 +91,8 @@ struct _FastLED {
+   void clear() { for (int i = 0; i < NUM_LEDS; i++) leds[i] = CRGB(0, 0, 0); }
+ } FastLED;
+ 
++inline CRGB primary_color() { return CRGB(0, 0, 255); }   // config.h: the front PSI's primary
++
+ inline void mock_resetLatch() { mock_showCount = 0; mock_fillColumnCount = 0; }
+ 
+ // ---- serial capture (test-only) ---------------------------------------------

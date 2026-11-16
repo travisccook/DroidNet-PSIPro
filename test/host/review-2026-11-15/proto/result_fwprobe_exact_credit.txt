@@ -1,0 +1,15 @@
+warmup: millis=128 true_us=4294832668 err_ppm=-999970
+idle-swipe: millis=8000 true_us=8000008 err_ppm=0
+solid: millis=8000 true_us=8000000 err_ppm=0
+solid+pump: millis=8000 true_us=8000004 err_ppm=0
+scored-comet+accent: millis=7999 true_us=8000016 err_ppm=-126
+twinkle: millis=7999 true_us=8000016 err_ppm=-126
+wipe+pump: millis=8001 true_us=8000012 err_ppm=123
+chase: millis=8001 true_us=8000012 err_ppm=123
+gradient: millis=8001 true_us=8000012 err_ppm=123
+colorcycle: millis=8000 true_us=8000012 err_ppm=-1
+meter: millis=8000 true_us=8000016 err_ppm=-1
+scan: millis=8000 true_us=8000020 err_ppm=-2
+native1: millis=7999 true_us=8000004 err_ppm=-125
+native15: millis=8001 true_us=8000016 err_ppm=122
+fwprobe done

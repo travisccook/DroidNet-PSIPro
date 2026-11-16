@@ -1,0 +1,384 @@
+=== S1 default brightness vs pot (pot low => native scale ~10)
+  t=  2808 scale=  9 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=  2912 scale=  9 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=3000  >> !P*A:i=solid,c=ffffff
+  t=  3016 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  3120 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+=== S2 live d= deadline survives into a pushed show
+  t=1000  >> !P*A:i=flash,c=ff0000,d=3000
+  t=  1924 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=3 idx=-1 cnt=0
+  t=2000  >> !**M:v=show
+  t=2001  >> !P*A:i=solid,c=00ff00,at=0
+  t=2002  >> !P*A:i=solid,c=0000ff,at=8
+  t=2003  >> !**C:bpm=120,bpb=4,beat=0
+  t=  2444 scale=200 lit=48 sum=12240 led20=00ff00 armed=1 fx=2 idx=0 cnt=2
+  t=  2964 scale=200 lit=48 sum=12240 led20=00ff00 armed=1 fx=2 idx=0 cnt=2
+  t=  3484 scale=200 lit=48 sum=12240 led20=00ff00 armed=1 fx=2 idx=0 cnt=2
+  t=  4004 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=0 cnt=2
+  t=  4524 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=0 cnt=2
+  t=  5044 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=0 cnt=2
+  t=  5564 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=0 cnt=2
+  t=  6084 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=0 cnt=2
+  t=  6604 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=0 cnt=2
+  t=  7124 scale= 20 lit=48 sum=12240 led20=0000ff armed=0 fx=2 idx=0 cnt=2
+  t=  7644 scale= 20 lit=48 sum=12240 led20=0000ff armed=0 fx=2 idx=0 cnt=2
+=== S3 meter base + per-beat accent
+  t=1000  >> !**M:v=show
+  t=1001  >> !P*A:i=meter,c=00ff00,at=0,am=2,ae=solid,ac=ffffff,ad=180
+  t=1002  >> !P*L:v=200
+  t=1003  >> !**C:bpm=60,bpb=4,beat=0
+  t=  2028 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  2054 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  2080 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  2106 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  2132 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  2158 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  2184 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  2210 scale= 10 lit= 0 sum=    0 led20=000000 armed=1 fx=8 idx=0 cnt=1
+  t=  2210 scale=200 lit=24 sum= 5124 led20=ffd700 armed=1 fx=8 idx=0 cnt=1
+  t=  2444 scale=200 lit=24 sum= 5124 led20=ffd700 armed=1 fx=8 idx=0 cnt=1
+  t=  2678 scale=200 lit=24 sum= 5124 led20=ffd700 armed=1 fx=8 idx=0 cnt=1
+  t=  2912 scale=200 lit=24 sum= 5124 led20=ffd700 armed=1 fx=8 idx=0 cnt=1
+  t=  3016 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  3042 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  3068 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  3094 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  3120 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  3146 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  3172 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=8 idx=0 cnt=1
+  t=  3198 scale= 10 lit= 0 sum=    0 led20=000000 armed=1 fx=8 idx=0 cnt=1
+  t=  3198 scale=200 lit=24 sum= 5124 led20=ffd700 armed=1 fx=8 idx=0 cnt=1
+=== S4 bpm=600 full-depth pump
+  t=1000  >> !**C:bpm=600,bpb=4,beat=0
+  t=1001  >> !P*A:i=solid,c=ffffff,m=255,am=2
+  t=  1508 scale=168 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1534 scale= 87 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1560 scale= 31 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1586 scale=  3 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1612 scale=154 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1638 scale= 76 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1664 scale= 25 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1690 scale=  1 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1716 scale=140 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1742 scale= 66 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1768 scale= 20 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1794 scale=  0 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1820 scale=166 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1846 scale= 75 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1872 scale= 19 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1898 scale=  0 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1924 scale=115 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1950 scale= 49 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  1976 scale= 10 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  2002 scale=191 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  2028 scale=103 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  2054 scale= 41 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+  t=  2080 scale=  7 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=-1 cnt=0
+=== S5 X then M:v=show
+  t=   910 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=1000  >> !P*A:i=solid,c=ff0000
+  t=  1066 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=  1222 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=  1378 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=  1534 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=  1690 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=  1846 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=2000  >> !P*X
+  t=  2000 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=2 idx=-1 cnt=0
+  t=  2158 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=  2314 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=  2470 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=  2626 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=  2782 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=  2938 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=3000  >> !**M:v=show
+  t=  3094 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=  3250 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+=== S6 ten sections pushed (cap 8)
+  t=1000  >> !**M:v=show
+  t=1001  >> !P*A:i=solid,c=010000,at=0
+  t=1002  >> !P*A:i=solid,c=020000,at=2
+  t=1003  >> !P*A:i=solid,c=030000,at=4
+  t=1004  >> !P*A:i=solid,c=040000,at=6
+  t=1005  >> !P*A:i=solid,c=050000,at=8
+  t=1006  >> !P*A:i=solid,c=060000,at=10
+  t=1007  >> !P*A:i=solid,c=070000,at=12
+  t=1008  >> !P*A:i=solid,c=080000,at=14
+  t=1009  >> !P*A:i=solid,c=090000,at=16
+  t=1010  >> !P*A:i=solid,c=0a0000,at=18
+  t=  1014 scale=200 lit=48 sum=12240 led20=0000ff armed=1 fx=2 idx=-1 cnt=8
+  t=1020  >> !**C:bpm=120,bpb=4,beat=0
+  t=  2028 scale=200 lit=48 sum=   96 led20=020000 armed=1 fx=2 idx=1 cnt=8
+  t=  3042 scale=200 lit=48 sum=  144 led20=030000 armed=1 fx=2 idx=2 cnt=8
+  t=  4056 scale=200 lit=48 sum=  192 led20=040000 armed=1 fx=2 idx=3 cnt=8
+  t=  5070 scale=200 lit=48 sum=  240 led20=050000 armed=1 fx=2 idx=4 cnt=8
+  t=  6084 scale=200 lit=48 sum=  288 led20=060000 armed=1 fx=2 idx=5 cnt=8
+  t=  7098 scale=200 lit=48 sum=  336 led20=070000 armed=1 fx=2 idx=6 cnt=8
+  t=  8112 scale=200 lit=48 sum=  384 led20=080000 armed=1 fx=2 idx=7 cnt=8
+  t=  9126 scale=200 lit=48 sum=  384 led20=080000 armed=1 fx=2 idx=7 cnt=8
+  t= 10140 scale=200 lit=48 sum=  384 led20=080000 armed=1 fx=2 idx=7 cnt=8
+  t= 11154 scale=200 lit=48 sum=  384 led20=080000 armed=1 fx=2 idx=7 cnt=8
+  t= 12168 scale=200 lit=48 sum=  384 led20=080000 armed=1 fx=2 idx=7 cnt=8
+=== S7 host goes away; native 0T1 / 0D while armed
+  t=   910 scale= 20 lit=48 sum=12240 led20=ff0000 armed=0 fx=2 idx=-1 cnt=0
+  t=1000  >> !P*A:i=solid,c=ff0000
+  t=  1430 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=  1950 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=2000  >> 0T1
+  t=  2470 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=  2990 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=3000  >> 0D
+  t=  3510 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=4000  >> 0T6
+  t=  4030 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+  t=  4550 scale=200 lit=48 sum=12240 led20=ff0000 armed=1 fx=2 idx=-1 cnt=0
+=== S8 scored native:1 then comet then native:1
+  t=1000  >> !**M:v=show
+  t=1001  >> !P*A:i=native:1,at=0
+  t=1002  >> !P*A:i=comet,c=00ff00,at=4
+  t=1003  >> !P*A:i=native:15,at=8
+  t=1004  >> !**C:bpm=120,bpb=4,beat=0
+  t=  4914 scale=200 lit=14 sum= 1790 led20=000000 armed=1 fx=10 idx=1 cnt=3
+  t=  4940 scale=200 lit=14 sum= 1790 led20=000000 armed=1 fx=10 idx=1 cnt=3
+  t=  4966 scale=200 lit=14 sum= 1790 led20=000000 armed=1 fx=10 idx=1 cnt=3
+  t=  4992 scale=200 lit=12 sum= 1916 led20=000000 armed=1 fx=10 idx=1 cnt=3
+  t=  5018 scale= 10 lit= 0 sum=    0 led20=000000 armed=1 fx=9 idx=2 cnt=3
+  t=  5018 scale=200 lit= 2 sum=  510 led20=000000 armed=1 fx=9 idx=2 cnt=3
+  t=  5278 scale= 10 lit= 0 sum=    0 led20=000000 armed=1 fx=9 idx=2 cnt=3
+  t=  5278 scale=200 lit= 4 sum= 1020 led20=000000 armed=1 fx=9 idx=2 cnt=3
+  t=  5538 scale= 10 lit= 0 sum=    0 led20=000000 armed=1 fx=9 idx=2 cnt=3
+  t=  5538 scale=200 lit= 6 sum= 1530 led20=000000 armed=1 fx=9 idx=2 cnt=3
+  t=  5798 scale= 10 lit= 0 sum=    0 led20=000000 armed=1 fx=9 idx=2 cnt=3
+  t=  5798 scale=200 lit= 6 sum= 1530 led20=ff0000 armed=1 fx=9 idx=2 cnt=3
+=== S9 native:15 in a show, then X (EEPROM blank => alwaysOn compiled default)
+  t=1000  >> !P*A:i=native:15
+  t=3000  >> !P*X
+  t=  3000 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t=  3094 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t=  3094 scale= 20 lit= 4 sum= 1020 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t=  3354 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t=  3354 scale= 20 lit= 2 sum=  510 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t=  3614 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t=  3614 scale= 20 lit= 4 sum= 1020 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+=== S10 same, EEPROM alwaysOn=0
+  t=1000  >> !P*A:i=native:15
+  t=3000  >> !P*X
+  t=  3000 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t=  5694 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t=  8294 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t= 10894 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t= 13494 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t= 16094 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t= 18694 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t= 21294 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t= 23894 scale= 10 lit= 0 sum=    0 led20=000000 armed=0 fx=9 idx=-1 cnt=0
+  t= 26494 scale= 20 lit=48 sum=12240 led20=0000ff armed=0 fx=9 idx=-1 cnt=0
+  t= 29094 scale= 20 lit=48 sum=12240 led20=0000ff armed=0 fx=9 idx=-1 cnt=0
+=== S11 bare re-anchor C mid-beat (Studio drift ticker) with a scored every-beat accent
+  t=1000  >> !**M:v=show
+  t=1001  >> !P*A:i=solid,c=000040,at=0,am=2,ae=solid,ac=ffffff,ad=180
+  t=2000  >> !**C:bpm=60,bpb=4,beat=0
+  t=  2002 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  2028 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  2054 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  2080 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  2106 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  2132 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  2158 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  2184 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2210 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2236 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2262 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2288 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2314 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2340 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2366 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2392 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2418 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2444 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2470 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2496 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2522 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2548 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2574 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2600 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2626 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2652 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2678 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2704 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2730 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2756 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2782 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2808 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2834 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2860 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2886 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2912 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2938 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2964 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  2990 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3016 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  3042 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  3068 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  3094 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  3120 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  3146 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  3172 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  3198 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3224 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3250 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3276 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3302 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3328 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3354 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3380 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3406 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3432 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3458 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3484 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3510 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3536 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3562 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3588 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3614 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3640 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3666 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3692 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3718 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3744 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3770 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3796 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3822 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3848 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3874 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3900 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3926 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3952 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  3978 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4004 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4030 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4056 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4082 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4108 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4134 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4160 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4186 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4212 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4238 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4264 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4290 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4316 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4342 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4368 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4394 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4420 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4446 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4472 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4498 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=4500  >> !**C:ph=1500,beat=4
+  t=  4524 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4550 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4576 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4602 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4628 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4654 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4680 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  4706 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4732 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4758 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4784 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4810 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4836 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4862 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4888 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4914 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4940 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4966 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  4992 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5018 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  5044 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  5070 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  5096 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  5122 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  5148 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  5174 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  5200 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5226 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5252 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5278 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5304 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5330 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5356 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5382 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5408 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5434 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5460 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5486 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5512 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5538 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5564 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5590 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5616 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5642 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5668 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5694 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5720 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5746 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5772 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5798 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5824 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5850 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5876 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5902 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5928 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5954 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  5980 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  6006 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  6032 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  6058 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  6084 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  6110 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  6136 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  6162 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  6188 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  6214 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  6240 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  6266 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  6292 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  6318 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  6344 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  6370 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+  t=  6396 scale=200 lit=48 sum= 3072 led20=000040 armed=1 fx=2 idx=0 cnt=1
+=== S12 b= on a scored line
+  t=1000  >> !**M:v=show
+  t=1001  >> !P*A:i=solid,c=ffffff,b=40,at=0
+  t=1002  >> !**C:bpm=120,bpb=4,beat=0
+  t=  1118 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  1326 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+  t=  1534 scale=200 lit=48 sum=36720 led20=ffffff armed=1 fx=2 idx=0 cnt=1
+=== S13 i=swipe / i=cylon (spec'd PSI ids)
+  t=1000  >> !P*A:i=comet,c=00ff00
+  t=  1118 scale=200 lit=12 sum= 1916 led20=000000 armed=1 fx=10 idx=-1 cnt=0
+  t=  1430 scale=200 lit=22 sum= 3706 led20=00c000 armed=1 fx=10 idx=-1 cnt=0
+  t=1500  >> !P*A:i=swipe,c=ff8800
+  t=  1742 scale=200 lit=14 sum= 4110 led20=000000 armed=1 fx=10 idx=-1 cnt=0
+  t=2000  >> !P*A:i=cylon,c=ff0000
+  t=  2054 scale=200 lit=14 sum= 1790 led20=000000 armed=1 fx=10 idx=-1 cnt=0
+  t=  2366 scale=200 lit=18 sum= 3322 led20=ff0000 armed=1 fx=10 idx=-1 cnt=0
+=== S14 Resend (M:v=show + new score, no X, no new C yet): stale clock keeps running
+  t=1000  >> !**M:v=show
+  t=1001  >> !P*A:i=solid,c=101010,at=0
+  t=2000  >> !**C:bpm=120,bpb=4,beat=0
+  t=  6916 scale=200 lit=48 sum= 2304 led20=101010 armed=1 fx=2 idx=0 cnt=1
+  t=7000  >> !**M:v=show
+  t=7001  >> !P*A:i=solid,c=ff0000,at=0
+  t=7002  >> !P*A:i=solid,c=00ff00,at=8
+  t=7003  >> !P*A:i=solid,c=0000ff,at=12
+  t=  7176 scale=200 lit=48 sum=12240 led20=00ff00 armed=1 fx=2 idx=1 cnt=3
+  t=  7436 scale=200 lit=48 sum=12240 led20=00ff00 armed=1 fx=2 idx=1 cnt=3
+  t=  7696 scale=200 lit=48 sum=12240 led20=00ff00 armed=1 fx=2 idx=1 cnt=3
+  t=  7956 scale=200 lit=48 sum=12240 led20=00ff00 armed=1 fx=2 idx=1 cnt=3
+  t=  8216 scale=200 lit=48 sum=12240 led20=0000ff armed=1 fx=2 idx=2 cnt=3
+  t=  8476 scale=200 lit=48 sum=12240 led20=0000ff armed=1 fx=2 idx=2 cnt=3
+  t=  8736 scale=200 lit=48 sum=12240 led20=0000ff armed=1 fx=2 idx=2 cnt=3
+  t=  8996 scale=200 lit=48 sum=12240 led20=0000ff armed=1 fx=2 idx=2 cnt=3

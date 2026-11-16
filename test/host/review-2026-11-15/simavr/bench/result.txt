@@ -1,0 +1,10 @@
+beatPosAt us=107
+beatAccentAmount us=50
+envBright us=13
+twinkle48 us=6784
+comet10 us=106
+wipe10 us=778
+chase10 us=782
+gradient10 us=882
+show48 us=1607
+bench done
