@@ -348,12 +348,14 @@ static PSI_NOINLINE bool _gateLetsNativeLight() {
 }
 
 // ---- the looks this build has ----------------------------------------------------
-// PSI_NO_STRIP_LOOKS (set only in the PSIPro-i2c environment) builds R1 without the six strip and
-// hue looks: with Wire and the I2C intake linked, they do not fit the part. A line that names one
-// is not dropped and still counts for verb V; it draws the nearest look this build has:
+// PSI_NO_STRIP_LOOKS (set in platformio.ini for every environment: R1 ships with it) builds
+// without the six strip and hue looks: with contract v1.3's gate they do not fit the part. A line
+// that names one is not dropped and still counts for verb V; it draws the nearest look the build
+// has:
 //   comet, chase, wipe -> scan       twinkle -> sparkle       gradient, colorcycle -> solid in c=
 // As an accent overlay all six become solid: scan and sparkle keep state between frames, which is
-// why the core refuses them as accents. R2's fixed-point clock is what brings the six back.
+// why the core refuses them as accents. The six stay in this file and are run on the host (the
+// all-looks build of the timeline scenarios), so that they can come back when there is room.
 #ifdef PSI_NO_STRIP_LOOKS
 static PSI_NOINLINE ContractEffect _lookHere(ContractEffect e, bool overlay) {
   switch (e) {

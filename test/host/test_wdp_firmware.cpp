@@ -24,7 +24,7 @@ static int g_fail = 0, g_total = 0;
   printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);} } while(0)
 
 static std::string line(const char* type) {
-  return std::string("@WDP1 {\"type\":\"") + type + "\",\"fw\":\"" WDP_FW "\",\"caps\":[\"droidnet.contract\",\"contract.1.3\"]}\n";
+  return std::string("@WDP1 {\"type\":\"") + type + "\",\"fw\":\"" WDP_FW "\",\"caps\":[\"droidnet.contract\",\"" WDP_FORK_CONTRACT "\"]}\n";
 }
 
 // One millisecond of the board: room in the TX buffer, loop(), the core's serialEventRun(), then

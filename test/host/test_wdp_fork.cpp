@@ -16,8 +16,9 @@ static int g_fail = 0, g_total = 0;
 #define CHECK(cond) do { g_total++; if(!(cond)){ g_fail++; \
   printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);} } while(0)
 
-// The lines, byte for byte. The second caps tag is the contract the build speaks: "contract.1.3",
-// or "contract.1.3s" for the build without the strip and hue looks (the PSIPro-i2c environment).
+// The lines, byte for byte. The second caps tag is the contract the build speaks: "contract.1.3s"
+// for a build without the strip and hue looks (R1, as platformio.ini builds it), "contract.1.3"
+// for one with all of them.
 #ifdef PSI_NO_STRIP_LOOKS
 #define CONTRACT_TAG "contract.1.3s"
 #else

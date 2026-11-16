@@ -18,7 +18,7 @@
 #   4. command-buffer width guard (the longest v1.3 scored line is 102 chars)
 #   5. parser fuzz + differential (ASan/UBSan)
 #   6. golden-frame parity against the committed captures (test/host/golden/)
-#   6d. the I2C build's six stand-in looks draw scan, sparkle and solid, frame for frame
+#   6d. the six stand-in looks draw scan, sparkle and solid, frame for frame
 #   6e. contract S9 as a property of the firmware: hostile and random line streams, frames measured
 #   7. scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock
 #   8. HSV oracle: CE_RAINBOW (CHSV->CRGB) == FastLED 3.5.0 hsv2rgb_rainbow (full cube)
@@ -89,12 +89,12 @@ echo "[1b/9] wdp_announce_core WDP device announce unit tests"
 echo "[1c/9] wdp_fork PSI Front / PSI Rear identity"
 # Fork-local. The header's own types and caps, with the longest fw git gives a build
 # ("<sha>-dirty"), must build a valid line for both roles in the fork's WDP_LINE_MAX, which is
-# sized to exactly the front line (93 B here) rather than the core's 128. Twice: the serial-only
-# build announces "contract.1.3", the build without the strip looks "contract.1.3s".
-"$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_fork.cpp -o "$T/psi_wdp_fork_test"
+# sized to exactly the front line (93 B here) rather than the core's 128. Twice: as R1 is built
+# (without the strip looks: "contract.1.3s"), and with every look ("contract.1.3").
+"$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 -DPSI_NO_STRIP_LOOKS test_wdp_fork.cpp -o "$T/psi_wdp_fork_test"
 "$T/psi_wdp_fork_test"
-"$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 -DPSI_NO_STRIP_LOOKS test_wdp_fork.cpp -o "$T/psi_wdp_fork_test_i2c"
-"$T/psi_wdp_fork_test_i2c"
+"$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_fork.cpp -o "$T/psi_wdp_fork_test_all"
+"$T/psi_wdp_fork_test_all"
 echo "[1d/9] WDP announce in the firmware (main.cpp + mocks)"
 # src/main.cpp verbatim against the golden harness's mocks, Serial1 modelled as a 63-byte TX
 # buffer draining at 9600 baud: pieces never exceed the room, a Q that arrives mid-line is
@@ -103,7 +103,7 @@ echo "[1d/9] WDP announce in the firmware (main.cpp + mocks)"
 # differs front vs rear. -std=gnu++17: the mocks use inline variables. -Wno-macro-redefined:
 # config.h redefines preamble.h's DEBUG_PRINT/UNUSED/FALL_THROUGH (upstream; stage 6 shows them).
 "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all \
-    -Wno-macro-redefined -I native_mocks -I ../../include '-DWDP_FW="abcdef0-dirty"' \
+    -Wno-macro-redefined -DPSI_NO_STRIP_LOOKS -I native_mocks -I ../../include '-DWDP_FW="abcdef0-dirty"' \
     test_wdp_firmware.cpp -o "$T/psi_wdp_firmware"
 "$T/psi_wdp_firmware"
 echo "[2/9] psi_vm.h decode-walk test"
@@ -228,29 +228,28 @@ if [ "$matrix_names" != "$golden_names" ]; then
   exit 1
 fi
 
-echo "[6d] the I2C build's stand-in looks"
-# The PSIPro-i2c environment builds without the six strip and hue looks (PSI_NO_STRIP_LOOKS). A
-# line naming one must draw the nearest look that build has, frame for frame: comet, chase and wipe
-# are scan, twinkle is sparkle, gradient and colorcycle are solid in c=.
-"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -w -DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS \
-    -I native_mocks -I "$BUILD/config_full" -I ../../include -o "$BUILD/golden_i2c" golden_native.cpp
+echo "[6d] the stand-in looks"
+# R1 is built without the six strip and hue looks (PSI_NO_STRIP_LOOKS, platformio.ini). A line
+# naming one must draw the nearest look the build has, frame for frame: comet, chase and wipe are
+# scan, twinkle is sparkle, gradient and colorcycle are solid in c=.
+# (The golden binary, built above, is that build.)
 frames() { python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); sys.stdout.buffer.write(d[d.index(b"\nFRAMES\n"):])' "$1"; }
 standin() {  # <look named on the wire> <look drawn> [committed golden of the look drawn]
-  "$BUILD/golden_i2c" --cmd "!P*A:i=$1,c=ff0000" --ms 12000 --jumper front --eeprom 00,01,14 --pot 512 \
-      --out "$GOLD/i2c_$1.psig" 2>/dev/null
+  "$BUILD/golden_full" --cmd "!P*A:i=$1,c=ff0000" --ms 12000 --jumper front --eeprom 00,01,14 --pot 512 \
+      --out "$GOLD/standin_$1.psig" 2>/dev/null
   if [ -n "${3:-}" ]; then want="golden/$3.psig"; else
-    want="$GOLD/i2c_$2.psig"
-    "$BUILD/golden_i2c" --cmd "!P*A:i=$2,c=ff0000" --ms 12000 --jumper front --eeprom 00,01,14 --pot 512 \
+    want="$GOLD/standin_$2.psig"
+    "$BUILD/golden_full" --cmd "!P*A:i=$2,c=ff0000" --ms 12000 --jumper front --eeprom 00,01,14 --pot 512 \
         --out "$want" 2>/dev/null
   fi
-  cmp -s <(frames "$want") <(frames "$GOLD/i2c_$1.psig") || { echo "FAIL: on the I2C build i=$1 is not i=$2"; exit 1; }
+  cmp -s <(frames "$want") <(frames "$GOLD/standin_$1.psig") || { echo "FAIL: i=$1 is not i=$2"; exit 1; }
 }
 standin comet scan; standin chase scan; standin wipe scan
 standin twinkle sparkle
 standin gradient solid; standin colorcycle solid
 # ...and the build still has the looks it keeps: rainbow is not solid there.
 standin rainbow rainbow
-if cmp -s <(frames "$GOLD/i2c_rainbow.psig") <(frames "$GOLD/i2c_solid.psig"); then echo "FAIL: rainbow drew as solid"; exit 1; fi
+if cmp -s <(frames "$GOLD/standin_rainbow.psig") <(frames "$GOLD/standin_solid.psig"); then echo "FAIL: rainbow drew as solid"; exit 1; fi
 echo "      6 stand-ins identical to the looks they draw."
 
 echo "[6b] upstream differential: Neil's PSIPro v1.7 and the fork on the same mocks"
@@ -264,14 +263,18 @@ bash diff_upstream.sh "$T" "$CXX_SAN"
 echo "[6c] timeline scenarios: the firmware on the mocks, scripted wire timelines"
 # src/main.cpp verbatim, a scripted timeline of wire lines, assertions on the frames show() latched
 # and on the bytes written to Serial1. One scenario per process (the firmware keeps static state).
-# Built twice, as the two environments are: serial-only, and I2C without the strip looks. The I2C
-# run adds the scenarios that feed a line through the TWI receive callback.
+# Built three times: as the two environments are (serial-only, and with the I2C intake, whose run
+# adds the scenarios that feed a line through the TWI receive callback), and with every look
+# (psi_timeline_all: the six strip and hue looks no environment links in R1, kept running here).
 "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
+    -DPSI_NO_STRIP_LOOKS \
     -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline"
 "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
     -DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS \
     -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline_i2c"
-for bin in psi_timeline psi_timeline_i2c; do
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline_all"
+for bin in psi_timeline psi_timeline_i2c psi_timeline_all; do
   n=0
   for s in $("$T/$bin" --list); do
     "$T/$bin" "$s" > "$T/scenario.out" 2>&1 || { cat "$T/scenario.out"; echo "FAIL: $bin $s"; exit 1; }
@@ -286,11 +289,11 @@ echo "[6e] contract S9 as a property: hostile and random line streams, the frame
 # 340 ms; on a native look's frames, the ones a contract edge led to), nothing above the owner's
 # brightness, dark after X, native after idle, a native command keeps the panel, and no line
 # writes into a native look.
-for cfg in "" "-DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS"; do
+for cfg in "-DPSI_NO_STRIP_LOOKS" "-DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS"; do
   # shellcheck disable=SC2086
   "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w $cfg \
       -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_property.cpp -o "$T/psi_property"
-  echo "      ${cfg:-serial-only}"
+  echo "      $cfg"
   "$T/psi_property" > "$T/property.out" 2>&1 || { cat "$T/property.out"; echo "FAIL: the S9 property does not hold"; exit 1; }
   sed 's/^/      /' "$T/property.out"
 done

@@ -3,11 +3,11 @@
 // the RSeries and FlthyHPs forks) builds and paces the line; this file only says what the board
 // is and where the line goes:
 //
-//     @WDP1 {"type":"PSI Front","fw":"<commit>","caps":["droidnet.contract","contract.1.3"]}
+//     @WDP1 {"type":"PSI Front","fw":"<commit>","caps":["droidnet.contract","contract.1.3s"]}
 //
-// The second tag says which contract the board speaks. The I2C build, which draws six of the
-// contract's looks as stand-ins (PSI_NO_STRIP_LOOKS), says "contract.1.3s" instead, so a host can
-// tell the two builds apart without a query.
+// The second tag says which contract the board speaks. "contract.1.3s" is v1.3 with six of its
+// looks drawn as stand-ins (PSI_NO_STRIP_LOOKS), which is how R1 is built; a build with all of
+// them says "contract.1.3". A host can tell the two apart without a query.
 //
 // "PSI Rear" on a board with the front/rear jumper fitted. Front and rear PSIs can share one WCB
 // port, and the WCB keeps one record per (port, type), so the role is part of the type.

@@ -3,9 +3,9 @@
 // (EEPROM 00,01,14) unless a scenario says otherwise. Section colours avoid blue and red: the front
 // swipe is made of those, and a full-secondary swipe is solid red.
 //
-// run.sh builds this file twice: as the default serial-only firmware, and as the PSIPro-i2c
-// environment is built (-DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS). Scenarios that only make sense in
-// one of them sit under #ifdef.
+// run.sh builds this file three times: as the two environments are built (-DPSI_NO_STRIP_LOOKS,
+// and with -DPSI_ENABLE_I2C as well), and with every look (no flag: the six strip and hue looks,
+// which no environment links in R1). Scenarios that only make sense in one of them sit under #ifdef.
 #define GREEN 0x00ff00
 #define MAGENTA 0xff00ff
 #define CYAN 0x00ffff

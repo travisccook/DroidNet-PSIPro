@@ -15,7 +15,8 @@ cd "$(dirname "$0")/../.."
 OUT="${1:?usage: mk_full_config.sh <out-dir>}"
 mkdir -p "$OUT/config_full"
 sed '/#define CONTRACT_SLIM/d' include/config.h > "$OUT/config_full/config.h"  # no-op now; see above
-"${CXX_SAN:-c++}" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined \
+# -DPSI_NO_STRIP_LOOKS: as platformio.ini builds the firmware (R1 ships without the six strip looks).
+"${CXX_SAN:-c++}" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -DPSI_NO_STRIP_LOOKS \
   -I test/host/native_mocks -I "$OUT/config_full" -I include \
   -o "$OUT/golden_full" test/host/golden_native.cpp
 echo "built $OUT/golden_full"
