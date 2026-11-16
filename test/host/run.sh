@@ -411,7 +411,8 @@ if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
   simrun gate 60 "$T/gate.txt" -o "$T/gate.vcd" -at "led=trace@0x2b/0x10"
   python3 ../simavr/check_gate.py "$T/gate.vcd" "$T/gate.txt"
   simrun wave 8 "$T/wave.txt" -o "$T/wave.vcd" -at "led=trace@0x2b/0x10"
-  python3 ../simavr/check_wave.py "$T/wave.vcd" --min-gap-us 50
+  # 280 us: the latch time of the later WS2812B revisions, between frames sent in the same tick.
+  python3 ../simavr/check_wave.py "$T/wave.vcd" --min-gap-us 280
   simrun bench 30 "$T/bench.txt"
   grep ' us=' "$T/bench.txt" | sed 's/^/    /'
 else

@@ -30,8 +30,10 @@ row same "swipe rear seed 7" rear 00 01 14 512 7 60000 1 0T1
 
 # |timing on every mode, command at 2000 ms
 for m in 2 3 4 5 6 7 8 9 10 11 12 13 14 15 20 21 92; do row same "0T$m|3" $D 12000 2000 "0T$m|3"; done
-# 0T19|n: upstream means to ignore the timing but aborts the battle at once (allOFF's stale timer);
-# the fork cuts it at n seconds. Task 16 makes the fork play it whole, which is still not upstream.
+# 0T19|n: upstream's comment says the battle ignores a timing, but its code aborts the battle at
+# once (allOFF's stale timer). The fork does what the comment says and plays the battle whole
+# (the timeline scenario the_saber_ignores_a_command_timing), so this row differs from upstream
+# by decision.
 row diff "0T19|3" $D 12000 2000 "0T19|3"
 
 # mode to mode
@@ -39,8 +41,9 @@ for pair in "6 15" "2 19" "13 12" "8 8" "15 6" "19 20" "20 4" "7 9" "11 2" "12 2
             "10 0" "0 7" "15 15" "6 6" "3 16" "16 13"; do
   set -- $pair; row same "0T$1 @1000 -> 0T$2 @2300" $D 30000 1000 "0T$1" 2300 "0T$2"
 done
-# the rebel symbol waits for the previous mode's delay (vmPlay gates its first step); fixed in Task 16
-row diff "0T9 @1000 -> 0T14 @2300" $D 30000 1000 0T9 2300 0T14
+# the rebel symbol shows on entry, as upstream's does, whatever delay the previous mode left running
+row same "0T9 @1000 -> 0T14 @2300" $D 30000 1000 0T9 2300 0T14
+row same "0T11 @1000 -> 0T14 @2300" $D 30000 1000 0T11 2300 0T14
 
 row same "0T6 -> 0D -> 0T6" $D 12000 1000 0T6 2300 0D 2500 0T6
 row same "0T15 -> 0A -> 0T10" $D 20000 1000 0T15 1800 0A 4000 0T10

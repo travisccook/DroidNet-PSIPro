@@ -855,6 +855,17 @@ static void a_scored_native_off_the_list_fails_v() {
   CHECK(strstr(Serial1.txLog, ",n=0,ok=2,") != nullptr && swipeAt(2900), "V fails and the board is given back (tx: %s)", Serial1.txLog);
 }
 
+// ---- native corner cases the upstream differential found ----------------------------------------
+// 0T19|3: upstream's comment says the lightsaber battle ignores a timing. It plays its whole 5.4 s.
+static void the_saber_ignores_a_command_timing() {
+  boot();
+  at(2000, "0T19|3");
+  runTo(9000);
+  uint32_t last = 0;
+  for (const Frame& f : between(2000, 9000)) if (f.lit > 0 && f.lit < 48) last = f.t;
+  CHECK(last >= 7300, "the battle must play to its end (5.4 s), last saber frame at t=%u", last);
+}
+
 // ---- L2: the host-silence watchdog ----------------------------------------------------------------
 static void watchdog_gives_the_panel_back() {
   boot();
@@ -1140,6 +1151,7 @@ static const Scenario kScenarios[] = {
   {"native_codes_off_the_list_are_dropped", native_codes_off_the_list_are_dropped},
   {"native_codes_on_the_list_run", native_codes_on_the_list_run},
   {"a_scored_native_off_the_list_fails_v", a_scored_native_off_the_list_fails_v},
+  {"the_saber_ignores_a_command_timing", the_saber_ignores_a_command_timing},
   {"watchdog_gives_the_panel_back", watchdog_gives_the_panel_back},
   {"watchdog_is_fed_by_any_addressed_line", watchdog_is_fed_by_any_addressed_line},
   {"watchdog_is_not_fed_by_another_boards_lines", watchdog_is_not_fed_by_another_boards_lines},

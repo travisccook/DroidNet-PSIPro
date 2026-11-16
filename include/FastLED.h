@@ -52,6 +52,7 @@
 #include <string.h>
 #if defined(__AVR__)
 #include <Arduino.h>            // also supplies `byte` etc. to functions.h, as FastLED.h did
+#include <util/delay.h>         // _delay_us(): the latch gap before each frame
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #endif
@@ -322,6 +323,11 @@ public:
     // re-enter itself. FastLED's showPixels() ends with an unconditional sei() here,
     // which is precisely what let that ISR nest (psi-i2c-isr-nesting-hazard). This
     // driver removes that route structurally; see the interrupt-budget note below.
+    // Latch. Two show() calls in one tick (a mode's clear and its first frame; OP_SHOWNOW then
+    // OP_SHOW) are otherwise 104 us apart, which is the staging loop above and nothing else. The
+    // original WS2812 latches after 50 us of low; later WS2812B revisions need 280 us. Interrupts
+    // are still on here, so this costs no millis() and delays no serial byte.
+    _delay_us(200);
     const uint8_t sreg = SREG;
     cli();
     // Exact millis() credit (v1.3 C4). Timer0 runs at clk/64 (4 us a tick) and overflows every
@@ -399,8 +405,10 @@ private:
   // tail, which WS2812s tolerate up to the >50 us latch threshold (the highs are what
   // the sampling window cares about).
   //
-  // After the final byte, brne falls through with the line low; the caller's next
-  // show() is >= 10 ms away at every call site, so the > 50 us latch happens for free.
+  // After the final byte, brne falls through with the line low. The next show() is NOT always
+  // a frame gate away: a mode's clear and its first frame are sent in the same tick. show()
+  // waits 200 us before each frame, so with its staging loop the line is low for over 300 us
+  // between any two frames: enough for every WS2812 revision (50 us originally, 280 us later).
   static void emitFrame(const uint8_t *p, uint8_t nbytes) {
     uint8_t cur, bits;
     asm volatile(

@@ -692,8 +692,9 @@ const uint8_t vmc_march[] PROGMEM = {
 // (src/main.cpp, deleted by this task): firstTime sets ledPatternState=0,
 // allOFF(true) (VMF_CLEAR), and unconditionally forces timingReceived=false
 // (this sequence never honors a received command timing — same shape as
-// FadeOut's VMF_IGNORE_TIMING, though moot here since g_vmRuntime is 0 and
-// never read for a oneshot's reversion; omitted, see below). 23 states
+// FadeOut's VMF_IGNORE_TIMING, and since contract v1.3 it carries that flag:
+// "moot" was wrong, a 0T19|n cut the battle at n seconds through the global
+// timer the |n armed). 23 states
 // (cases 0-22), each a displayMatrixColor(lightsaberN, 0xffffff, 0x000000,
 // true, 0, 0xff0000, 0x0000cc[, 0x999999]) call — displayMe=true, so EVERY
 // state double-shows exactly like red_heart (OP_SHOWLIVE then a normal
@@ -841,7 +842,8 @@ const uint8_t vmc_process[] PROGMEM = {
 enum {
   VMF_CLEAR         = 0x01,  // allOFF(true)-style blackout+show on entry
   VMF_ONESHOT       = 0x02,  // OP_END stops (hold last frame if alwaysOn, else restore)
-  VMF_IGNORE_TIMING = 0x04,  // pattern ignores a received command timing (FadeOut)
+  VMF_IGNORE_TIMING = 0x04,  // pattern ignores a received command timing (FadeOut, the lightsaber)
+  VMF_IMMEDIATE     = 0x08,  // the first frame shows on entry, not after the previous mode's delay (rebel)
 };
 
 struct VmProg {
@@ -869,7 +871,7 @@ const VmProg vmProgs[] PROGMEM = {
   { vmc_swscan,    5, 0,  0 },                       // VMP_SWSCAN   (mode 10) — was Cylon_Row(0xC8AA00, 500, 4, 5, 0)
   { vmc_knight,    5, 0,  0 },                       // VMP_KNIGHT   (mode 15) — was Cylon_Col(0xff0000, 250, 1, 5, 0)
   { vmc_radar,     6, 0,  VMF_CLEAR },               // VMP_RADAR    (mode 8)  — was radar(0xff0000, 250, 6, 0)
-  { vmc_rebel,     0, 5,  0 },                       // VMP_REBEL    (mode 14) — was displayMatrixColor(rebel, ..., true, 5)
+  { vmc_rebel,     0, 5,  VMF_IMMEDIATE },           // VMP_REBEL    (mode 14) — was displayMatrixColor(rebel, ..., true, 5)
   { vmc_pulse,     3, 0,  VMF_CLEAR },               // VMP_PULSE    (mode 9 rear) — was Pulse(100, 3, 0)
   { vmc_disco,    30, 4,  VMF_CLEAR },               // VMP_DISCO4   (mode 12) — was DiscoBall(150, 30, 3, CRGB::Grey, 4)
   { vmc_disco,     0, 0,  VMF_CLEAR },               // VMP_DISCOINF (mode 13) — was DiscoBall(150, 0, 3, CRGB::Grey, 0)
@@ -877,7 +879,7 @@ const VmProg vmProgs[] PROGMEM = {
   { vmc_iheartu,   3, 0,  VMF_CLEAR },               // VMP_IHEARTU  (mode 7)  — was i_heart_u(500, 3, 0)
   { vmc_redheart,  3, 0,  VMF_CLEAR },               // VMP_REDHEART (mode 9 front) — was red_heart(500, 3, 0)
   { vmc_march,    42, 47, VMF_CLEAR },               // VMP_MARCH    (mode 11) — was march(0xffffff, 552, 42, 47)
-  { vmc_saber,     0, 0,  VMF_CLEAR | VMF_ONESHOT }, // VMP_SABER    (mode 19) — was lightsaberBattle(250)
+  { vmc_saber,     0, 0,  VMF_CLEAR | VMF_ONESHOT | VMF_IGNORE_TIMING }, // VMP_SABER    (mode 19) — was lightsaberBattle(250)
   { vmc_swintro,   4, 10, VMF_CLEAR },               // VMP_SWINTRO  (mode 20) — was StarWarsIntro(500, 4, 0xC8AA00, 10)
   { vmc_process,   3, 0,  VMF_CLEAR },               // VMP_PROCESS  (mode 22) — fork addition, no native equivalent; see vmc_process's comment
 };
@@ -1236,6 +1238,10 @@ inline void vmPlay(uint8_t progId) {
     g_vmDone     = false;
     globalPatternLoops = g_vmDescLoops;
     if (g_vmFlags & VMF_IGNORE_TIMING) timingReceived = false;
+    // Upstream's displayMatrixColor() draws the symbol at once on entry. vmPlay() gates its first
+    // step on the delay the PREVIOUS mode left running, so the rebel symbol appeared up to that
+    // delay late (100 ms after the heart, never after a mode with none).
+    if (g_vmFlags & VMF_IMMEDIATE) set_delay(0);
     if ((g_vmRuntime != 0) && (!timingReceived)) set_global_timeout(g_vmRuntime);
     if (timingReceived) set_global_timeout(commandTiming);
     if (g_vmFlags & VMF_CLEAR) {
