@@ -1087,6 +1087,104 @@ static void lDoesNotReach(bool show) {
 static void l_does_not_reach_the_owners_vu_mode() { lDoesNotReach(false); }
 static void l_does_not_reach_a_shows_native_vu() { lDoesNotReach(true); }
 
+// ---- S10: the allow-listed native looks, classified by how they run as STOCK -------------------
+// S10: a native look on the allow-list runs as stock when its whole field does not swing by a tenth
+// of the ceiling faster than every 340 ms, or when what moves is a small lit area (under a quarter
+// of the field at a time). This scenario runs every code on the core's list (nativeAllowedPsi) as
+// the stock command starts it (0T<n>), on a front and a rear PSI, with the board's alwaysOn setting
+// on (20 s of the mode) and off (the mode's own run, to its end), and measures the frames two ways:
+// by each LED's brightest channel, which is what the gate measures, and by Rec.709 luminance. The
+// measure is the gate's own rule with a tenth as its step: lit or not; a rise of a tenth above the
+// trough is an onset; a lit field that falls a tenth below its peak is not lit; an onset less than
+// 340 ms after the field last lit or got brighter is a fast swing. The kind each code measures as
+// must be the one in the table. A code added to the list with no row fails; so does a row whose
+// look no longer measures as its kind, and a mode that swings fast and lights a quarter of the
+// field or more cannot be on the list at all (2, 3 and 5 are checked to be such modes).
+// (It reads lastPSIeventCode, the stock firmware's own "which mode runs", to know when a mode ends.)
+enum NativeKind { SLOW_FIELD, SMALL_AREA, UNFIT };
+static const char* const kNativeKind[] = { "its field never swings fast", "a small lit area moves", "a fast full-field swing: cannot be listed" };
+static const struct { int code; NativeKind kind; const char* name; } S10_NATIVE[] = {
+  {0, SLOW_FIELD, "panel off"},        {1, SLOW_FIELD, "swipe"},            {4, SLOW_FIELD, "short circuit"},
+  {6, SMALL_AREA, "Leia"},             {7, SLOW_FIELD, "I heart U"},        {8, SLOW_FIELD, "radar"},
+  {9, SLOW_FIELD, "heart / pulse"},    {10, SLOW_FIELD, "Star Wars scan"},  {11, SLOW_FIELD, "Imperial March"},
+  {12, SLOW_FIELD, "disco ball, 4 s"}, {13, SLOW_FIELD, "disco ball"},      {14, SLOW_FIELD, "rebel symbol"},
+  {15, SMALL_AREA, "Knight Rider"},    {16, SLOW_FIELD, "all white"},       {17, SLOW_FIELD, "all red"},
+  {18, SLOW_FIELD, "all green"},       {19, SLOW_FIELD, "lightsaber"},      {20, SLOW_FIELD, "Star Wars intro"},
+  {21, SLOW_FIELD, "VU meter, 4 s"},   {22, SLOW_FIELD, "processing"},      {92, SLOW_FIELD, "VU meter"},
+};
+struct FieldSwing {                                    // levels in thousandths of the ceiling
+  int lo = 1 << 30, hi = 0, onsets = 0, ref = 1 << 30; bool lit = false, any = false; uint32_t stamp = 0, closest = 0xFFFFFFFFu;
+  void see(int v, uint32_t now) {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+    if (lit) { if (v > ref) { ref = v; stamp = now; } else if (ref - v >= 100) { lit = false; ref = v; } return; }
+    if (v < ref) ref = v;
+    if (v - ref >= 100) { if (any && now - stamp < closest) closest = now - stamp; onsets++; lit = true; any = true; ref = v; stamp = now; }
+  }
+  bool fast() const { return closest < 340; }
+  int closestMs() const { return closest == 0xFFFFFFFFu ? -1 : (int)closest; }
+};
+// One mode, in a fresh firmware (this runs in a forked child). Returns the kind it measures as.
+static NativeKind measureStockLook(int code, const char* name, bool always, bool front) {
+  const int ceil = 200;
+  char cmd[16]; snprintf(cmd, sizeof cmd, "0T%d", code);
+  boot(always ? 0x01 : 0x00, 0x01, ceil, front);
+  at(1000, cmd);
+  uint32_t end = always ? 21000 : 41000;               // without alwaysOn: until the mode ends by itself
+  for (uint32_t t = 1100; t <= end; t += 10) { runTo(t); if (!always && lastPSIeventCode != code) { end = t; break; } }
+  FieldSwing chan, lum; unsigned mostLit = 0;
+  for (const Frame& f : between(1001, end - 1)) {
+    long c = 0, y = 0;
+    for (int i = 0; i < NUM_LEDS; i++) {
+      const CRGB& p = f.px[i];
+      c += p.r > p.g ? (p.r > p.b ? p.r : p.b) : (p.g > p.b ? p.g : p.b);
+      y += 2126L * p.r + 7152L * p.g + 722L * p.b;
+    }
+    chan.see((int)(c * f.scale * 1000 / ((long)NUM_LEDS * 255 * ceil)), f.t);
+    lum.see((int)(y / 10000 * f.scale * 1000 / ((long)NUM_LEDS * 255 * ceil)), f.t);
+    if (f.lit > mostLit) mostLit = f.lit;
+  }
+  const bool fast = chan.fast() || lum.fast();
+  const NativeKind kind = !fast ? SLOW_FIELD : (mostLit * 4 < NUM_LEDS ? SMALL_AREA : UNFIT);
+  printf("  native:%-2d %-16s %s, %s, %5u ms: brightest channel %3d..%3d %%, %3d onsets, closest %4d ms; Rec.709 %3d..%3d %%, %3d onsets,"
+         " closest %4d ms; at most %2u of %d LEDs lit -> %s\n", code, name, front ? "front" : "rear ", always ? "alwaysOn" : "own run ", end - 1000,
+         chan.lo / 10, chan.hi / 10, chan.onsets, chan.closestMs(), lum.lo / 10, lum.hi / 10, lum.onsets, lum.closestMs(), mostLit, NUM_LEDS,
+         kNativeKind[kind]);
+  return kind;
+}
+static int measuredKind(int code, const char* name, bool always, bool front) {
+  fflush(stdout);
+  const pid_t pid = fork();
+  if (pid == 0) { const NativeKind k = measureStockLook(code, name, always, front); fflush(stdout); _exit((int)k); }
+  int status = 0;
+  if (pid < 0 || waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) return -1;
+  return WEXITSTATUS(status);
+}
+static void s10_native_looks_are_classified_by_their_stock_field_swing() {
+  int onList = 0;
+  for (int code = 0; code < 256; code++) {
+    if (!nativeAllowedPsi(code)) continue;
+    onList++;
+    const char* name = nullptr; NativeKind want = SLOW_FIELD;
+    for (const auto& row : S10_NATIVE) if (row.code == code) { name = row.name; want = row.kind; }
+    CHECK(name != nullptr, "native:%d is on the allow-list and has no row in S10_NATIVE", code);
+    if (!name) continue;
+    for (int k = 0; k < 4; k++) {
+      const int got = measuredKind(code, name, (k & 1) != 0, (k & 2) == 0);
+      CHECK(got == (int)want, "native:%d (%s) measures as \"%s\"; the table says \"%s\"", code, name,
+            got < 0 ? "the firmware did not finish" : kNativeKind[got], kNativeKind[want]);
+    }
+  }
+  CHECK(onList == (int)(sizeof S10_NATIVE / sizeof S10_NATIVE[0]), "%d codes on the list, %d rows in the table", onList,
+        (int)(sizeof S10_NATIVE / sizeof S10_NATIVE[0]));
+  // and the modes S7 names as off the list really are ones that could not be on it
+  static const struct { int code; const char* name; } off[] = { {2, "flash"}, {3, "alarm"}, {5, "scream"} };
+  for (const auto& o : off) {
+    CHECK(!nativeAllowedPsi(o.code), "native:%d is on the allow-list", o.code);
+    CHECK(measuredKind(o.code, o.name, true, true) == (int)UNFIT, "native:%d (%s) no longer measures as a fast full-field swing", o.code, o.name);
+  }
+}
+
 // ---- core revision CA1.2: what a line may and may not do ---------------------------------------
 // A scored line delivered twice (a mesh retry) changes nothing: the section that is playing does
 // not restart. A DIFFERENT line for the same beat replaces the entry, and the look follows.
@@ -1236,6 +1334,7 @@ static const Scenario kScenarios[] = {
   {"b_under_a_native_look_is_held", b_under_a_native_look_is_held},
   {"l_does_not_reach_the_owners_vu_mode", l_does_not_reach_the_owners_vu_mode},
   {"l_does_not_reach_a_shows_native_vu", l_does_not_reach_a_shows_native_vu},
+  {"s10_native_looks_are_classified_by_their_stock_field_swing", s10_native_looks_are_classified_by_their_stock_field_swing},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},
   {"a_bpm_that_is_not_a_number_is_ignored", a_bpm_that_is_not_a_number_is_ignored},
 #ifdef PSI_ENABLE_I2C

@@ -61,7 +61,7 @@ bash test/host/run.sh
 
 What it runs, in order: the shared core's unit tests and its fuzz model (and that the shared files
 are the commit in `src/contract/CORE_PIN`); the WDP announce; the animation VM's bytecode; 36
-golden captures of the native modes; 78 timelines against upstream v1.7 on the same mocks; 89
+golden captures of the native modes; 78 timelines against upstream v1.7 on the same mocks; 90
 contract scenarios on each build (`test_timeline.cpp`: the firmware's own `src/main.cpp`, scripted
 wire lines, assertions on the frames it latches); contract S9 as a property of the firmware under
 23 hostile scripts and 1,500 random streams (`test_property.cpp`); the scale and HSV oracles; the
@@ -94,7 +94,10 @@ here is about the host, the cross-compiler and the simulator.
   What the contract holds is their edges: the start of a `native:<n>` look and the hand-over back
   to the board's own look both wait until an onset is allowed, and a rise of the brightness it
   gives a native look is held like any relight. `L` feeds the contract's `meter` look only, never
-  a native VU mode.
+  a native VU mode. The scenario `s10_native_looks_are_classified_by_their_stock_field_swing`
+  measures every listed mode as stock (brightest channel and Rec.709 luminance): 6 and 15 move a
+  lit area under a quarter of the field, the rest never swing the field by a tenth faster than
+  every 340 ms, and 2, 3 and 5 measure as the fast full-field swings they are.
 - **WDP caps:** `droidnet.contract` and `contract.1.3` (`contract.1.3s` from the I2C build).
 
 ## Layout

@@ -130,7 +130,7 @@ own supply.
 **Testing.** `bash test/host/run.sh` is the whole suite. It runs the firmware's own `src/main.cpp`
 on host mocks of the hardware (no mock of the board API: that one lied twice and is retired) and
 compares it, frame for frame, with captures of every native mode (36 goldens) and with upstream
-v1.7 on the same mocks (78 scripted timelines); runs 89 scripted contract scenarios on each of the
+v1.7 on the same mocks (78 scripted timelines); runs 90 scripted contract scenarios on each of the
 two builds; feeds the firmware 23 hostile line scripts and 1,500 random streams and measures the
 frames (at most three dark-to-lit swings a second, nothing above the owner's brightness); then
 cross-compiles both builds with the real avr-gcc, gates their flash and worst-case stack, and runs
@@ -338,7 +338,8 @@ The contract's specification and its plan are in the DroidNet Signal Booster rep
   draws at the brightness the show gives it, so `b=` and `B` dim all of them. A mode starts only
   when the panel may light again, the look before it staying up until then (most modes clear the
   panel and draw at once). `L` feeds the contract's own `meter` look and nothing else: the board's
-  VU modes (21 and 92) keep their own bars, from a button or in a show.
+  VU modes (21 and 92) keep their own bars, from a button or in a show. A test measures every
+  listed mode as its stock command runs it and fails if one swings the whole field fast.
 
 ### The animation VM: modes are data now
 

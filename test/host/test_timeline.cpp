@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>      // fork: a scenario that needs several fresh firmwares runs each in a child
+#include <sys/wait.h>
 #include <string>
 #include <vector>
 
