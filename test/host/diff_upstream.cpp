@@ -15,10 +15,23 @@
 #include "../../src/main.cpp"          // the fork
 #endif
 static FILE* g_out; static unsigned long nframes = 0;
+// An I2C line that arrives INSIDE a show(): FastLED's show() re-enables interrupts while it
+// clocks the pixels out, so the TWI interrupt (receiveEvent, which parses and starts the mode at
+// once, as upstream's does) can land in the middle of the mode step that is drawing. Armed by an
+// event "<t> I2C:<cmd>"; taken by the first show() at or after t.
+static const char* g_isrCmd = nullptr; static bool g_inIsr = false;
 static void hook(const CRGB* l, int n, uint8_t scale) {
   fprintf(g_out, "%u %u ", (unsigned)g_mock_millis, scale);
   for (int i = 0; i < n; i++) fprintf(g_out, "%02x%02x%02x", l[i].r, l[i].g, l[i].b);
   fputc('\n', g_out); nframes++;
+#if defined(UPSTREAM) || defined(PSI_ENABLE_I2C)
+  if (g_isrCmd && !g_inIsr) {
+    char line[40]; snprintf(line, sizeof line, "%s\r", g_isrCmd);
+    g_isrCmd = nullptr; g_inIsr = true;
+    Wire.feed(line); receiveEvent((int)strlen(line));
+    g_inIsr = false;
+  }
+#endif
 }
 int main(int argc, char** argv) {
   // argv: out jumper ee0 ee1 ee2 pot seed dur [t cmd]...
@@ -31,7 +44,11 @@ int main(int argc, char** argv) {
   int ei = 9;
   for (uint32_t t = 1; t <= dur; t++) {
     g_mock_millis = t;
-    while (ei + 1 < argc && strtoul(argv[ei], 0, 10) == t) { Serial1.feed(argv[ei + 1]); Serial1.feed("\r"); ei += 2; }
+    while (ei + 1 < argc && strtoul(argv[ei], 0, 10) == t) {
+      if (!strncmp(argv[ei + 1], "I2C:", 4)) g_isrCmd = argv[ei + 1] + 4;
+      else { Serial1.feed(argv[ei + 1]); Serial1.feed("\r"); }
+      ei += 2;
+    }
     loop(); serialEventRun();
   }
   fclose(g_out); fprintf(stderr, "%lu frames\n", nframes); return 0;

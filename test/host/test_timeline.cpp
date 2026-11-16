@@ -40,10 +40,24 @@ static std::vector<Ev> g_evs;
 static uint32_t g_now = 0;
 static int g_fails = 0;
 
+#ifdef PSI_ENABLE_I2C
+void receiveEvent(int);
+// An I2C line that arrives INSIDE a show() (atI2cInShow): FastLED's show() re-enables interrupts
+// while it clocks the pixels out, so the TWI interrupt can run the receive callback in the middle
+// of the mode step that is drawing. Taken by the first show() at or after g_isrFrom.
+static std::string g_isrLine; static uint32_t g_isrFrom = 0, g_isrTookAt = 0; static bool g_inIsr = false;
+#endif
 static void hook(const CRGB* l, int n, uint8_t scale) {
   Frame f; f.t = g_mock_millis; f.scale = scale; f.lit = 0;
   for (int i = 0; i < n && i < NUM_LEDS; i++) { f.px[i] = l[i]; if (l[i].r | l[i].g | l[i].b) f.lit++; }
   g_frames.push_back(f);
+#ifdef PSI_ENABLE_I2C
+  if (g_isrFrom && !g_inIsr && g_mock_millis >= g_isrFrom) {
+    g_isrFrom = 0; g_isrTookAt = g_mock_millis; g_inIsr = true;
+    Wire.feed(g_isrLine.c_str()); receiveEvent((int)g_isrLine.size());
+    g_inIsr = false;
+  }
+#endif
 }
 // Cold boot. ee: alwaysOn, pot-vs-internal, internal brightness (see golden_native.cpp for the gates).
 static void boot(uint8_t ee0 = 0x00, uint8_t ee1 = 0x01, uint8_t ee2 = 20, bool front = true, int pot = 512) {
@@ -57,6 +71,8 @@ static void at(uint32_t t, const char* line) { g_evs.push_back({t, line, false})
 // A line from an I2C master at time t. The receive callback runs between two loop passes, as the
 // TWI interrupt would run it.
 static void atI2c(uint32_t t, const char* line) { g_evs.push_back({t, std::string(line) + "\r", true}); }
+// The same line from inside the first show() at or after t.
+static void atI2cInShow(uint32_t t, const char* line) { g_isrLine = std::string(line) + "\r"; g_isrFrom = t; }
 #endif
 static void runTo(uint32_t t) {
   while (g_now < t) {

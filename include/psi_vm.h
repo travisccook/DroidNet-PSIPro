@@ -1032,9 +1032,32 @@ static void vmMaybeCountLoop(const uint8_t* pc) {
   }
 }
 
+// A MODE COMMAND FROM INSIDE A SHOW (the I2C build only). The TWI interrupt parses its line and
+// runs the mode at once, as upstream's does, and FastLED's show() re-enables interrupts while it
+// clocks the pixels out: so a mode can be started, and draw its first step, in the middle of the
+// step that is showing. Upstream's mode function then finishes the step it was in: it draws what
+// was left of it, shows, and sets its delay. vmStep() did that too, and then stored ITS place in
+// ITS program over the new program's: the panel drew one step of the new mode and resumed the old
+// one under the new mode's number. runPattern() counts its calls. A step that finds a mode was
+// run under one of its shows is `stale`: it finishes as upstream's function does (draw, show,
+// delay) and stores nothing, so the VM's place, repeat count, loop target and loop count stay the
+// new mode's. (Upstream's interrupted function also steps the counters its modes share, so after
+// some modes its new mode runs a step ahead; the VM has no shared counter and starts the new mode
+// at its first step. test/host/diff_upstream.sh lists which.)
+#ifdef PSI_ENABLE_I2C
+static volatile uint8_t g_vmRuns;
+#define VM_RAN_UNDER() (runs != g_vmRuns)
+#else
+#define VM_RAN_UNDER() false
+#endif
+
 // Execute ops from the current frame start through its SHOW terminator (or END).
 static void vmStep() {
   const uint8_t* pc = g_vmPC;
+#ifdef PSI_ENABLE_I2C
+  const uint8_t runs = g_vmRuns;
+#endif
+  bool stale = false;   // a mode was run from inside one of this step's shows (above)
   for (;;) {
     uint8_t rep = 1;
     uint8_t op = pgm_read_byte(pc++);
@@ -1046,6 +1069,7 @@ static void vmStep() {
         fill_solid(leds, NUM_LEDS, vmColor(pgm_read_byte(pc++)));
         break;
       case OP_LOOPSTART:
+        if (stale) break;
         g_vmLoopPtr = pc;
         g_vmPC = pc;
         break;
@@ -1061,6 +1085,7 @@ static void vmStep() {
         // frame 0: scale 10 committed vs 20 from an earlier show(brightness())
         // draft here) — do not "fix" this to show(brightness()).
         FastLED.show();
+        if (VM_RAN_UNDER()) stale = true;
         break;
       case OP_SHOWLIVE:
         // show(brightness()), NOT a bare show() — mirrors displayMatrixColor's
@@ -1069,6 +1094,7 @@ static void vmStep() {
         // OP_SHOWLIVE's enum comment, above, for the golden proof this needs
         // LIVE brightness, not OP_SHOWNOW's frozen boot scale.
         FastLED.show(brightness());
+        if (VM_RAN_UNDER()) stale = true;
         break;
       case OP_FILL_ROW: {
         uint8_t r = pgm_read_byte(pc++);
@@ -1098,7 +1124,10 @@ static void vmStep() {
       case OP_SHOW: {
         uint16_t d = pgm_read_byte(pc++);
         d |= (uint16_t)pgm_read_byte(pc++) << 8;
-        vmShowDelay(d);
+        FastLED.show(brightness());
+        if (VM_RAN_UNDER()) stale = true;
+        if (!(g_vmFlags & VMF_IMMEDIATE)) set_delay(d);   // (the rebel symbol: see vmPlay())
+        if (stale) return;
         if (g_vmRepLeft == 0) g_vmRepLeft = rep;
         if (--g_vmRepLeft == 0) {
           g_vmPC = pc;
@@ -1112,7 +1141,9 @@ static void vmStep() {
         uint16_t hi = pgm_read_byte(pc++);
         hi |= (uint16_t)pgm_read_byte(pc++) << 8;
         FastLED.show(brightness());
+        if (VM_RAN_UNDER()) stale = true;
         set_delay(random(lo, hi));
+        if (stale) return;
         g_vmPC = pc;
         vmMaybeCountLoop(pc);  // see vmMaybeCountLoop's comment
         return;
@@ -1133,6 +1164,7 @@ static void vmStep() {
         // comment for why that specific lateness is the one case that
         // renders a whole extra, unwanted pass).
         FastLED.clear();
+        if (stale) return;
         g_vmPC = pc;
         vmMaybeCountLoop(pc);  // see vmMaybeCountLoop's comment
         return;
@@ -1186,6 +1218,7 @@ static void vmStep() {
       // OP_MUL_RAND landed Task 12 above — vmc_fadeout.)
       case OP_END:
       default:
+        if (stale) return;
         if (g_vmFlags & VMF_ONESHOT) {
           g_vmDone = true;                     // hold display; lifecycle below restores
           return;
@@ -1253,10 +1286,6 @@ inline void vmPlay(uint8_t progId) {
     g_vmDone     = false;
     globalPatternLoops = g_vmDescLoops;
     if (g_vmFlags & VMF_IGNORE_TIMING) timingReceived = false;
-    // Upstream's displayMatrixColor() draws the symbol at once on entry. vmPlay() gates its first
-    // step on the delay the PREVIOUS mode left running, so the rebel symbol appeared up to that
-    // delay late (100 ms after the heart, never after a mode with none).
-    if (g_vmFlags & VMF_IMMEDIATE) set_delay(0);
     if ((g_vmRuntime != 0) && (!timingReceived)) set_global_timeout(g_vmRuntime);
     if (timingReceived) set_global_timeout(commandTiming);
     if (g_vmFlags & VMF_CLEAR) {
@@ -1265,7 +1294,11 @@ inline void vmPlay(uint8_t progId) {
     }
   }
 
-  if (!g_vmDone && checkDelay()) vmStep();
+  // VMF_IMMEDIATE (the rebel symbol): upstream's displayMatrixColor() draws on every poll and
+  // never reads or sets the step delay, so the delay the mode BEFORE the symbol left running is
+  // still running for the mode after it. The symbol is stepped whatever that delay says, and its
+  // show sets none (OP_SHOW in vmStep()).
+  if (!g_vmDone && ((g_vmFlags & VMF_IMMEDIATE) || checkDelay())) vmStep();
 
   if (g_vmDone) {
     // oneshot end (lightsaberBattle semantics, arriving Task 13)
@@ -1274,7 +1307,11 @@ inline void vmPlay(uint8_t progId) {
       patternRunning = false;
       g_vmDone = false;              // the mode is no longer current (vmReplayIfEnded is about the current one)
     }
-  } else if ((g_vmRuntime == 0) && (!timingReceived)) {
+  } else if ((g_vmRuntime == 0) && (!timingReceived || (g_vmFlags & VMF_IGNORE_TIMING))) {
+    // (VMF_IGNORE_TIMING: upstream's FadeOut and lightsaberBattle have no timer of their own, so
+    // a timing that arrives while they run, from a command that starts nothing, does not end them
+    // here. The battle still ends at its next step, in displayMatrixColor()'s own tail, as
+    // upstream's does.)
     if (g_vmDescLoops) loopsDonedoRestoreDefault();
   } else {
     globalTimerDonedoRestoreDefault();

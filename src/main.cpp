@@ -927,6 +927,9 @@ void runPattern(int pattern) {
 
   // Used to restore state if an invalid pattern code is received.
   int currentPattern = lastPSIeventCode;
+#ifdef PSI_ENABLE_I2C
+  g_vmRuns++;   // DroidNet: a bytecode step that was showing when the TWI interrupt came here stops (psi_vm.h)
+#endif
   
   if (lastPSIeventCode != pattern)
   {
