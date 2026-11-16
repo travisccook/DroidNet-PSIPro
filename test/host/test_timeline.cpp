@@ -3,6 +3,8 @@
 //
 // One scenario per process (the firmware keeps static state): `test_timeline --list` prints the
 // names, `test_timeline <name>` runs one and exits 0 (pass) or 1 (fail). run.sh loops over the list.
+// The build without the contract layer (-DPSI_NO_CONTRACT) runs its own, short scenario file,
+// timeline_nocontract.inc.
 // Assertions read only what is observable on the wire and at the LEDs: the frames FastLED.show()
 // latched (time, master scale, pixels) and the bytes written to Serial1. They do not read contract
 // globals, so they hold across refactors of the layer under test.
@@ -109,6 +111,7 @@ static uint16_t crc16(const char* s) {
 // the owner's brightness is 20, so native frames latch at scale 20.
 // ---------------------------------------------------------------------------------------------
 
+#ifndef PSI_NO_CONTRACT
 // Holds today: a pushed score mixes native modes and contract effects (review S8).
 static void score_mixes_native_and_contract() {
   boot();
@@ -122,6 +125,7 @@ static void score_mixes_native_and_contract() {
   for (const Frame& f : between(5100, 6000)) if (f.lit > most) most = f.lit;
   CHECK(most > 0 && most <= 6, "beats 8+ should be Knight Rider (one column, <= 6 lit), saw up to %u lit", most);
 }
+#endif
 
 struct Scenario { const char* name; void (*fn)(); };
 // -DTIMELINE_SCENARIOS='"<file>"' runs another scenario file through the same harness.
@@ -129,10 +133,11 @@ struct Scenario { const char* name; void (*fn)(); };
 #define TIMELINE_SCENARIOS "timeline_scenarios.inc"
 #endif
 #include TIMELINE_SCENARIOS
-static const Scenario kBase[] = { {"score_mixes_native_and_contract", score_mixes_native_and_contract} };
-
 int main(int argc, char** argv) {
-  std::vector<Scenario> all(kBase, kBase + sizeof kBase / sizeof kBase[0]);
+  std::vector<Scenario> all;
+#ifndef PSI_NO_CONTRACT
+  all.push_back({"score_mixes_native_and_contract", score_mixes_native_and_contract});
+#endif
   for (const Scenario& s : kScenarios) all.push_back(s);
   if (argc == 2 && !strcmp(argv[1], "--list")) { for (const Scenario& s : all) puts(s.name); return 0; }
   if (argc != 2) { fprintf(stderr, "usage: %s --list | <scenario>\n", argv[0]); return 2; }

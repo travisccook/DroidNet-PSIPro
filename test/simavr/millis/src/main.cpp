@@ -24,6 +24,24 @@ static uint32_t trueTicks() {          // 4 us a tick
   return ((uint32_t)o << 16) | t;
 }
 // name|line|line|line, one look per row. Every row starts from M:v=idle.
+#ifdef PSI_NO_CONTRACT
+// The build without the contract layer: native modes, each started by its command (the fork's
+// default alwaysOn keeps a mode running for the 16 s it is measured).
+static void feedLine(char* l) { parseCommand(l); }
+static const char kLooks[] PROGMEM =
+  "warmup|\n"
+  "idle-swipe|\n"
+  "0T6-leia|0T6\n"
+  "0T15-knight|0T15\n"
+  "0T7-heart|0T7\n"
+  "0T10-scan|0T10\n"
+  "0T13-disco|0T13\n"
+  "0T92-vu|0T92\n"
+  "0T22-process|0T22\n"
+  "0T19-saber|0T19\n"
+  "0T16-white|0T16\n";
+#else
+static void feedLine(char* l) { parseContract(l); }
 static const char kLooks[] PROGMEM =
   "warmup|\n"
   "idle-swipe|\n"
@@ -39,19 +57,22 @@ static const char kLooks[] PROGMEM =
   "scan|!P*A:i=scan,c=202020\n"
   "native1|!P*A:i=native:1\n"
   "native15|!P*A:i=native:15\n";
+#endif
 static const char* gRow = kLooks;      // the row being measured (flash address)
 static uint32_t m0, t0;
 static uint32_t gPassMax = 0;          // the longest single pass of the firmware's loop() in this look, in Timer1 ticks
 static bool started = false;
 static void startRow() {
   char buf[96]; uint8_t n = 0; bool name = true;
-  strcpy_P(buf, PSTR("!**M:v=idle")); parseContract(buf);
+#ifndef PSI_NO_CONTRACT
+  strcpy_P(buf, PSTR("!**M:v=idle")); feedLine(buf);
   delay(200);                          // past the 170 ms live-look hold
+#endif
   for (const char* p = gRow;; p++) {
     char c = (char)pgm_read_byte(p);
     if (c == '|' || c == '\n') {
       buf[n] = 0;
-      if (!name && n) parseContract(buf);
+      if (!name && n) feedLine(buf);
       name = false; n = 0;
       if (c == '\n') break;
     } else if (n < sizeof buf - 1) buf[n++] = c;

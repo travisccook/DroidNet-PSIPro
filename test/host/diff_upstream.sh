@@ -11,15 +11,21 @@ cd "$(dirname "$0")"
 T="$1"; CXX="$2"; bad=0; n=0
 F="-std=gnu++17 -O1 -fsigned-char -w -I . -I native_mocks -I ../../include"
 "$CXX" $F -DUPSTREAM -I upstream-v1.7 diff_upstream.cpp -o "$T/diff_up" || exit 1
-"$CXX" $F '-DWDP_FW="x"' diff_upstream.cpp -o "$T/diff_fork" || exit 1
+# The fork twice, as its two environments are built: the default (serial-only, with the contract
+# layer), and PSIPro-i2c (the I2C intake, no contract layer). Every row holds for both.
+"$CXX" $F '-DWDP_FW="x"' -DPSI_NO_STRIP_LOOKS diff_upstream.cpp -o "$T/diff_fork" || exit 1
+"$CXX" $F '-DWDP_FW="x"' -DPSI_NO_STRIP_LOOKS -DPSI_ENABLE_I2C -DPSI_NO_CONTRACT diff_upstream.cpp -o "$T/diff_fork_i2c" || exit 1
 row() {
   want=$1; name=$2; shift 2; n=$((n + 1))
   [ "${STRICT:-0}" = 1 ] && want=same
   "$T/diff_up" "$T/up.txt" "$@" 2>/dev/null
   "$T/diff_fork" "$T/fork.txt" "$@" 2>/dev/null
-  for f in up fork; do awk '{k=$2" "$3; if (k!=p) print; p=k}' "$T/$f.txt" > "$T/n_$f.txt"; done
-  if cmp -s "$T/n_up.txt" "$T/n_fork.txt"; then got=same; else got=diff; fi
-  [ "$got" = "$want" ] || { echo "FAIL: '$name' is $got, expected $want"; bad=1; }
+  "$T/diff_fork_i2c" "$T/fork_i2c.txt" "$@" 2>/dev/null
+  for f in up fork fork_i2c; do awk '{k=$2" "$3; if (k!=p) print; p=k}' "$T/$f.txt" > "$T/n_$f.txt"; done
+  for f in fork fork_i2c; do
+    if cmp -s "$T/n_up.txt" "$T/n_$f.txt"; then got=same; else got=diff; fi
+    [ "$got" = "$want" ] || { echo "FAIL: '$name' is $got on $f, expected $want"; bad=1; }
+  done
 }
 D="front 00 01 14 512 1"        # front jumper, alwaysOn=0, internal brightness 20, pot 512, seed 1
 A="front 01 01 14 512 1"        # as D with alwaysOn=1
@@ -68,5 +74,5 @@ row same "timing_leia_3s" $D 9000 2000 "0T6|3"
 row same "timing_knight_rear" rear 00 01 14 512 1 9000 2000 "0T15|3"
 row same "timing_vu_3s" $D 9000 2000 "0T21|3"
 
-[ $bad = 0 ] && echo "upstream differential: $n timelines, all as expected"
+[ $bad = 0 ] && echo "upstream differential: $n timelines on each build, all as expected"
 exit $bad

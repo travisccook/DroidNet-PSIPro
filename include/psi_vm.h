@@ -1282,6 +1282,7 @@ inline void vmPlay(uint8_t progId) {
 // (vmContractScan() is gone: contract v1.3 gives scan one timing definition for all three boards,
 // fxScanPos() in contract_core.h, and ContractPSI.h draws it from that. DiscoBall's shim stays.)
 
+#ifndef PSI_NO_CONTRACT              // a build without the contract layer has no caller for it
 static void vmContractSparkle(unsigned long d, const CRGB& col) {
   if (firstTime) {
     firstTime = false;
@@ -1315,6 +1316,7 @@ static void vmContractSparkle(unsigned long d, const CRGB& col) {
   // timingReceived is (still) true.
   if (timingReceived) globalTimerDonedoRestoreDefault();
 }
+#endif  // PSI_NO_CONTRACT
 
 #endif  // PSI_VM_TABLES_ONLY
 

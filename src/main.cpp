@@ -286,7 +286,10 @@
 // DroidNet: every frame passes the contract's S9 field gate on its way out (ContractPSI.h,
 // contractFrameScale). With no contract activity the gate only watches: the scale is unchanged.
 // Named BEFORE preamble.h, whose functions.h is the first to include <FastLED.h>.
+// (PSI_NO_CONTRACT: a build without the contract layer has no gate, and show() is upstream's.)
+#ifndef PSI_NO_CONTRACT
 #define PSI_FRAME_GATE contractFrameScale
+#endif
 #include "preamble.h"
 #include <FastLED.h>
 #include <EEPROM.h>
@@ -371,7 +374,24 @@ CRGB overlayColors[COLUMNS];
 // inline dispatchers see leds[]/level[]/tempGlobalBrightnessValue/firstTime/
 // serialPort + the primitive prototypes, and BEFORE loop()/serialEvent() so those
 // can call parseContract()/contractLoopTick()/contractPulseTick(). Additive only.
+//
+// PSI_NO_CONTRACT (set by the PSIPro-i2c environment, platformio.ini) builds the firmware WITHOUT
+// the contract layer: the '!' path is compiled out, a '!' line goes to parseCommand() as it does
+// upstream, and the hooks below are empty. What is left of the fork in that build: the exact
+// millis() credit and the latch gap (include/FastLED.h), the bounded command buffer
+// (buildCommand), the animation VM, and the WDP announce with no contract tag. The contract with
+// the I2C intake does not fit this part in R1 (contract v1.3 with core CA1.4: 29,110 B of 28,672).
+#ifndef PSI_NO_CONTRACT
 #include "contract/ContractPSI.h"
+#else
+static inline bool contractLoopTick()        { return false; }   // the native pattern path, always
+static inline void contractServicePending()  { }
+static inline void contractPulseTick()       { }
+static inline void contractReplyTick()       { }
+static inline void contractYieldToNative()   { }
+static inline void contractOwnerSet3P()      { }
+static inline bool contractHoldsLevels()     { return false; }
+#endif
 
 
 // Setup
@@ -1028,8 +1048,11 @@ void receiveEvent(int eventCode) {
       // re-enables interrupts mid-render (an unconditional sei) while the I2C slave is already
       // re-armed, so this ISR can re-enter itself and walk the stack down into .bss. Copy the
       // line out and let loop() do the work. See the I2C DEFERRAL note in ContractPSI.h.
+#ifndef PSI_NO_CONTRACT
       if (cmdString[0]=='!') contractQueueFromISR(cmdString);  // additive contract branch
-      else                   parseCommand(cmdString);   // unchanged JawaLite path
+      else
+#endif
+                             parseCommand(cmdString);   // unchanged JawaLite path
     }
   }
 }
@@ -1059,8 +1082,11 @@ void serialEvent() {
     command_available=buildCommand(ch, cmdString);  // build command line
     if (command_available)
     {
+#ifndef PSI_NO_CONTRACT
       if (cmdString[0]=='!') parseContract(cmdString);  // additive contract branch
-      else                   parseCommand(cmdString);   // unchanged JawaLite path
+      else
+#endif
+                             parseCommand(cmdString);   // unchanged JawaLite path
     }
   }
   sei();

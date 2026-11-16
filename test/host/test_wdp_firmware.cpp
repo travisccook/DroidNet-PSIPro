@@ -6,6 +6,8 @@
 //   * a Q that arrives mid-line is answered after the whole line, never inside it, in a pass
 //     that has room for the whole reply, and the tail of the line is not sent twice;
 //   * the type follows the front/rear jumper at each announce;
+//   * built without the contract layer (PSI_NO_CONTRACT, the PSIPro-i2c environment): the line
+//     carries no caps, and a Q is not answered (a '!' line is nothing to that build);
 //   * the seed differs between the front and rear PSI, and between chips.
 // Part of the DroidNet PSI Pro fork. Copyright (c) 2026 Travis Cook. SPDX-License-Identifier: MIT
 #include "native_mocks/Arduino.h"
@@ -24,7 +26,11 @@ static int g_fail = 0, g_total = 0;
   printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);} } while(0)
 
 static std::string line(const char* type) {
+#ifdef PSI_NO_CONTRACT
+  return std::string("@WDP1 {\"type\":\"") + type + "\",\"fw\":\"" WDP_FW "\"}\n";
+#else
   return std::string("@WDP1 {\"type\":\"") + type + "\",\"fw\":\"" WDP_FW "\",\"caps\":[\"droidnet.contract\",\"" WDP_FORK_CONTRACT "\"]}\n";
+#endif
 }
 
 // One millisecond of the board: room in the TX buffer, loop(), the core's serialEventRun(), then
@@ -78,6 +84,19 @@ int main() {
     if (tick(t)) firstAt = t;
   CHECK(firstAt >= 500 && firstAt <= 3000);
   const std::string front = line("PSI Front");
+#ifdef PSI_NO_CONTRACT
+  // No contract layer: the line is 48 bytes and leaves in one piece. A Q gets no reply, ever.
+  CHECK(Serial1.txLen == (int)front.size());
+  CHECK(std::string(Serial1.txLog) == front);
+  Serial1.feed("!PFQ:r=0\r");
+  for (uint32_t end = t + 300; t < end; t++) tick(t);
+  std::string got(Serial1.txLog);
+  CHECK(got == front);
+  uint32_t replyAt = firstAt; const std::string reply;
+  const size_t afterAck = got.size();
+  for (; t < firstAt + 25000; t++) tick(t);
+  CHECK(Serial1.txLen == (int)afterAck);
+#else
   CHECK(Serial1.txLen == 63);
   CHECK(std::string(Serial1.txLog) == front.substr(0, 63));
 
@@ -97,6 +116,7 @@ int main() {
   const size_t afterAck = got.size();
   for (; t < firstAt + 25000; t++) tick(t);
   CHECK(Serial1.txLen == (int)afterAck);             // the tail was not sent a second time, nor the reply
+#endif
 
   // The next line 25-30 s after the first; the jumper is fitted before it: "PSI Rear".
   g_mock_pins[JUMP_FRONT_REAR] = 0;

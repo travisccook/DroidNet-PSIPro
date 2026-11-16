@@ -7,7 +7,11 @@
 //
 // The second tag says which contract the board speaks. "contract.1.3s" is v1.3 with six of its
 // looks drawn as stand-ins (PSI_NO_STRIP_LOOKS), which is how R1 is built; a build with all of
-// them says "contract.1.3". A host can tell the two apart without a query.
+// them says "contract.1.3". A host can tell the two apart without a query. A build without the
+// contract layer (PSI_NO_CONTRACT: the PSIPro-i2c environment) sends no caps at all, so nothing
+// takes it for a board that can run a show:
+//
+//     @WDP1 {"type":"PSI Front","fw":"<commit>"}
 //
 // "PSI Rear" on a board with the front/rear jumper fitted. Front and rear PSIs can share one WCB
 // port, and the WCB keeps one record per (port, type), so the role is part of the type.
@@ -34,6 +38,10 @@
 #endif
 #define WDP_FORK_TYPE_FRONT "PSI Front"   // jumper open (pin HIGH)
 #define WDP_FORK_TYPE_REAR  "PSI Rear"    // jumper fitted (pin LOW)
+#ifdef PSI_NO_CONTRACT
+#define WDP_FORK_CAPS       ""
+#define WDP_FORK_LINE_TAIL  "\"}\n"                  // the line ends after fw: no caps
+#else
 #ifdef PSI_NO_STRIP_LOOKS
 #define WDP_FORK_CONTRACT   "contract.1.3s"
 #else
@@ -41,7 +49,8 @@
 #endif
 #define WDP_FORK_CAPS       "droidnet.contract " WDP_FORK_CONTRACT
 // The same tags as the line spells them (the space becomes `","`), for sizing the buffer below.
-#define WDP_FORK_CAPS_WIRE  "droidnet.contract\",\"" WDP_FORK_CONTRACT
+#define WDP_FORK_LINE_TAIL  "\",\"caps\":[\"droidnet.contract\",\"" WDP_FORK_CONTRACT "\"]}\n"
+#endif
 
 // The line buffer: exactly the longer of this build's two lines ("PSI Front") and its NUL, 87 B
 // for a clean serial-only build and 93 B for a "-dirty" one (one more with I2C), instead of the
@@ -50,7 +59,7 @@
 // 1d compare the two byte for byte); "" WDP_FW compiles only when WDP_FW is a string literal, so
 // a define that lost its quotes fails the build here instead of announcing garbage.
 #define WDP_LINE_MAX \
-  sizeof("@WDP1 {\"type\":\"" WDP_FORK_TYPE_FRONT "\",\"fw\":\"" WDP_FW "\",\"caps\":[\"" WDP_FORK_CAPS_WIRE "\"]}\n")
+  sizeof("@WDP1 {\"type\":\"" WDP_FORK_TYPE_FRONT "\",\"fw\":\"" WDP_FW WDP_FORK_LINE_TAIL)
 #include "wdp_announce_core.h"
 
 static_assert(sizeof(WDP_FORK_TYPE_REAR) <= sizeof(WDP_FORK_TYPE_FRONT), "WDP_LINE_MAX is sized by the front line");
@@ -61,17 +70,19 @@ static_assert(sizeof(WDP_FORK_CAPS) - 1 <= WDP_CAPS_MAX, "WDP_FORK_CAPS is longe
 #ifndef WDP_FORK_IDENTITY_ONLY   // host tests of the identity alone define this (no Arduino)
 #include <avr/boot.h>
 
-// Defined in contract/ContractPSI.h, included after this file.
-inline bool contractAddressed(char cls, char unit);
-
 static WdpAnnouncer gWdp;
 
 // Front or rear, decided by the contract's own test: this board is "PSI Front" exactly when "!PF"
 // addresses it (JUMP_FRONT_REAR HIGH), so the announce and the contract cannot disagree. Read on
-// every tick; the core uses it only when a line starts.
-inline const char* wdpForkType() {
-  return contractAddressed('P', 'F') ? WDP_FORK_TYPE_FRONT : WDP_FORK_TYPE_REAR;
-}
+// every tick; the core uses it only when a line starts. Without the contract layer it is the
+// jumper itself, the same pin.
+#ifdef PSI_NO_CONTRACT
+inline bool wdpForkFront() { return psiJumperOpen(); }
+#else
+inline bool contractAddressed(char cls, char unit);   // contract/ContractPSI.h, included after this file
+inline bool wdpForkFront() { return contractAddressed('P', 'F'); }
+#endif
+inline const char* wdpForkType() { return wdpForkFront() ? WDP_FORK_TYPE_FRONT : WDP_FORK_TYPE_REAR; }
 
 // The jitter seed. It must differ board to board, or PSIs that power up together announce in
 // lockstep, and between the front and rear PSI, which may share a WCB port.
@@ -98,7 +109,7 @@ inline uint32_t wdpForkSeed(bool front) {
 
 // Once, in setup() after serialPort is begun (and after the jumper pin's pull-up is on).
 inline void wdpForkSetup() {
-  wdpInit(gWdp, wdpForkSeed(contractAddressed('P', 'F')), (uint32_t)millis());
+  wdpInit(gWdp, wdpForkSeed(wdpForkFront()), (uint32_t)millis());
 }
 
 // Every loop() pass, outside the 25 ms render gate. Writes only what fits in the TX buffer now.

@@ -19,15 +19,19 @@ static int g_fail = 0, g_total = 0;
 // The lines, byte for byte. The second caps tag is the contract the build speaks: "contract.1.3s"
 // for a build without the strip and hue looks (R1, as platformio.ini builds it), "contract.1.3"
 // for one with all of them.
+// A build without the contract layer (PSI_NO_CONTRACT: the PSIPro-i2c environment) sends no caps.
+#ifdef PSI_NO_CONTRACT
+#define CAPS_TAIL "\"}\n"
+#else
 #ifdef PSI_NO_STRIP_LOOKS
 #define CONTRACT_TAG "contract.1.3s"
 #else
 #define CONTRACT_TAG "contract.1.3"
 #endif
-static const char kFront[] =
-    "@WDP1 {\"type\":\"PSI Front\",\"fw\":\"abcdef0-dirty\",\"caps\":[\"droidnet.contract\",\"" CONTRACT_TAG "\"]}\n";
-static const char kRear[] =
-    "@WDP1 {\"type\":\"PSI Rear\",\"fw\":\"abcdef0-dirty\",\"caps\":[\"droidnet.contract\",\"" CONTRACT_TAG "\"]}\n";
+#define CAPS_TAIL "\",\"caps\":[\"droidnet.contract\",\"" CONTRACT_TAG "\"]}\n"
+#endif
+static const char kFront[] = "@WDP1 {\"type\":\"PSI Front\",\"fw\":\"abcdef0-dirty" CAPS_TAIL;
+static const char kRear[]  = "@WDP1 {\"type\":\"PSI Rear\",\"fw\":\"abcdef0-dirty" CAPS_TAIL;
 
 static void check_line(const char* type, const char* want, size_t wantLen) {
   char out[WDP_LINE_MAX];
@@ -46,10 +50,16 @@ static void test_the_real_identity_builds_both_lines() {
 }
 
 static void test_the_line_buffer_is_exactly_the_front_line() {
-  // 92 bytes and the NUL (93 and the NUL with the "s" tag): the front line fills it, so a byte
-  // less would refuse it (and with it every announce); the rear line is one shorter.
+  // 92 bytes and the NUL (93 and the NUL with the "s" tag, 48 and the NUL with no caps): the
+  // front line fills it, so a byte less would refuse it (and with it every announce); the rear
+  // line is one shorter.
   CHECK(WDP_LINE_MAX == sizeof(kFront));
+#ifdef PSI_NO_CONTRACT
+  CHECK(WDP_LINE_MAX == 49);
+  CHECK(strstr(kFront, "caps") == nullptr && strstr(kFront, "contract") == nullptr);
+#else
   CHECK(WDP_LINE_MAX == 93 + (int)sizeof(CONTRACT_TAG) - (int)sizeof("contract.1.3"));
+#endif
   CHECK(sizeof(kFront) - 1 <= 128);                  // the core's own line limit, which the WCB is sized for
   char small[WDP_LINE_MAX - 1];
   CHECK(wdpBuildLine(small, sizeof(small), WDP_FORK_TYPE_FRONT, WDP_FW, WDP_FORK_CAPS) == 0);

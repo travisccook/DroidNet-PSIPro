@@ -112,6 +112,15 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 
 //#define PSI_ENABLE_I2C
 
+// DroidNet, contract v1.3 (R1): the contract layer and the I2C intake do not fit this part
+// together (29,110 B of 28,672). The I2C build is therefore built WITHOUT the contract layer:
+// `pio run -e PSIPro-i2c` sets PSI_ENABLE_I2C and PSI_NO_CONTRACT (platformio.ini). That build is
+// upstream's firmware with this fork's fixes; it has no '!' path and runs no show. If you
+// uncomment the line above instead, define PSI_NO_CONTRACT with it.
+#if defined(__AVR__) && defined(PSI_ENABLE_I2C) && !defined(PSI_NO_CONTRACT)
+#error "PSI_ENABLE_I2C needs PSI_NO_CONTRACT in this release: the contract layer and the I2C intake do not fit the part together. Build with: pio run -e PSIPro-i2c"
+#endif
+
 
 ///////////////////////////////////////////////////
 ////////////// SWIPE MODE SETTINGS ///////////////

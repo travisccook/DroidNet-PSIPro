@@ -11,13 +11,16 @@
 #   1h. the shared core files are the commit in src/contract/CORE_PIN (when that checkout is here)
 #   1i. no floating point in the core or in the contract layer (and, stage 9b, none in the linked image)
 #   1b. wdp_announce_core.h WDP device announce unit tests (shared with the RSeries and Flthy forks)
-#   1c. wdp_fork.h: this fork's real WDP identity builds its line, front and rear
-#   1d. the WDP announce in the firmware: main.cpp + mocks (TX room, the Q reply, the jumper, the seed)
+#   1c. wdp_fork.h: this fork's real WDP identity builds its line, front and rear, for each build
+#   1d. the WDP announce in the firmware: main.cpp + mocks (TX room, the Q reply, the jumper, the seed),
+#       with the contract layer and without it
 #   2. psi_vm.h decode-walk test (every VM program: known ops, in-bounds arities, reaches OP_END)
 #   3. (retired: the firmware-layer guards are timeline scenarios now, stage 6c, on the real main.cpp)
 #   4. command-buffer width guard (the longest v1.3 scored line is 102 chars)
 #   5. parser fuzz + differential (ASan/UBSan)
-#   6. golden-frame parity against the committed captures (test/host/golden/)
+#   6. golden-frame parity against the committed captures (test/host/golden/), on both builds
+#   6b. the upstream differential: upstream v1.7 and both builds of the fork, the same timelines
+#   6c. timeline scenarios: scripted wire lines, assertions on the frames (every build)
 #   6d. the six stand-in looks draw scan, sparkle and solid, frame for frame
 #   6e. contract S9 as a property of the firmware: hostile and random line streams, frames measured
 #   7. scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock
@@ -95,6 +98,9 @@ echo "[1c/9] wdp_fork PSI Front / PSI Rear identity"
 "$T/psi_wdp_fork_test"
 "$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_fork.cpp -o "$T/psi_wdp_fork_test_all"
 "$T/psi_wdp_fork_test_all"
+# ...and as the PSIPro-i2c environment is built, without the contract layer: no caps.
+"$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 -DPSI_NO_STRIP_LOOKS -DPSI_NO_CONTRACT test_wdp_fork.cpp -o "$T/psi_wdp_fork_test_i2c"
+"$T/psi_wdp_fork_test_i2c"
 echo "[1d/9] WDP announce in the firmware (main.cpp + mocks)"
 # src/main.cpp verbatim against the golden harness's mocks, Serial1 modelled as a 63-byte TX
 # buffer draining at 9600 baud: pieces never exceed the room, a Q that arrives mid-line is
@@ -106,6 +112,11 @@ echo "[1d/9] WDP announce in the firmware (main.cpp + mocks)"
     -Wno-macro-redefined -DPSI_NO_STRIP_LOOKS -I native_mocks -I ../../include '-DWDP_FW="abcdef0-dirty"' \
     test_wdp_firmware.cpp -o "$T/psi_wdp_firmware"
 "$T/psi_wdp_firmware"
+# The PSIPro-i2c build: the same announce with no caps, and a Q that is never answered.
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all \
+    -Wno-macro-redefined -DPSI_NO_STRIP_LOOKS -DPSI_ENABLE_I2C -DPSI_NO_CONTRACT -I native_mocks -I ../../include \
+    '-DWDP_FW="abcdef0-dirty"' test_wdp_firmware.cpp -o "$T/psi_wdp_firmware_i2c"
+"$T/psi_wdp_firmware_i2c"
 echo "[2/9] psi_vm.h decode-walk test"
 # Structural check of every VM program (test/host/test_psi_vm.cpp): ops are known,
 # arities consume in-bounds bytes, every program reaches OP_END within its array. Built
@@ -213,6 +224,25 @@ while read -r name cmd ms jumper ee pot at; do
   fi
 done < golden_matrix.txt
 echo "      $(wc -l < golden_matrix.txt | tr -d ' ') captures identical."
+# The PSIPro-i2c environment (the I2C intake, no contract layer) is upstream's firmware with this
+# fork's fixes: every native capture must come out of that build byte for byte as well. (The one
+# row that is a contract line, contract_sparkle, is nothing to it.)
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -w -DPSI_NO_STRIP_LOOKS -DPSI_ENABLE_I2C -DPSI_NO_CONTRACT \
+    -I native_mocks -I "$BUILD/config_full" -I ../../include -o "$BUILD/golden_i2c" golden_native.cpp
+ni2c=0
+while read -r name cmd ms jumper ee pot at; do
+  [ -z "$name" ] && continue
+  case "$cmd" in *'!'*) continue ;; esac
+  "$BUILD/golden_i2c" --cmd "$cmd" --ms "$ms" --jumper "$jumper" \
+    --eeprom "$ee" --pot "$pot" --at "${at:-0}" --out "$GOLD/i2c_$name.psig" 2>/dev/null
+  if ! cmp -s "golden/$name.psig" "$GOLD/i2c_$name.psig"; then
+    echo "GOLDEN MISMATCH on the PSIPro-i2c build: $name"
+    python3 golden_compare.py "golden/$name.psig" "$GOLD/i2c_$name.psig" || true
+    exit 1
+  fi
+  ni2c=$((ni2c + 1))
+done < golden_matrix.txt
+echo "      $ni2c native captures identical on the build without the contract layer."
 
 # Set equality, both directions, between golden_matrix.txt's row names and
 # test/host/golden/*.psig's basenames: the loop above only proves that every
@@ -253,8 +283,9 @@ if cmp -s <(frames "$GOLD/standin_rainbow.psig") <(frames "$GOLD/standin_solid.p
 echo "      6 stand-ins identical to the looks they draw."
 
 echo "[6b] upstream differential: Neil's PSIPro v1.7 and the fork on the same mocks"
-# 77 scripted timelines (mode after mode, |timing, alwaysOn, rear jumper, brightness commands)
-# through test/host/upstream-v1.7/PSIPro.ino and through src/main.cpp. Each row states whether the
+# 78 scripted timelines (mode after mode, |timing, alwaysOn, rear jumper, brightness commands)
+# through test/host/upstream-v1.7/PSIPro.ino and through src/main.cpp as each of the two
+# environments builds it (with the contract layer; with the I2C intake and without it). Each row states whether the
 # visible frame sequence must be identical or is a known, explained difference; either way a row
 # that changes sides fails. The goldens above are captured from the fork itself; this is the stage
 # that ties them to upstream.
@@ -263,9 +294,11 @@ bash diff_upstream.sh "$T" "$CXX_SAN"
 echo "[6c] timeline scenarios: the firmware on the mocks, scripted wire timelines"
 # src/main.cpp verbatim, a scripted timeline of wire lines, assertions on the frames show() latched
 # and on the bytes written to Serial1. One scenario per process (the firmware keeps static state).
-# Built three times: as the two environments are (serial-only, and with the I2C intake, whose run
-# adds the scenarios that feed a line through the TWI receive callback), and with every look
-# (psi_timeline_all: the six strip and hue looks no environment links in R1, kept running here).
+# Four builds. psi_timeline: the default environment (serial-only, the contract layer, no strip
+# looks). psi_timeline_nocontract: the PSIPro-i2c environment (the I2C intake, no contract layer),
+# with its own short scenario file. And two builds no environment links in R1, kept running here so
+# that they can come back: psi_timeline_all (every look) and psi_timeline_i2c (the contract layer
+# with the I2C intake, whose run adds the scenarios that feed a line through the TWI receive callback).
 "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
     -DPSI_NO_STRIP_LOOKS \
     -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline"
@@ -274,7 +307,10 @@ echo "[6c] timeline scenarios: the firmware on the mocks, scripted wire timeline
     -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline_i2c"
 "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
     -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline_all"
-for bin in psi_timeline psi_timeline_i2c psi_timeline_all; do
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
+    -DPSI_NO_STRIP_LOOKS -DPSI_ENABLE_I2C -DPSI_NO_CONTRACT '-DTIMELINE_SCENARIOS="timeline_nocontract.inc"' \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline_nocontract"
+for bin in psi_timeline psi_timeline_nocontract psi_timeline_all psi_timeline_i2c; do
   n=0
   for s in $("$T/$bin" --list); do
     "$T/$bin" "$s" > "$T/scenario.out" 2>&1 || { cat "$T/scenario.out"; echo "FAIL: $bin $s"; exit 1; }
@@ -285,15 +321,14 @@ done
 
 echo "[6e] contract S9 as a property: hostile and random line streams, the frames measured"
 # test_property.cpp: 23 hostile profiles x 8 rounds and 1500 random streams, each in a fresh copy
-# of the firmware, on both builds. Dark-to-lit onsets (at most 3 a second, never two inside
+# of the firmware, as the default environment builds it (the one with the contract layer). Dark-to-lit onsets (at most 3 a second, never two inside
 # 340 ms; on a native look's frames, the ones a contract edge led to), nothing above the owner's
 # brightness, dark after X, native after idle, a native command keeps the panel, and no line
 # writes into a native look.
-for cfg in "-DPSI_NO_STRIP_LOOKS" "-DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS"; do
+for cfg in "-DPSI_NO_STRIP_LOOKS"; do
   # shellcheck disable=SC2086
   "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w $cfg \
       -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_property.cpp -o "$T/psi_property"
-  echo "      $cfg"
   "$T/psi_property" > "$T/property.out" 2>&1 || { cat "$T/property.out"; echo "FAIL: the S9 property does not hold"; exit 1; }
   sed 's/^/      /' "$T/property.out"
 done
@@ -346,21 +381,19 @@ if [ -n "$PIO" ]; then
 echo "using $PIO"
 ( cd ../.. && "$PIO" run -e PSIPro -e PSIPro-i2c )
 echo "cross-compiles for the real MCU (ATmega32U4 (SparkFun Pro Micro)) OK"
-echo "    BOTH configs built: PSIPro (serial-only) and PSIPro-i2c — sizes below."
+echo "    BOTH configs built: PSIPro (serial-only, the contract layer) and PSIPro-i2c (the I2C"
+echo "    intake, no contract layer) — sizes below."
 echo "    (a successful LINK is not a bench test: this firmware has never been flashed.)"
 echo
 echo "    NOTE: this board's flash budget is the tight one — 28,672 B usable, and the"
 echo "    stock upstream firmware already used 87.6% of it. The linker enforces the"
 echo "    ceiling, so if this stage passes, both configs FIT — THAT is the invariant this"
 echo "    stage exists to hold, not any specific byte count, which will keep moving as"
-echo "    animations are added. (as of the WDP device announce: PSIPro 25,320 B / 88.3%,"
-echo "    PSIPro-i2c 26,758 B / 93.3% — re-measure with 'pio run && pio run -e PSIPro-i2c'"
-echo "    rather than trusting this comment.) It fits because of the codegen flags in"
-echo "    platformio.ini and the PSI_NOINLINE outlining in src/contract/ContractPSI.h —"
-echo "    disable both and the I2C build fails. There used to be a third leg here,"
-echo "    CONTRACT_SLIM, that dropped five native modes to make room; those five are"
-echo "    now permanent PROGMEM bytecode (include/psi_vm.h), all 23 upstream modes"
-echo "    ship, and CONTRACT_SLIM is gone."
+echo "    animations are added (stage 9b prints the sizes and holds them to their gates)."
+echo "    The default build fits because of the codegen flags in platformio.ini, the"
+echo "    PSI_NOINLINE outlining in src/contract/ContractPSI.h and PSI_NO_STRIP_LOOKS; the"
+echo "    contract layer and the I2C intake do not fit together, so PSIPro-i2c is built"
+echo "    without the contract layer (PSI_NO_CONTRACT). All 23 upstream modes ship in both."
 
 echo "[9b] flash and stack gates"
 # Flash: what the linker placed (text + data) against a ceiling below the board's 28,672 B, so the
@@ -399,7 +432,7 @@ if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
   simrun() {  # <project> <seconds> <log> [simavr args...]: build, run until the timeout, clean the log
     p=$1; secs=$2; log=$3; shift 3
     ( cd "../simavr/$p" && "$PIO" run -s ) > "$log.build" 2>&1 || { cat "$log.build"; echo "FAIL: the $p probe did not build"; exit 1; }
-    timeout "$secs" "$SIMAVR" -m atmega32u4 -f 16000000 "$@" "../simavr/$p/.pio/build/$p/firmware.elf" \
+    timeout "$secs" "$SIMAVR" -m atmega32u4 -f 16000000 "$@" "../simavr/$p/.pio/build/${SIMENV:-$p}/firmware.elf" \
       > "$log.raw" 2>&1 || true
     sed 's/\x1b\[[0-9;]*m//g; s/\.\.$//' "$log.raw" > "$log"
   }
@@ -410,6 +443,9 @@ if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
   # while a pass of loop() runs, and the 64-byte RX ring holds 66 ms of such a burst. The longest
   # pass in any look must stay under 20 ms.
   python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 300 --max-pass-us 20000
+  # The same on the PSIPro-i2c build (the I2C intake, no contract layer): ten native modes.
+  SIMENV=millis_i2c simrun millis 300 "$T/millis_i2c.txt"
+  python3 ../simavr/check_millis.py "$T/millis_i2c.txt" --limit-ppm 300 --max-pass-us 20000 --looks 10
   simrun lifecycle 45 "$T/lifecycle.txt"
   python3 ../simavr/check_lifecycle.py "$T/lifecycle.txt"
   simrun gate 60 "$T/gate.txt" -o "$T/gate.vcd" -at "led=trace@0x2b/0x10"
