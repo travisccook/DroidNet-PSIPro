@@ -314,28 +314,41 @@ public:
     // driver removes that route structurally; see the interrupt-budget note below.
     const uint8_t sreg = SREG;
     cli();
+    // Exact millis() credit (v1.3 C4). Timer0 runs at clk/64 (4 us a tick) and overflows every
+    // 256 ticks; the hardware can queue ONE overflow while interrupts are masked. Count the
+    // overflows the frame spans from TCNT0 itself and credit every one the hardware cannot queue.
+    // Is one already queued on entry (ISR context, or an overflow in the last cycles before cli)?
+    // The flag is read on both sides of TCNT0: an overflow that lands between the reads is
+    // "before t0" when TCNT0 has just wrapped, and otherwise it is the frame's own first wrap.
+    const uint8_t before = TIFR0 & _BV(TOV0);
+    const uint8_t t0 = TCNT0;
+    const uint8_t pending = (TIFR0 & _BV(TOV0)) && (before || t0 < 128);
     emitFrame(sWire, nbytes);
-    SREG = sreg;
-
-    // Clock correction, matching FastLED-on-AVR (clockless_trinket.h:130-159, active
-    // because FASTLED_ALLOW_INTERRUPTS==0 and NO_CLOCK_CORRECTION is undefined): the
-    // frame masked interrupts for ~nbytes*10 us (8 bits * 1.25 us/bit). One timer0
-    // overflow (~1024 us) is queued by hardware and serviced the instant interrupts
-    // return, so only the masked time BEYOND that one tick is lost to millis(). Add it
-    // back through a microsecond accumulator. Same intent as FastLED; both approximate.
-    {
-      extern volatile unsigned long timer0_millis;  // Arduino core wiring.c, non-static
-      static uint16_t carry_us = 0;
-      uint16_t frame_us = (uint16_t)nbytes * 10u;   // 144 -> 1440 us
-      if (frame_us > 1024u) {
-        carry_us += (uint16_t)(frame_us - 1024u);   // ~416 us/frame
-        while (carry_us >= 1000u) { carry_us -= 1000u; timer0_millis += 1u; }
-      }
+    const uint8_t t1 = TCNT0;
+    // The frame is nbytes * 163 cycles (7 bits of 20 cy + one of 23 cy a byte) = kFrameTicks
+    // timer ticks, between 256 and 511 for 48 LEDs: one wrap for certain, a second when TCNT0
+    // ended below where it started.
+    uint8_t lost = (uint8_t)(kFrameTicks >> 8) + (t1 < t0 ? 1 : 0);
+    if (!pending) lost--;                        // the hardware keeps one for the ISR
+    if (lost) {
+      extern volatile unsigned long timer0_millis;          // Arduino core wiring.c, non-static
+      extern volatile unsigned long timer0_overflow_count;  // keeps micros() in step
+      static uint8_t fract = 0;                  // 8 us units, as wiring.c's own timer0_fract
+      do {
+        timer0_millis += 1u;                     // one overflow = 1.024 ms
+        timer0_overflow_count += 1u;
+        fract += 3u;
+        if (fract >= 125u) { fract -= 125u; timer0_millis += 1u; }
+      } while (--lost);
     }
+    SREG = sreg;                                 // interrupts return only after the credit
   }
 
 private:
   static const int kMaxLeds = 48;  // == NUM_LEDS (config.h is included after this header)
+  // Masked frame length in timer0 ticks (64 CPU cycles each): 144 bytes * 163 cycles = 366.
+  static const uint16_t kFrameTicks = (uint16_t)(((uint32_t)kMaxLeds * 3u * 163u) / 64u);
+  static_assert(kFrameTicks > 256 && kFrameTicks < 512, "the lost-overflow count assumes one or two wraps");
 
   // Staged GRB wire bytes. +1 spare: the emitter preloads the NEXT byte at each byte
   // boundary before testing the counter, so on the final byte it reads one byte past

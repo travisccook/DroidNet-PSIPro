@@ -298,8 +298,8 @@ if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
     sed 's/\x1b\[[0-9;]*m//g; s/\.\.$//' "$log.raw" > "$log"
   }
   simrun millis 240 "$T/millis.txt"
-  # --report-only until the millis() credit is exact (review H1): the numbers are printed, not gated.
-  python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 1000 --report-only
+  # 1000 ppm is a fifth of the contract's +/-0.5 % clock budget; the exact credit measures under 400.
+  python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 1000
   simrun wave 8 "$T/wave.txt" -o "$T/wave.vcd" -at "led=trace@0x2b/0x10"
   python3 ../simavr/check_wave.py "$T/wave.vcd" --min-gap-us 50
   simrun bench 30 "$T/bench.txt"
