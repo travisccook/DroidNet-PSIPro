@@ -644,6 +644,55 @@ static void x_drops_a_held_look() {
   CHECK(mostLit(1130, 2000) == 0, "after X nothing is applied late (saw %u lit)", mostLit(1130, 2000));
 }
 
+// ---- section 6: capacity and every-N accents; section 11: lines back to back ----------------------
+// Every section of a full table plays (16 in the serial-only build, 12 with I2C), and the whole
+// load arrives as ONE burst with no gap between lines, over 400 bytes of it.
+static void a_full_table_arrives_in_one_burst_and_plays() {
+  boot();
+  at(1000, "!**M:v=show");
+  static char buf[PSI_SCORE_CAP][48]; size_t bytes = 0;
+  for (int i = 0; i < PSI_SCORE_CAP; i++) {
+    // 16 lines of 28 bytes or 12 of 38: over 400 bytes either way, and inside the mock's 512-byte RX buffer
+    snprintf(buf[i], sizeof buf[i], PSI_SCORE_CAP > 12 ? "!P*A:i=solid,c=00%02x00,at=%d" : "!P*A:i=solid,c=00%02x00,s=128,b=255,at=%d",
+             0x10 + i, i * 2);
+    at(1001, buf[i]); bytes += strlen(buf[i]) + 1;
+  }
+  at(1100, "!**C:bpm=120,bpb=4,beat=0");
+  runTo(1100 + PSI_SCORE_CAP * 1000 + 500);
+  CHECK(bytes > 400, "the burst is over 400 bytes (%u)", (unsigned)bytes);
+  for (int i = 0; i < PSI_SCORE_CAP; i++) {
+    const uint32_t t = 1100 + (uint32_t)(i * 2) * 500 + 600;
+    CHECK(shown(t).px[20].g == 0x10 + i, "section %d (beat %d) did not play: green=%02x at t=%u", i, i * 2, shown(t).px[20].g, t);
+  }
+}
+// an=2,ap=1: with am=2, accent the beats where beat % 2 == 1. This is what lets a delivered show
+// alternate front and rear by beat.
+static void every_second_beat_accents() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=solid,c=000040,at=0,am=2,an=2,ap=1,ae=solid,ac=ffffff");
+  at(2000, "!**C:bpm=60,bpb=4,beat=0");                // beats at 2000, 3000, ...: odd beats at 3000, 5000, 7000
+  runTo(8500);
+  const std::vector<uint32_t> on = onsets(2000, 8400, WHITE);
+  CHECK(on.size() == 3, "an=2,ap=1 accents beats 1, 3 and 5 only, saw %u", (unsigned)on.size());
+  CHECK(!on.empty() && on[0] >= 3000 && on[0] < 3100, "the first accent is on beat 1 (t=3000), saw t=%u", on.empty() ? 0 : on[0]);
+}
+// A scored line of 102 characters, the longest v1.3 line, arrives whole: its LAST key is what the
+// check reads (ad=2550, a 2.55 s accent), so a buffer one byte short would cut it. (The length is
+// made up with leading zeros so that the look is one the check can see on both builds.)
+static void the_longest_line_arrives_whole() {
+  static const char line[] =
+    "!P*A:i=solid,c=3b82f6,s=255,b=255,at=000000000000000,am=2,m=000,an=16,ap=00,ae=solid,ac=ffffff,ad=2550";
+  static_assert(sizeof line - 1 == 102, "the longest v1.3 scored line is 102 characters");
+  boot();
+  at(1000, "!**M:v=show"); at(1001, line); at(2000, "!**C:bpm=120,bpb=4,beat=0");
+  runTo(6000);
+  uint32_t last = 0;
+  for (const Frame& f : between(2000, 6000)) { if (!f.allAre(WHITE)) break; last = f.t; }
+  CHECK(shown(2100).allAre(WHITE), "the accent is up at beat 0");
+  CHECK(last >= 2000 + 2550 - 30 && last <= 2000 + 2550 + 30, "ad=2550 arrived whole: the accent lasts 2.55 s, saw %u ms", last - 2000);
+  CHECK(shown(5000).allAre(0x3b82f6), "the section's own look returns after it");
+}
+
 // ---- L2: the host-silence watchdog ----------------------------------------------------------------
 static void watchdog_gives_the_panel_back() {
   boot();
@@ -854,6 +903,9 @@ static const Scenario kScenarios[] = {
   {"a_seek_goes_back", a_seek_goes_back},
   {"live_looks_inside_170ms_are_held_and_merged", live_looks_inside_170ms_are_held_and_merged},
   {"x_drops_a_held_look", x_drops_a_held_look},
+  {"a_full_table_arrives_in_one_burst_and_plays", a_full_table_arrives_in_one_burst_and_plays},
+  {"every_second_beat_accents", every_second_beat_accents},
+  {"the_longest_line_arrives_whole", the_longest_line_arrives_whole},
   {"watchdog_gives_the_panel_back", watchdog_gives_the_panel_back},
   {"watchdog_is_fed_by_any_addressed_line", watchdog_is_fed_by_any_addressed_line},
   {"watchdog_is_not_fed_by_another_boards_lines", watchdog_is_not_fed_by_another_boards_lines},

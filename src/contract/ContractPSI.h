@@ -113,8 +113,16 @@ void fill_column(uint8_t column, CRGB color, uint8_t scale_brightness);
 // ---- safety and capacity ------------------------------------------------------
 static const uint8_t SAFE_MAX_BRIGHTNESS = 200;   // Neil's LED-life cap; the owner's ceiling never exceeds it
 
-// Score capacity. An entry is 22 B on AVR.
-#define PSI_SCORE_CAP 8
+// Score capacity (v1.3 section 6: at least 12), reported as cap= in the query reply. An entry is
+// 22 B on AVR. The I2C build has 282 B less SRAM (Wire's buffers, the deferral line), so it holds
+// 12; measured stack headroom is in DROIDNET_FORK.md and gated by run.sh.
+#ifndef PSI_SCORE_CAP
+  #ifdef PSI_ENABLE_I2C
+    #define PSI_SCORE_CAP 12
+  #else
+    #define PSI_SCORE_CAP 16
+  #endif
+#endif
 
 // ---- state ----------------------------------------------------------------------
 // The whole per-unit contract state is the core's ContractUnitState (one unit on this board).
@@ -505,6 +513,7 @@ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint16_t lineCr
     e.bright     = pr.hasBright ? pr.bright : 255;     // S6: carried in the entry; 255 is the ceiling
     e.beatMod    = pr.hasBeatMod ? pr.beatMod : 0;
     e.accentMode = pr.hasAm ? pr.accentMode : 0;
+    e.accentEvery = accentEveryFrom(pr);               // an=, ap=: with am=2, the beats where beat % n == ap
     if (pr.hasAccentFx) {
       e.accentFx    = pr.accentFx;
       e.accentColor = pr.hasAccentColor ? pr.accentColor : e.color;

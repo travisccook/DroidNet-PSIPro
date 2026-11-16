@@ -319,18 +319,20 @@ static inline int8_t psiLed(uint8_t column, uint8_t row) {
 }
 
 // Command processing stuff
-// maximum number of characters in a command (95 chars since we need the null termination)
+// maximum number of characters in a command (103 chars since we need the null termination)
 //
-// DroidNet fork: raised 64 -> 96 (+32 B SRAM). buildCommand() DROPS every byte past
+// DroidNet fork: raised 64 -> 96 for contract v1.2, and 96 -> 104 for v1.3, whose longest
+// scored line (every key at its longest, at= to five digits) is 102 characters. buildCommand() DROPS every byte past
 // CMD_MAX_LENGTH-1 and terminates there — an over-long line is silently TRUNCATED and then
 // parsed as if it were complete. A v1.2 scored contract line carrying an accent, e.g.
 //   !P*A:i=colorcycle,c=3b82f6,at=1234,am=2,m=200,ae=flash,ac=ffffff
 // is 64 characters, one past the old 63-char ceiling: the trailing accent key would be
-// chopped and the section would silently render with no accent. 96 covers the longest line
-// the Studio emitter can produce (pinned by the buffer guard in test/host/run.sh).
+// chopped and the section would silently render with no accent. 104 covers the longest line
+// the Studio emitter can produce (pinned by the buffer guard in test/host/run.sh). 128 would
+// cost 24 B more SRAM, 48 B in the I2C build (which copies a line out of its interrupt).
 // NOTE: preamble.h defines this macro too, and is included FIRST (main.cpp:286) — the two
 // MUST be kept identical, or the definition that reaches buildCommand() is not this one.
-#define CMD_MAX_LENGTH 96
+#define CMD_MAX_LENGTH 104
 
 // memory for command string processing
 char cmdString[CMD_MAX_LENGTH];

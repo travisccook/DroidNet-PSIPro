@@ -10,10 +10,10 @@
 // Define any constants or macros needed for compilation
 // DroidNet fork: was 32 here and 64 in config.h — two different values for the SAME macro,
 // working only because config.h is included second and its definition wins by redefinition.
-// Both are now 96 (identical bodies, so no redefinition diff): a v1.2 scored contract line
-// carrying an accent runs to 64+ chars and buildCommand() SILENTLY TRUNCATES anything past
+// Both are now 104 (identical bodies, so no redefinition diff): a v1.3 scored contract line
+// runs to 102 chars and buildCommand() SILENTLY TRUNCATES anything past
 // CMD_MAX_LENGTH-1. Keep this in lockstep with config.h (guarded by test/host/run.sh).
-#define CMD_MAX_LENGTH 96
+#define CMD_MAX_LENGTH 104
 #define FALL_THROUGH() do {} while (0)
 #define UNUSED(x) (void)(x)
 #define DEBUG_PRINT(x)

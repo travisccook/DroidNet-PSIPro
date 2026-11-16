@@ -1,6 +1,9 @@
 // Real-firmware millis-rate probe: the fork's src/main.cpp VERBATIM (setup/loop renamed), driven
 // with contract lines through its own parseContract(), measured against Timer1 (which the masked
-// LED frame cannot disturb). One line per look: "<name>: millis=<ms> true_us=<us> err_ppm=<n>".
+// LED frame cannot disturb). One line per look:
+// "<name>: millis=<ms> true_us=<us> max_pass_us=<us> err_ppm=<n>". max_pass_us is the longest
+// single pass of the firmware's loop(): while a pass runs nothing reads the serial port, and the
+// 64-byte RX ring holds 66 ms of a gapless 9600-baud burst (contract v1.3 section 11).
 // The firmware leaves under 300 B of stack, so the probe keeps its table in flash and nothing in
 // SRAM but 15 bytes of state. Build with board_upload.maximum_size = 32256: simavr has no bootloader.
 #include <Arduino.h>
@@ -38,6 +41,7 @@ static const char kLooks[] PROGMEM =
   "native15|!P*A:i=native:15\n";
 static const char* gRow = kLooks;      // the row being measured (flash address)
 static uint32_t m0, t0;
+static uint32_t gPassMax = 0;          // the longest single pass of the firmware's loop() in this look, in Timer1 ticks
 static bool started = false;
 static void startRow() {
   char buf[96]; uint8_t n = 0; bool name = true;
@@ -52,7 +56,7 @@ static void startRow() {
       if (c == '\n') break;
     } else if (n < sizeof buf - 1) buf[n++] = c;
   }
-  m0 = millis(); t0 = trueTicks();
+  m0 = millis(); t0 = trueTicks(); gPassMax = 0;
 }
 void setup() {
   fw_setup();
@@ -60,13 +64,16 @@ void setup() {
 }
 void loop() {
   if (!started) { started = true; startRow(); }
+  const uint32_t before = trueTicks();
   fw_loop();
   uint32_t t = trueTicks();
+  if (t - before > gPassMax) gPassMax = t - before;
   if ((t - t0) < 4000000UL) return;    // 16 s of true time a look: 1 ms of millis() is 62 ppm
   uint32_t dm = millis() - m0, dus = (t - t0) * 4UL;
   for (const char* p = gRow;; p++) { char c = (char)pgm_read_byte(p); if (c == '|' || c == '\n') break; Serial1.write(c); }
   Serial1.print(F(": millis=")); Serial1.print(dm);
   Serial1.print(F(" true_us=")); Serial1.print(dus);
+  Serial1.print(F(" max_pass_us=")); Serial1.print(gPassMax * 4UL);
   Serial1.print(F(" err_ppm=")); Serial1.println((long)(((int32_t)(dm * 1000UL) - (int32_t)dus) / 16));   // dus is 16,000,0xx
   Serial1.flush();
   while (pgm_read_byte(gRow) != '\n') gRow++;

@@ -121,9 +121,6 @@ static void score_mixes_native_and_contract() {
   CHECK(most > 0 && most <= 6, "beats 8+ should be Knight Rider (one column, <= 6 lit), saw up to %u lit", most);
 }
 
-#ifndef PSI_SCORE_CAP
-#define PSI_SCORE_CAP 8   // firmware before v1.3
-#endif
 struct Scenario { const char* name; void (*fn)(); };
 // -DTIMELINE_SCENARIOS='"<file>"' runs another scenario file through the same harness.
 #ifndef TIMELINE_SCENARIOS

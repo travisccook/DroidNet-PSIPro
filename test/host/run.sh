@@ -15,7 +15,7 @@
 #   1d. the WDP announce in the firmware: main.cpp + mocks (TX room, the Q ack, the jumper, the seed)
 #   2. psi_vm.h decode-walk test (every VM program: known ops, in-bounds arities, reaches OP_END)
 #   3. (retired: the firmware-layer guards are timeline scenarios now, stage 6c, on the real main.cpp)
-#   4. command-buffer width guard (the v1.2 accent keys push a scored line past 63 chars)
+#   4. command-buffer width guard (the longest v1.3 scored line is 102 chars)
 #   5. parser fuzz + differential (ASan/UBSan)
 #   6. golden-frame parity against the committed captures (test/host/golden/)
 #   6d. the I2C build's six stand-in looks draw scan, sparkle and solid, frame for frame
@@ -116,7 +116,8 @@ echo "[4/9] command-buffer width guard"
 # longest scored line the Studio emitter can produce must therefore fit, with its NUL.
 # CMD_MAX_LENGTH is defined TWICE (preamble.h, then config.h, which wins by redefinition);
 # both must be >= that length + 1, or the value that reaches buildCommand() is the wrong one.
-worst='!P*A:i=colorcycle,c=3b82f6,s=255,b=200,at=1234,am=2,m=200,ae=colorcycle,ac=ffffff,ad=2550'
+# v1.3: every key a scored line can carry, each at its longest, at= to five digits (99,999 beats).
+worst='!P*A:i=colorcycle,c=3b82f6,s=255,b=255,at=99999,am=2,m=255,an=16,ap=15,ae=colorcycle,ac=ffffff,ad=2550'
 need=$(( ${#worst} + 1 ))
 for f in ../../include/preamble.h ../../include/config.h; do
   val=$(sed -n 's/^#define[[:space:]]\{1,\}CMD_MAX_LENGTH[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' "$f" | tail -1)
@@ -124,13 +125,13 @@ for f in ../../include/preamble.h ../../include/config.h; do
     echo "FAIL: no CMD_MAX_LENGTH definition found in $f"; exit 1
   fi
   if [ "$val" -lt "$need" ]; then
-    echo "FAIL: $f defines CMD_MAX_LENGTH $val, but the longest v1.2 scored line is"
+    echo "FAIL: $f defines CMD_MAX_LENGTH $val, but the longest v1.3 scored line is"
     echo "      ${#worst} chars and needs $need (line + NUL). It would be silently truncated:"
     echo "      $worst"
     exit 1
   fi
 done
-echo "CMD_MAX_LENGTH >= $need in preamble.h + config.h (worst v1.2 line ${#worst} chars) OK"
+echo "CMD_MAX_LENGTH >= $need in preamble.h + config.h (worst v1.3 line ${#worst} chars) OK"
 
 # --- STATIC GUARD: the I2C ISR must not parse or render -------------------------------------
 # receiveEvent() (src/main.cpp) is the Wire onReceive callback and runs in TWI INTERRUPT context.
@@ -397,7 +398,10 @@ if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
   simrun millis 300 "$T/millis.txt"
   # 16 s a look, so 1 ms of millis() is 62 ppm and reading it twice is worth up to 125. The exact
   # credit measures inside that; 300 ppm is the gate (the contract's clock budget is 5000).
-  python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 300
+  # Section 11 (a 400-byte burst with no gap at 9600 baud loses no line): nothing reads the port
+  # while a pass of loop() runs, and the 64-byte RX ring holds 66 ms of such a burst. The longest
+  # pass in any look must stay under 20 ms.
+  python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 300 --max-pass-us 20000
   simrun lifecycle 45 "$T/lifecycle.txt"
   python3 ../simavr/check_lifecycle.py "$T/lifecycle.txt"
   simrun gate 60 "$T/gate.txt" -o "$T/gate.vcd" -at "led=trace@0x2b/0x10"
