@@ -10,7 +10,8 @@
 //         brightness), and the watchdog fires when the test's own count says it must;
 //     (d) is dark at once after X, and stays dark until a line that may relight it;
 //     (e) L6: runs the mode a native command started, and the contract does not take the panel
-//         back by itself.
+//         back by itself;
+//     (f) S7: never runs, for a show, a native mode that is off the allow-list.
 //
 // What is measured is the frame on its way to the LEDs: the full-field level of every frame
 // FastLED.show() sends (the mean over the LEDs of each LED's brightest channel, times the master
@@ -80,7 +81,7 @@ static int gCeil = 20;                    // the owner's brightness in this stre
 static bool gButtons = false;             // this stream has an owner at the controller
 static Onsets gObs[3];
 static int gLevel = 0, gScale = 0, gLit = 0;
-static long gOverCeiling = 0, gNotNative = 0, gNotDark = 0, gNotButton = 0, gWdLate = 0;
+static long gOverCeiling = 0, gNotNative = 0, gNotDark = 0, gNotButton = 0, gWdLate = 0, gOffList = 0;
 static long gDarkChecked = 0, gNativeChecked = 0, gButtonChecked = 0, gContractFrames = 0, gLines = 0, gPresses = 0;
 static bool gExpectNative = false, gExpectDark = false; static uint32_t gNativeFrom = 0, gDarkFrom = 0;
 static int gExpectButton = -1; static uint32_t gButtonFrom = 0; static int gButtonPasses = 0;
@@ -117,6 +118,8 @@ static void hook(const CRGB* l, int n, uint8_t scale) {
     if (o.minGap < 340 && gap >= 340) broke("two onsets under 340 ms apart");
   }
   if (g_owned) { gContractFrames++; if (scale > gCeil) { gOverCeiling++; broke("a contract frame above the ceiling"); } }
+  // (f): S7. The show never runs a native mode that is off the allow-list.
+  if (g_owned && g_u.base == CB_NATIVE && !nativeAllowedPsi(g_u.nativeCode)) { gOffList++; broke("a native mode off the allow-list"); }
 }
 
 static void expectNative() { if (!gExpectNative) gNativeFrom = gNow; gExpectNative = true; gExpectDark = false; }
@@ -315,11 +318,11 @@ static const Profile kProfiles[] = {
 static const int kProfileCount = (int)(sizeof kProfiles / sizeof kProfiles[0]);
 
 struct Result {
-  int worst = 0; uint32_t minGap = 0xFFFFFFFFu; long overCeiling = 0, notNative = 0, notDark = 0, wdLate = 0, notButton = 0;
+  int worst = 0; uint32_t minGap = 0xFFFFFFFFu; long overCeiling = 0, notNative = 0, notDark = 0, wdLate = 0, notButton = 0, offList = 0;
   long onsets = 0, darkChecked = 0, nativeChecked = 0, contractFrames = 0, lines = 0, presses = 0, buttonChecked = 0;
   void take() {
     for (const Onsets& o : gObs) { if (o.worst > worst) worst = o.worst; if (o.minGap < minGap) minGap = o.minGap; }
-    overCeiling = gOverCeiling; notNative = gNotNative; notDark = gNotDark; wdLate = gWdLate; notButton = gNotButton;
+    overCeiling = gOverCeiling; notNative = gNotNative; notDark = gNotDark; wdLate = gWdLate; notButton = gNotButton; offList = gOffList;
     onsets = gObs[0].total; darkChecked = gDarkChecked; nativeChecked = gNativeChecked; contractFrames = gContractFrames;
     lines = gLines; presses = gPresses; buttonChecked = gButtonChecked;
   }
@@ -327,11 +330,13 @@ struct Result {
     if (o.worst > worst) worst = o.worst;
     if (o.minGap < minGap) minGap = o.minGap;
     overCeiling += o.overCeiling; notNative += o.notNative; notDark += o.notDark; wdLate += o.wdLate; notButton += o.notButton;
+    offList += o.offList;
     onsets += o.onsets; darkChecked += o.darkChecked; nativeChecked += o.nativeChecked; contractFrames += o.contractFrames;
     lines += o.lines; presses += o.presses; buttonChecked += o.buttonChecked;
   }
   bool holds() const {
-    return worst <= 3 && minGap >= 2 * STROBE_MIN_STATE_MS && overCeiling == 0 && notNative == 0 && notDark == 0 && wdLate == 0 && notButton == 0;
+    return worst <= 3 && minGap >= 2 * STROBE_MIN_STATE_MS && overCeiling == 0 && notNative == 0 && notDark == 0 && wdLate == 0 &&
+           notButton == 0 && offList == 0;
   }
   void print(const char* verdict, const char* name) const {
     printf("%s S9 %s: %d onsets in one second", verdict, name, worst);
@@ -341,6 +346,7 @@ struct Result {
     if (overCeiling) printf(", %ld frames over the ceiling", overCeiling);
     if (wdLate)      printf(", the watchdog was late %ld times", wdLate);
     if (notButton)   printf(", %ld ms not on the mode a native command started", notButton);
+    if (offList)     printf(", %ld frames of a native mode off the allow-list", offList);
     printf("\n");
   }
 };

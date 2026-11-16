@@ -12,6 +12,9 @@ import sys
 CEIL = 100
 OBSERVERS = ((10, 50), (19, 75), (4, 31))     # dark at or under, lit at or over: percent of the ceiling
 MIN_GAP_MS = 340
+# The gate times onsets with millis(), which steps by 1.024 ms and now and then by 2: two onsets it
+# holds 340 ms apart can be up to 2 ms closer on the wire. (Three a second needs 333 ms.)
+MILLIS_SLACK_MS = 2
 
 
 def frames(path):
@@ -61,11 +64,11 @@ def main():
         gaps = [b - a for a, b in zip(on, on[1:])]
         worst = max((sum(1 for u in on if t - 1000 < u <= t) for t in on), default=0)
         print("    dark <= %2d %%, lit >= %2d %%: %2d onsets in 7 s, most in one second %d, closest two %s ms"
-              % (dark, lit, len(on), worst, "%.0f" % min(gaps) if gaps else "-"))
+              % (dark, lit, len(on), worst, "%.1f" % min(gaps) if gaps else "-"))
         if len(on) < 6:
             fail.append("observer %d/%d saw %d onsets: the streams are not exercising the gate" % (dark, lit, len(on)))
-        if worst > 3 or (gaps and min(gaps) < MIN_GAP_MS - 1):
-            fail.append("observer %d/%d: %d onsets in one second, closest two %.0f ms" % (dark, lit, worst, min(gaps)))
+        if worst > 3 or (gaps and min(gaps) < MIN_GAP_MS - MILLIS_SLACK_MS):
+            fail.append("observer %d/%d: %d onsets in one second, closest two %.1f ms" % (dark, lit, worst, min(gaps)))
     for f in fail:
         print("FAIL:", f)
     if not fail:

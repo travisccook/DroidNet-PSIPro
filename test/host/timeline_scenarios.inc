@@ -783,6 +783,49 @@ static void the_longest_line_arrives_whole() {
   CHECK(shown(5000).allAre(0x3b82f6), "the section's own look returns after it");
 }
 
+// ---- S7: native codes are an allow-list -----------------------------------------------------------
+// A line naming a code off the list is dropped whole: the look, the colour and everything else on
+// it. 2, 3 and 5 are upstream's Flash, Alarm and Scream; 23 and 99 are no mode at all.
+static void native_codes_off_the_list_are_dropped() {
+  boot();
+  at(1000, "!P*A:i=solid,c=00ff00"); at(2000, "!P*A:i=native:2,c=ff00ff"); at(3000, "!P*A:i=native:99");
+  at(4000, "!P*A:i=native:3"); at(5000, "!P*A:i=native:5,b=10"); at(6000, "!P*A:i=native:23"); at(7000, "!P*A:i=native:-1");
+  runTo(8000);
+  for (const Frame& f : between(1100, 8000))
+    if (!f.allAre(GREEN) || f.scale != 20) { CHECK(false, "t=%u: the look changed; a line naming native 2, 3, 5, 23, 99 or -1 is dropped whole", f.t); break; }
+}
+// ...and every code on the list is taken: each draws something of its own, and none is the solid
+// look it replaced.
+static void native_codes_on_the_list_run() {
+  static const int modes[] = {1, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 92};
+  const int n = (int)(sizeof modes / sizeof modes[0]);
+  char line[20][32];
+  boot();
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=solid,c=00ff00");
+  for (int k = 0; k < n; k++) { snprintf(line[k], sizeof line[k], "!P*A:i=native:%d", modes[k]); at(2000 + 2000 * k, line[k]); }
+  at(2000 + 2000 * n, "!P*A:i=native:0");
+  runTo(2000 + 2000 * n + 1000);
+  for (int k = 0; k < n; k++) {
+    const uint32_t a = 2100 + 2000 * k, b = 3990 + 2000 * k;
+    bool green = false;
+    for (const Frame& f : between(a, b)) if (f.allAre(GREEN)) green = true;
+    CHECK(!green && mostLit(a, b) > 0, "native:%d did not run (still the solid look, or dark)", modes[k]);
+  }
+  CHECK(shown(2000 + 2000 * n + 900).lit == 0, "native:0 is the board's own off");
+}
+// A scored line naming a code off the list is not stored, so V sees a line missing.
+static void a_scored_native_off_the_list_fails_v() {
+  boot();
+  static char v[48];
+  static const char* good = "P*A:i=native:15,at=0"; static const char* bad = "P*A:i=native:2,at=8";
+  snprintf(v, sizeof v, "!PFV:n=2,k=%04x", (unsigned)(crc16(good) ^ crc16(bad)));
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=native:15,at=0"); at(1002, "!P*A:i=native:2,at=8"); at(1003, "!PFQ:r=0");
+  at(1004, v); at(1005, "!PFQ:r=0");
+  runTo(3000);
+  CHECK(strstr(Serial1.txLog, ",n=1,ok=0,") != nullptr, "only the allowed section was stored (tx: %s)", Serial1.txLog);
+  CHECK(strstr(Serial1.txLog, ",n=0,ok=2,") != nullptr && swipeAt(2900), "V fails and the board is given back (tx: %s)", Serial1.txLog);
+}
+
 // ---- L2: the host-silence watchdog ----------------------------------------------------------------
 static void watchdog_gives_the_panel_back() {
   boot();
@@ -1016,6 +1059,9 @@ static const Scenario kScenarios[] = {
   {"a_full_table_arrives_in_one_burst_and_plays", a_full_table_arrives_in_one_burst_and_plays},
   {"every_second_beat_accents", every_second_beat_accents},
   {"the_longest_line_arrives_whole", the_longest_line_arrives_whole},
+  {"native_codes_off_the_list_are_dropped", native_codes_off_the_list_are_dropped},
+  {"native_codes_on_the_list_run", native_codes_on_the_list_run},
+  {"a_scored_native_off_the_list_fails_v", a_scored_native_off_the_list_fails_v},
   {"watchdog_gives_the_panel_back", watchdog_gives_the_panel_back},
   {"watchdog_is_fed_by_any_addressed_line", watchdog_is_fed_by_any_addressed_line},
   {"watchdog_is_not_fed_by_another_boards_lines", watchdog_is_not_fed_by_another_boards_lines},
