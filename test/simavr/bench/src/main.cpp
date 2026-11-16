@@ -18,7 +18,7 @@ void setup() {
   a = t1(); for (int i = 0; i < 48; i++) { uint8_t tb = fxTwinkleBright(i, vnow, vspeed); leds[i] = CRGB((uint16_t)255 * tb / 255, (uint16_t)128 * tb / 255, (uint16_t)64 * tb / 255); } b = t1(); sink = leds[3].r; rep(F("twinkle48"), b - a);
   a = t1(); int head = fxHead(vnow, vspeed, 10); for (int p = 0; p < 10; p++) sink = fxCometBright(p, head, 10); b = t1(); rep(F("comet10"), b - a);
   a = t1(); for (int p = 0; p < 10; p++) sink = fxWipeLit(p, vnow, vspeed, 10); b = t1(); rep(F("wipe10"), b - a);
-  a = t1(); for (int p = 0; p < 10; p++) sink = fxChaseLit(p, vnow, vspeed); b = t1(); rep(F("chase10"), b - a);
+  a = t1(); for (int p = 0; p < 10; p++) sink = fxChaseLit(p, vnow, vspeed, 10); b = t1(); rep(F("chase10"), b - a);
   a = t1(); for (int p = 0; p < 10; p++) { ContractRGB c = fxHsv2rgb(fxGradientHue(p, 10, 0, vnow, vspeed), 255, 255); sink = c.r; } b = t1(); rep(F("gradient10"), b - a);
   FastLED.addLeds<WS2812, 4, GRB>(leds, 48);
   a = t1(); FastLED.show(200); b = t1(); rep(F("show48"), b - a);

@@ -43,6 +43,11 @@
 //     live A or P; X is dark until M:v=idle or a look; M:v=idle returns to the default pattern.
 //     A pulse with no show overlays the native look and returns to it (L3). A native T or D
 //     command ends a show (L6).
+//   * The gate (S9, S11): every frame the contract draws is measured by brightest channel and by
+//     luminance and passed through the core's field gate in FastLED.show() (contractFrameScale);
+//     a lit frame of another look or colour waits for the core's look gate (contractLoopTick);
+//     a section waits its 170 ms (contractSectionMayApply). Native looks (S10) are told to the
+//     gate once at each edge and never frame by frame.
 //   * The accent overlay is ONE primitive with two triggers: verb P (live) and the board's own
 //     per-beat score edge (a scored A's ae=/ac=/ad=). Same code path, same look.
 //   * Verb L feeds the contract's own meter look (A:i=meter) and nothing else, honouring the VU
@@ -147,6 +152,20 @@ static bool    g_owned        = false;
 static bool    g_tookLook     = false;             // more than a pulse was shown: give-back returns to the swipe
 static bool    g_ownerTempOn  = false;
 static uint8_t g_ownerTempVal = 0;
+// S10: a mode that is NOT on the allow-list is on the LEDs (someone's command started it), and
+// the contract's next drawn frame takes them from it.
+static bool    g_nativeUnknown = false;
+static uint8_t g_nativeLevel = 0;                  // the level the gate was told a native:<n> look runs at
+// The darkest frame Leia or Knight Rider has put on the LEDs, measured as the gate measures
+// (contractFrameScale), and not yet told to the gate.
+static bool    g_seenNative  = false;
+static uint8_t g_seenLevel   = 0, g_seenLum = 0;
+// An edge of a native look the gate has still to be told: 1 it starts (or has the panel back),
+// 2 a show moved its brightness. Told when its light is on the LEDs (a start: at the look's first
+// lit frame; a move: at its next frame): a look that was given the panel and never drew, or never
+// lit, must not leave the gate believing in its light.
+static uint8_t g_edgeKind = 0;
+static int     g_edgeCode = 0;
 
 // ---- small local helpers -----------------------------------------------------------
 // contract speed (0..255, higher=faster) -> primitive time_delay ms (inverse map).
@@ -191,8 +210,28 @@ static PSI_NOINLINE uint8_t _ownerBri() {
   }
   return b > SAFE_MAX_BRIGHTNESS ? SAFE_MAX_BRIGHTNESS : b;
 }
+// The field level a native look runs at, as the gate is told it: none for mode 0 (panel off), the
+// brightness the look draws at otherwise.
+static inline uint8_t _nativeField(int code, uint8_t bri) { return code == 0 ? (uint8_t)0 : bri; }
+// S10, which native modes report their frames to the gate (never held, only told): the ones on
+// the allow-list whose whole field never swings fast, which is all of them but two. Leia (6) and
+// Knight Rider (15) move a lit area under a quarter of the field several times a second: to the
+// gate's rule (a step is a tenth of the ceiling) each move would be an onset, and the contract
+// could never light the panel after one. Their frames are not reported; the gate knows their
+// edges. The scenario s10_native_looks_are_classified_by_their_stock_field_swing measures every
+// listed mode by the gate's own rule and keeps this split honest.
+static PSI_NOINLINE bool _nativeReports(int code) { return code != 6 && code != 15 && nativeAllowedPsi(code); }
+// S10, the gate's TELL at an edge of a native look, owed until its light is on the LEDs
+// (contractFrameScale): it starts (kind 1), or a show moved its brightness (kind 2).
+static PSI_NOINLINE void _nativeEdge(uint8_t kind, int code) {
+  if (g_edgeKind != 1) g_edgeKind = kind;              // a start that is still owed stays a start
+  g_edgeCode = code;
+}
 static PSI_NOINLINE void _takePanel() {
   if (g_owned) return;
+  // S10: the contract's own drawing is about to take the LEDs from the board's own look. If that
+  // is a mode off the allow-list, contractLoopTick() tells the gate at the first frame it draws.
+  g_nativeUnknown = !nativeAllowedPsi(lastPSIeventCode);
   // S6: an armed show's ceiling is the owner's brightness when it armed (_boundary). A live look
   // or a pulse with no show armed takes it now.
   if (!g_u.inShow) g_u.ceil = _ownerBri();
@@ -204,9 +243,10 @@ static PSI_NOINLINE void _takePanel() {
 // L1 "gives the board back completely": the owner's brightness state returns and, unless all the
 // contract did was pulse over the native look (L3), the default pattern (swipe) runs next.
 // When: contractLoopTick() calls this once nothing of the contract's is left to show AND the gate
-// lets the native look light (S10: a native look runs as stock, but its START is a look change
-// and, from dark, an onset). A native command from the owner calls it at once (_yieldNow).
+// lets a native look start (S10: a native look runs as stock, but its START is a look change and
+// an onset). A native command from the owner calls it at once (_yieldNow).
 static PSI_NOINLINE void _givePanelBack() {
+  g_nativeUnknown = false;
   if (!g_owned) return;
   useTempInternalBrightness = g_ownerTempOn;
   tempGlobalBrightnessValue = g_ownerTempVal;
@@ -258,6 +298,9 @@ static PSI_NOINLINE void _yieldNow() {
   g_tookLook = false;                                  // the native command chose the pattern
   _boundary('i', 0);
   _givePanelBack();                                    // now: the owner's own light is never held back
+  // S10: light the contract did not ask for is on the LEDs from here. The gate is told (it cannot
+  // be asked), so that what the contract does next keeps its distance.
+  _nativeEdge(1, lastPSIeventCode);
 }
 #ifdef PSI_ENABLE_I2C
 static volatile bool g_yieldPending = false;
@@ -284,67 +327,98 @@ inline bool contractHoldsLevels() {
   return g_levelFed;
 }
 
-// ---- S9: one limit for every path --------------------------------------------------------
+// ---- S9 and S11: one limit for every path ---------------------------------------------------
 // Called by FastLED.show() for EVERY frame, as the last thing before it goes out (the hook is
-// PSI_FRAME_GATE, set in main.cpp). It measures the frame's field level (the mean over the LEDs
-// of each LED's brightest channel, times the master scale) and returns the scale to send.
-//   * A frame the contract DRAWS (its looks, the overlay, X's dark) goes through the core's
-//     field gate: a dark-to-lit swing across the field is let through only 340 ms after the last
-//     one, and until then the frame is scaled down. It is also never brighter than the ceiling.
+// PSI_FRAME_GATE, set in main.cpp), and returns the scale to send.
+//   * A frame the contract DRAWS (its looks, the overlay, X's dark) is measured twice: its field
+//     level (the mean over the LEDs of each LED's brightest channel, times the master scale) and
+//     its luminance (the same with the core's Rec.709 weights, so a change of colour counts). The
+//     core's field gate is ASKED with both: a dark-to-lit swing in either is let through only
+//     340 ms after the last one, and until then the frame is scaled down. Then the gate is TOLD
+//     what goes out, measured again at the scale it goes out at. The frame is also never brighter
+//     than the ceiling. An accent overlay still up when its section gives way to a native:<n> one
+//     is the contract's own drawing.
 //   * A frame of a native look is never changed (S10: native looks run as stock), whether the
-//     owner started the look or a show selected it from the allow-list. The gate is only told
-//     about it, so that what the contract does next keeps its distance. What the contract may
-//     hold is the look's EDGES, and it does that before the look draws: the start of a
-//     native:<n> look and the brightness a show gives it from then on (contractLoopTick), and
-//     the hand-over back to the board's own look (_givePanelBack). An accent overlay still up
-//     when its section gives way to a native:<n> one is the contract's own drawing: gated.
-// The level is computed exactly, floor(sum * scale / (n * 255)): at a low brightness a unit of
-// level is several percent of the ceiling, and a measure that rounded twice would miss a rise
-// an observer can see. The measuring is 48 compares and two divides; nothing here blocks.
+//     owner started the look or a show selected it from the allow-list. The gate governs its
+//     EDGES, and is told at each: when the look starts, at what level, and when a show moves
+//     its brightness (both at the look's next frame, here: only light that reached the LEDs is
+//     told), and when the contract's own drawing takes the LEDs back (contractLoopTick).
+//     The level it is told is the brightness the look draws at, and what a mode
+//     puts on the field is anything from a twentieth of that (Knight Rider) to all of it, in any
+//     colour, lit at once or a little later. This board can measure a native frame, so it does,
+//     and TELLS the gate what is on the LEDs (the frame is never held): for every listed mode
+//     whose field does not swing fast, each frame; for Leia and Knight Rider, whose every move
+//     would count as an onset, only the last one, before the contract's first frame after it.
+//     Then a rise the contract makes from there is the onset it is, and a native look's own
+//     light keeps the contract's next onset at its distance.
+// The measures are computed exactly, floor(sum * scale / (n * 255)): at a low brightness a unit
+// of level is several percent of the ceiling, and a measure that rounded twice would miss a rise
+// an observer can see. 48 LEDs, two sums, four divides; nothing here blocks.
 #ifndef PSI_FRAME_GATE_WIRED
 #error "FastLED.h was included before main.cpp named PSI_FRAME_GATE: frames would skip the S9 gate"
 #endif
+static PSI_NOINLINE uint8_t _fieldOf(uint16_t sum, uint8_t scale) {
+  return (uint8_t)((uint16_t)(((uint32_t)sum * scale) / 255u) / NUM_LEDS);
+}
 uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
-  uint16_t sum = 0;                                    // 48 * 255 fits
+  const bool drawn = g_owned && (g_u.base != CB_NATIVE || g_u.pulseActive);     // the contract drew this frame itself
+  if (drawn && scale > g_u.ceil) scale = g_u.ceil;
+  uint16_t sum = 0, sumY = 0;                          // 48 * 255 fits
   for (uint8_t i = 0; i < n; i++) {
     uint8_t m = l[i].r;
     if (l[i].g > m) m = l[i].g;
     if (l[i].b > m) m = l[i].b;
     sum += m;
+    sumY += contractLuminance(l[i].r, l[i].g, l[i].b);
   }
   const uint32_t now = millis();
 #ifdef PSI_ENABLE_I2C
   const uint8_t sreg = SREG;                           // a native frame can be drawn from the TWI
   cli();                                               // interrupt: keep the gate's state whole
 #endif
-  const bool drawn = g_owned && (g_u.base != CB_NATIVE || g_u.pulseActive);   // the contract drew this frame itself
-  if (drawn && scale > g_u.ceil) scale = g_u.ceil;
-  const uint8_t level = (uint8_t)((uint16_t)(((uint32_t)sum * scale) / 255u) / n);
-  if (drawn) {
-    const uint8_t allowed = contractFieldGate(g_u, level, now);
-    if (allowed < level) scale = (uint8_t)(((uint16_t)scale * allowed) / level);   // rounds down
-  } else {
+  uint8_t level = _fieldOf(sum, scale), lum = _fieldOf(sumY, scale);
+  const bool reports = !drawn && _nativeReports(g_owned ? g_u.nativeCode : lastPSIeventCode);
+  if (g_seenNative && (drawn || reports)) {            // what Leia or Knight Rider left on the LEDs
+    contractFieldTell(g_u, g_seenLevel, g_seenLum, now);
+    g_seenNative = false;
+  }
+  if (!drawn) {                                        // a native look's frame: never changed
     if (!g_owned && !g_u.inShow) g_u.ceil = scale;     // no show: the step follows the owner's level
-    contractFieldForced(g_u, level, now);
+    if (g_edgeKind == 1 && level != 0) {
+      // The look that took the panel is lit, for the first time: its start, as the gate hears
+      // it. A mode whose frames are reported has changed the look (S11) and its light is told
+      // below. Leia and Knight Rider are told once, here (S10), by the level of this frame.
+      if (reports) contractLookForced(g_u, contractLookSigNative(g_edgeCode), now);
+      else         contractNativeStarted(g_u, g_edgeCode, level, now);
+      g_edgeKind = 0;
+    } else if (g_edgeKind == 2) {
+      if (!reports) contractNativeLevel(g_u, level, now);
+      g_edgeKind = 0;
+    }
+    // A mode whose frames are reported: the gate hears what is on the LEDs, as it is. (The level
+    // a call would tell it, the brightness the mode draws at, is not what most modes put on the
+    // field, and a gate that believed it would take the contract's next rise from the real level
+    // for less than it is.) Leia and Knight Rider: their darkest frame is kept, for whoever draws
+    // next (they go dark between steps, and what lights the field after that is an onset).
+    if (reports) contractFieldTell(g_u, level, lum, now);
+    else {                                             // the darkest it has been: a rise from there is an onset
+      if (!g_seenNative || level < g_seenLevel) g_seenLevel = level;
+      if (!g_seenNative || lum < g_seenLum) g_seenLum = lum;
+      g_seenNative = true;
+    }
+  } else {
+    g_edgeKind = 0;                                    // a native look that never lit owes the gate nothing
+    const uint8_t ask = contractFieldAsk(g_u, level, lum, now);
+    if (ask != 255) {
+      scale = (uint8_t)(((uint16_t)scale * ask) / 255u);                        // rounds down
+      level = _fieldOf(sum, scale); lum = _fieldOf(sumY, scale);
+    }
+    contractFieldTell(g_u, level, lum, now);
   }
 #ifdef PSI_ENABLE_I2C
   SREG = sreg;
 #endif
   return scale;
-}
-
-// The gate, asked without being told: how far may the field rise to `level` right now? One copy
-// of the core's contractFieldAllowed() for the brightness a show gives a native look.
-static PSI_NOINLINE uint8_t _gateAllows(uint8_t level) { return contractFieldAllowed(g_u, level, millis()); }
-// May a native look be given the panel now? Yes when a dark-to-lit onset would be allowed: 340 ms
-// after the field last lit or got brighter, whether the panel is lit or dark at this moment. The
-// contract cannot see what the look will draw. It may clear the panel and light it at once (most
-// native modes do when they start), or be in a dark stretch of its own and relight at its own
-// time: to anyone watching, that light follows the contract's last one. So the two edges where
-// frames of the contract's give way to a native look's (a native:<n> starting, the hand-back to
-// the board's own look) both wait for this, and the panel keeps what it shows until then.
-static PSI_NOINLINE bool _gateLetsNativeLight() {
-  return strobeCoolDownExpired(g_u.fieldOnsetMs, millis(), 2 * STROBE_MIN_STATE_MS);
 }
 
 // ---- the looks this build has ----------------------------------------------------
@@ -394,7 +468,7 @@ inline void _renderChase(const CRGB& col, uint32_t t0) {
   uint32_t elapsed = millis() - t0;
   CRGB off(0, 0, 0);
   for (int p = 0; p < COLUMNS; p++) {
-    bool lit = fxChaseLit(p, elapsed, g_u.speed);
+    bool lit = fxChaseLit(p, elapsed, g_u.speed, COLUMNS);
     fill_column((uint8_t)p, lit ? col : off, 0);
   }
   FastLED.show(brightness());
@@ -498,19 +572,27 @@ static PSI_NOINLINE bool _fireAccent(ContractEffect fx, const ContractRGB& c, ui
 // A live look: now, or when its S4 hold ends.
 static PSI_NOINLINE void _applyLook(ContractLookPatch lp, uint32_t now) {
   lookPatchDefault(lp, g_u.base);                      // L5: no i= and no look yet is solid
+  // S11: re-applying the same look does not restart it. Asked before anything is written: the
+  // look this line makes, against the one the unit has.
+  const ContractEffect effect = (lp.has & LP_EFFECT) ? _lookHere(lp.effect, false) : g_u.effect;
+  const bool same = contractLookSame(g_u, effect, (lp.has & LP_EFFECT) ? lp.nativeCode : g_u.nativeCode,
+                                     (lp.has & LP_COLOR) ? lp.color : g_u.color, (lp.has & LP_SPEED) ? lp.speed : g_u.speed);
   if (lp.has & LP_COLOR)   g_u.color = lp.color;
   if (lp.has & LP_SPEED)   g_u.speed = lp.speed;
   if (lp.has & LP_BRIGHT)  g_u.bright = lp.bright;
   if (lp.has & LP_BEATMOD) g_u.beatMod = lp.beatMod;
   if (lp.has & LP_AM)      g_u.accentMode = lp.accentMode;
   if (lp.has & LP_EVERY)   g_u.accentEvery = lp.every;
-  g_u.startMs = now;
   g_u.pulseActive = false;
   if (lp.has & LP_EFFECT) {
     _holdPanel();
-    g_u.effect = _lookHere(lp.effect, false);
+    g_u.effect = effect;
     g_u.nativeCode = lp.nativeCode;
     g_u.base = (lp.effect == CE_NATIVE) ? CB_NATIVE : CB_LOOK;
+  }
+  if (!same) {                                         // another look: its timeline starts, and what
+    g_u.startMs = now;                                 // the field shows next is a change of look
+    contractLookRestart(g_u);
     g_lastEffect = CE_NONE;                            // force a retrigger on the next tick
   }
 }
@@ -657,18 +739,24 @@ inline bool contractLoopTick() {
     bp = beatPosAt(g_clock, now);
     if (g_u.scoreLen) {
       int idx = scoreCursor(g_u.curSection, scoreActiveIndex(g_score, g_u.scoreLen, bp.beatIndex), g_u.pinForward);
-      if (idx >= 0 && idx != g_u.curSection) {         // a section boundary
+      // A section boundary. S4 for every path: a section is applied 170 ms after the unit's last
+      // look change at the earliest (a C seek can move the beat between two sections every few
+      // milliseconds); one that has to wait is taken by a later tick, if the beat is still in it.
+      if (idx >= 0 && idx != g_u.curSection && contractSectionMayApply(g_u, now)) {
         const ScoreEntry& e = g_score[idx];
         _holdPanel();
+        if (!contractLookSame(g_u, e.effect, e.nativeCode, e.color, e.speed)) {   // S11
+          g_u.startMs = now;
+          contractLookRestart(g_u);
+          g_lastEffect = CE_NONE;
+        }
         g_u.curSection   = (int8_t)idx;
         g_u.sectionStart = e.atBeat;
         g_u.sectionEnd   = (idx + 1 < g_u.scoreLen) ? g_score[idx + 1].atBeat : (e.atBeat + 9999);
         g_u.effect = e.effect; g_u.nativeCode = e.nativeCode; g_u.color = e.color; g_u.speed = e.speed;
         g_u.bright = e.bright; g_u.beatMod = e.beatMod; g_u.accentMode = e.accentMode;
         g_u.accentEvery = e.accentEvery;
-        g_u.startMs = now;
         g_u.base = (e.effect == CE_NATIVE) ? CB_NATIVE : CB_LOOK;
-        g_lastEffect = CE_NONE;
       }
       // The scored accent. Consume the edge first, always (or a beat that does not fire is tested
       // again on every frame); then the SAME predicate the pump uses (S2). A native:<n> section
@@ -683,13 +771,16 @@ inline bool contractLoopTick() {
   }
 
   if (!_owns()) {                                      // nothing of ours left to show: the native look runs
-    // S10: handing the panel to the native look is the contract's edge, and the light that look
-    // shows next is counted as the contract's doing. So the hand-over waits until an onset is
-    // allowed (_gateLetsNativeLight); until then the panel keeps what it shows. The native look's
-    // own frames then tell the gate (contractFrameScale).
+    // S10: handing the panel to the board's own look is the contract's edge, and the light that
+    // look shows next is counted as the contract's doing. So the hand-over waits until an onset
+    // and a change of look are allowed (contractNativeMayStart), lit or dark; until then the panel
+    // keeps what it shows. The gate is told once, as the look takes the LEDs.
     if (g_owned) {
-      if (!_gateLetsNativeLight()) return true;
+      const int code = g_tookLook ? (int)defaultPattern : lastPSIeventCode;
+      const uint8_t level = _nativeField(code, _ownerBri());
+      if (!contractNativeMayStart(g_u, code, level, now)) return true;
       _givePanelBack();
+      _nativeEdge(1, code);
     }
     return false;
   }
@@ -710,32 +801,64 @@ inline bool contractLoopTick() {
     const uint32_t t0 = g_u.pulseActive ? g_u.pulseStartMs : g_u.startMs;
     effBright = (uint8_t)(((uint16_t)lvl * fxPulseBright(now - t0, g_u.speed)) / 255u);
   }
-  const ContractEffect eff = (g_u.base == CB_DARK) ? CE_OFF : g_u.effect;
-  if (g_u.base == CB_NATIVE) {
-    // S10: a native:<n> look runs as stock and its frames are not held. What the contract holds is
-    // the brightness it gives the look: every rise of it (B, b=, the pump) goes only as far as the
-    // gate allows now. Every native mode draws at brightness(), so a look that is dark when the
-    // brightness comes up inside the gate's window stays dim until the window ends. (The start of
-    // the look is held as a whole, below.)
-    const uint8_t allowed = _gateAllows(effBright);
-    if (allowed < effBright) effBright = allowed;
-  }
+  ContractEffect eff = (g_u.base == CB_DARK) ? CE_OFF : g_u.effect;
   useTempInternalBrightness = true;                    // 3P volatile path only, never EEPROM
-  tempGlobalBrightnessValue = effBright;
 
-  if (g_u.pulseActive) {
-    _renderLook(g_u.pulseFx == CE_NONE ? CE_SOLID : g_u.pulseFx, _scaled(g_u.pulseColor), g_u.pulseStartMs);
+  if (g_u.base == CB_NATIVE && !g_u.pulseActive) {
+    // S10: a native:<n> look runs as stock. Its frames are not held, measured or reported; the
+    // gate governs its edges, and each is one call.
+    uint8_t level = _nativeField(g_u.nativeCode, effBright);
+    if (eff != g_lastEffect) {
+      // It starts. Most modes clear the panel and draw at once, whatever was on it, so the start
+      // waits until an onset and a change of look are allowed, the panel keeping what it shows.
+      if (!contractNativeMayStart(g_u, g_u.nativeCode, level, now)) return true;
+      _nativeEdge(1, g_u.nativeCode);
+      firstTime = true;                                // re-init the native state machines
+      g_lastEffect = eff;
+    } else if (level != g_nativeLevel) {
+      // The show moves its brightness (B, b=, the pump). Every native mode draws at brightness().
+      // A rise goes only as far as the gate allows now. While the look has not been lit yet (it
+      // started at no brightness, or dark), its first light is its start: that asks again.
+      if (level > g_nativeLevel) {
+        if (g_edgeKind != 1) level = contractFieldAllowed(g_u, level, now);
+        else if (!contractNativeMayStart(g_u, g_u.nativeCode, level, now)) level = g_nativeLevel;
+      }
+      _nativeEdge(2, g_u.nativeCode);
+    }
+    g_nativeLevel = level;
+    if (g_u.nativeCode != 0) effBright = level;
+    tempGlobalBrightnessValue = effBright;
+    runPattern(g_u.nativeCode);
     return true;
   }
-  if (eff != g_lastEffect) {                           // a new look: re-init the native state machines
-    // S10: a native:<n> look starts. That is the contract's edge, and one the brightness cannot
-    // soften: most modes clear the panel and draw at once, whatever was on it. So the start waits
-    // until an onset is allowed, the panel keeping what it shows.
-    if (g_u.base == CB_NATIVE && !_gateLetsNativeLight()) return true;
+  tempGlobalBrightnessValue = effBright;
+
+  // What the contract draws itself: the overlay (an effect swap on its own timeline), or the look.
+  ContractRGB col = g_u.color;
+  uint32_t t0 = g_u.startMs;
+  if (g_u.pulseActive) {
+    eff = (g_u.pulseFx == CE_NONE) ? CE_SOLID : g_u.pulseFx;
+    col = g_u.pulseColor;
+    t0  = g_u.pulseStartMs;
+  }
+  // S11, S4 for every path: a frame that would show another look or colour than the field last
+  // showed lit comes 170 ms after the field's last change at the earliest, whichever path asked
+  // for it (an accent between two looks, a section, a look after a native one). Until then the
+  // frame that is up stays up. Black is not a look: a blackout is never held.
+  if (eff != CE_OFF && effBright != 0 && !contractLookGate(g_u, contractLookSig(eff, col), now)) return true;
+  if (g_nativeUnknown) {
+    // S10: the contract draws again, from this frame, where a mode that is not on the allow-list
+    // was. It may have been flashing: the field is taken as dark and just lit, and the contract's
+    // next onset keeps 340 ms from here. (A mode on the list needs no such care: the gate has
+    // heard its frames, or, for Leia and Knight Rider, hears what they left on the LEDs.)
+    contractNativeEnded(g_u, false, now);
+    g_nativeUnknown = false;
+  }
+  if (!g_u.pulseActive && eff != g_lastEffect) {       // a new look: re-init the native state machines
     firstTime = true;
     g_lastEffect = eff;
   }
-  _renderLook(eff, _scaled(g_u.color), g_u.startMs);
+  _renderLook(eff, _scaled(col), t0);
   return true;
 }
 

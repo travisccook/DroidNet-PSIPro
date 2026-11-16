@@ -757,6 +757,14 @@ inline int scoreInsert(ScoreEntry* entries, int n, int cap, const ScoreEntry& e)
 // speed knob. fxHash16: cheap xorshift PRNG hash for sparkle/twinkle seeding.
 // fxHsv2rgb: standard 6-sextant HSV->RGB (integer division, matches the JS parity port).
 inline uint32_t fxStepMs(uint8_t speed) { return 30u + (uint32_t)(255 - speed) / 2u; }
+// The shortest cycle of a look that lights its whole field once a cycle (pulse, wipe). The S9
+// gate lets a field light again 340 ms after it last got BRIGHTER, which is the cycle's peak, so
+// the falling half and the first tenth of the next rise have to take 340 ms between them: a
+// triangle needs 618 ms, a wipe on 8 positions 605. Shorter, and the gate holds the rise back.
+// Measured (test/host/gate_held_table.cpp): nothing is held from 640 ms up with frames 10 to
+// 15 ms apart, and from 680 ms up with frames as much as 40 ms apart. 680 is four states of the
+// strobe floor.
+static const uint32_t FX_CYCLE_MIN_MS = 4u * STROBE_MIN_STATE_MS;
 // The `x +=` is load-bearing: a bare xorshift has 0 as a FIXED POINT (0^0 == 0 at every
 // step), so fxHash16(0) returned 0. Every consumer seeds from the strand index, so index 0
 // hashed to zero — in twinkle that gave pixel 0 the minimum period AND zero phase offset,
@@ -820,9 +828,15 @@ inline uint8_t fxCometBright(int p, int head, int N) {
   // dist*255 wraps a 16-bit int for dist > 128, i.e. any strand with N > ~322.
   return (uint8_t)(255u - ((uint32_t)dist * 255u) / (uint32_t)trail);
 }
-inline bool fxChaseLit(int p, uint32_t elapsed, uint8_t speed) {
+// chase: every third position of a RING of N lit, the ring turning one position a step. The
+// lit count is the same at every step, ceil(N / 3), whatever N is (CA1.5). It used to be every
+// third position of the line, which lights 3, 3, then 2 of 8: the field mean moved by an eighth
+// of the ceiling at every step, more than the S9 gate's tenth. Where N is not a multiple of 3
+// one gap of the ring is shorter than the others, and it travels with the rest.
+inline bool fxChaseLit(int p, uint32_t elapsed, uint8_t speed, int N) {
+  if (N <= 0) return false;
   uint32_t s = fxStepMs(speed); if (!s) s = 1;
-  return (((uint32_t)p + elapsed / s) % 3u) == 0u;
+  return ((((uint32_t)p + elapsed / s) % (uint32_t)N) % 3u) == 0u;
 }
 // A ping-pong wipe: fill 0 -> N-1, then DRAIN BACK from the far end. The drain half used to
 // read `p > (ph - N)`, which empties from position 0 upward — i.e. the erase head travelled
@@ -830,8 +844,16 @@ inline bool fxChaseLit(int p, uint32_t elapsed, uint8_t speed) {
 // ping-ponged at all. That contradicted the spec, this function's own comment, and the JS
 // visualizer's preview. The mirrored form below empties from N-1 downward, which is what a
 // ping-pong is, and keeps the identical cadence (one position per step, N steps per half).
+// One wipe, fill and drain, takes 2 * N steps, and never less than FX_CYCLE_MIN_MS (CA1.5): a
+// short strand at a high speed lit its whole field again less than 340 ms after it was last
+// full, and the S9 gate held the fill back. The step is stretched where 2 * N of them are shorter.
+inline uint32_t fxWipeStepMs(uint8_t speed, int N) {
+  uint32_t s = fxStepMs(speed);
+  const uint32_t least = (FX_CYCLE_MIN_MS + (uint32_t)N * 2u - 1u) / ((uint32_t)N * 2u);
+  return s < least ? least : s;
+}
 inline bool fxWipeLit(int p, uint32_t elapsed, uint8_t speed, int N) {
-  if (N <= 0) return false; uint32_t s = fxStepMs(speed); if (!s) s = 1;
+  if (N <= 0) return false; uint32_t s = fxWipeStepMs(speed, N);
   uint32_t ph = (elapsed / s) % ((uint32_t)N * 2u);   // 2*N wraps a 16-bit int for N > 16383
   if (ph < (uint32_t)N) return p <= (int)ph;          // fill: light 0..ph
   return p < (int)((uint32_t)N * 2u - 1u - ph);       // drain: dark from N-1 back down
@@ -925,7 +947,23 @@ inline void lookPatchDefault(ContractLookPatch& lp, uint8_t base) {
   }
 }
 
-struct ContractUnitState {
+// THE SAFETY ANCHORS of a unit: what no reset clears (contractShowReset). They are a struct of
+// their own so that the reset keeps them as one piece: a field added here is kept without
+// anyone having to remember it.
+struct ContractAnchors {
+  uint32_t       lastApplyMs = 0;       // S4: when the unit's look last changed (a live A, a section)
+  uint32_t       pulseLastMs = 0;       // the strobe cool-down
+  // ---- S9: the field gate (contractFieldGate)
+  uint32_t       fieldOnsetMs = 0;      // when the field last lit, or last got brighter while lit
+  uint8_t        fieldRef = 0;          // lit: the brightest level since it lit. Not lit: the darkest since it fell.
+  bool           fieldLit = false;
+  uint8_t        fieldRefY = 0;         // the same two for the field's LUMINANCE (a colour change moves it
+  bool           fieldLitY = false;     // while the brightest channel stays where it was)
+  // ---- S4 for every path: the look gate (contractLookGate)
+  uint32_t       lookSig = 0;           // the look the field last showed lit (contractLookSig); 0: none yet
+  uint32_t       lookMs = 0;            // when it changed to that, or the field last lit or got brighter in it
+};
+struct ContractUnitState : ContractAnchors {
   bool           inShow = false;        // M:v=show armed (it stays set through X)
   uint8_t        base = CB_NONE;        // ContractBase
   // ---- the look
@@ -941,14 +979,12 @@ struct ContractUnitState {
   // ---- S4: the held live look
   bool           holdPending = false;
   ContractLookPatch held;
-  uint32_t       lastApplyMs = 0;       // SAFETY ANCHOR: survives a reset
   // ---- the accent overlay
   bool           pulseActive = false;
   ContractEffect pulseFx = CE_NONE;
   ContractRGB    pulseColor{255, 255, 255};
   uint16_t       pulseDurMs = 0;
   uint32_t       pulseStartMs = 0;
-  uint32_t       pulseLastMs = 0;       // SAFETY ANCHOR (the strobe cool-down): survives a reset
   uint8_t        pulseBright = 255;     // the overlay's own brightness fraction (P's b=): never the base look's
   // ---- the score cursor, and the load check
   uint8_t        scoreLen = 0;          // entries held (the table itself is the fork's, sized by its cap)
@@ -960,10 +996,6 @@ struct ContractUnitState {
   int32_t        lastAccentBeat = BEAT_NONE;
   // ---- L2
   uint8_t        wdSec = 0;             // 0 = no watchdog
-  // ---- S9: the field gate (contractFieldGate). SAFETY ANCHORS: all three survive a reset.
-  uint32_t       fieldOnsetMs = 0;      // when the field last lit, or last got brighter while lit
-  uint8_t        fieldRef = 0;          // lit: the brightest level since it lit. Not lit: the darkest since it fell.
-  bool           fieldLit = false;
 };
 
 // S6: the level a brightness fraction gives under a ceiling. 255 is the ceiling itself, 128 half
@@ -978,12 +1010,11 @@ inline uint8_t contractLevel(uint8_t ceil, uint8_t fraction) {
 // (X, then P, repeated). A failed load check (loadOk == 2) is kept too; contractOnShow() is what
 // clears it.
 inline void contractShowReset(ContractUnitState& s, uint8_t ceiling) {
-  const uint32_t keepPulse = s.pulseLastMs, keepApply = s.lastApplyMs, keepOnset = s.fieldOnsetMs;
-  const uint8_t  keepOk = (s.loadOk == 2) ? 2 : 0, keepRef = s.fieldRef;
-  const bool     keepLit = s.fieldLit;
+  const ContractAnchors keep = s;
+  const uint8_t keepOk = (s.loadOk == 2) ? 2 : 0;
   s = ContractUnitState();
-  s.pulseLastMs = keepPulse; s.lastApplyMs = keepApply; s.loadOk = keepOk;
-  s.fieldOnsetMs = keepOnset; s.fieldRef = keepRef; s.fieldLit = keepLit;
+  static_cast<ContractAnchors&>(s) = keep;
+  s.loadOk = keepOk;
   s.ceil = ceiling;
 }
 // M:v=show[,wd=<s>]: reset and arm. base stays CB_NONE: the native idle look keeps running until
@@ -1054,8 +1085,8 @@ inline bool liveLookDue(ContractUnitState& s, uint32_t nowMs, ContractLookPatch&
 //     allowed = contractFieldGate(state, level, now);
 // before the frame leaves. When allowed < level it scales the frame down to `allowed`.
 //
-// The rule. A change of at least a STEP (a quarter of the unit's ceiling) is a swing; smaller
-// changes are a look's own texture and pass. The unit is either LIT or not:
+// The rule. A change of a STEP (more than a tenth of the unit's ceiling, and at least 2 levels)
+// is a swing; smaller changes are a look's own texture and pass. The unit is either LIT or not:
 //   * LIT. The gate follows the level up, and each new peak is the end of the onset so far. A
 //     fall of a step or more below the peak makes the unit not lit. A fall is never delayed: a
 //     blackout is always immediate.
@@ -1068,37 +1099,106 @@ inline bool liveLookDue(ContractUnitState& s, uint32_t nowMs, ContractLookPatch&
 // in any second. (Why "last got brighter" and not "last lit": an onset is over when the light
 // stops rising. Timing from its start would let a slow rise be followed too closely.)
 //
-// What it costs a look: nothing, unless it swings the whole field by a quarter of the ceiling
-// more often than every 340 ms. The looks that could are held to the floor already (S2, S4, S8);
-// the gate squares off the fastest of them a little (a pulse faster than about 1.8 cycles a
-// second rises in a step instead of a ramp) and never makes anything brighter.
+// What it costs a look: nothing, unless it swings the whole field by more than a tenth of the
+// ceiling more often than every 340 ms. The looks that could are held to the floor already (S2,
+// S4, S8); the gate squares off the fastest of them a little (a pulse faster than about 1.8
+// cycles a second rises in a step instead of a ramp) and never makes anything brighter. A look
+// with texture (a sparkle, a chase) moves its field mean by less than a step from frame to frame;
+// docs/CHANGING_THE_CORE.md has the measured share of frames the gate holds back, look by look.
 //
-// Six bytes of state a unit. The state survives every reset (contractShowReset).
-inline uint8_t contractFieldStep(uint8_t ceil) { return (uint8_t)(ceil / 4u + 1u); }
-inline uint8_t contractFieldGate(ContractUnitState& s, uint8_t level, uint32_t nowMs) {
+// Sixteen bytes of state a unit, with the look gate's. It survives every reset (contractShowReset).
+inline uint8_t contractFieldStep(uint8_t ceil) { return ceil < 10 ? (uint8_t)2 : (uint8_t)(ceil / 10u + 1u); }
+
+// TWO MEASURES, ONE GATE (core revision CA1.4). The brightest channel cannot see colour: a field
+// that goes from white to blue and back keeps its level and loses nine tenths of its light. So a
+// fork that draws colour measures each frame twice,
+//     level = the mean over the LEDs of each LED's brightest channel      (above)
+//     lum   = the mean over the LEDs of each LED's luminance, Rec.709:
+//             (54 * r + 183 * g + 19 * b) >> 8                            (contractLuminance)
+// and the rule above runs on each, with ONE shared time: an onset in either measure needs 340 ms
+// from the last onset, or the last brightening, in either. The step is the same for both.
+// A fork with single-colour LEDs has one measure and uses contractFieldGate(): the same rule
+// with lum = level.
+inline uint8_t contractLuminance(uint8_t r, uint8_t g, uint8_t b) {
+  return (uint8_t)(((uint16_t)54u * r + (uint16_t)183u * g + (uint16_t)19u * b) >> 8);
+}
+// One measure's part of the rule, in two halves. `open`: the 340 ms had passed when this frame
+// began. ASK: what the measure allows for x (nothing changes).
+inline uint8_t _fieldAsk(bool lit, uint8_t ref, uint8_t x, uint8_t step, bool open) {
+  if (lit || open || x < ref || (uint8_t)(x - ref) < step) return x;      // lit already; an onset in time; texture
+  return (uint8_t)(ref + step - 1u);                                      // held
+}
+// TELL: x, which the rule allowed, is what the unit shows. Sets `brighter` when the field lit,
+// or got brighter while lit, in this measure.
+inline void _fieldTell(bool& lit, uint8_t& ref, uint8_t x, uint8_t step, bool& brighter) {
+  if (lit) {
+    if (x > ref) { ref = x; brighter = true; }                            // still rising
+    else if ((uint8_t)(ref - x) >= step) { lit = false; ref = x; }        // a fall: never delayed
+  } else if (x < ref) ref = x;                                            // the trough
+  else if ((uint8_t)(x - ref) >= step) { lit = true; ref = x; brighter = true; }   // an onset
+}
+// The field lit, or got brighter while lit: both of the gate's times move. The second is the
+// look gate's (below). A field that lights changes its look, whatever look it lights in, and a
+// look that fades in (a pulse, a wipe) is not on the field at its first, dim frame: the next
+// change of look keeps its 170 ms from when this one stopped arriving.
+inline void _fieldBrighter(ContractUnitState& s, uint32_t nowMs) { s.fieldOnsetMs = nowMs; s.lookMs = nowMs; }
+// The gate for a frame with both measures, in its two halves.
+// ASK: the SCALE for a frame drawn at (level, lum). 255: as drawn. Otherwise every channel of
+// every LED is multiplied by scale / 255, rounding down. Nothing changes.
+//     open  = 340 ms have passed since fieldOnsetMs            (decided once, before either measure)
+//     aL    = what the rule allows of level,  aY = what it allows of lum
+//     scale = min(255, floor(aL * 255 / level), floor(aY * 255 / lum))
+inline uint8_t contractFieldAsk(const ContractUnitState& s, uint8_t level, uint8_t lum, uint32_t nowMs) {
   const uint8_t step = contractFieldStep(s.ceil);
-  if (s.fieldLit) {
-    if (level > s.fieldRef) { s.fieldRef = level; s.fieldOnsetMs = nowMs; }           // still rising
-    else if ((uint8_t)(s.fieldRef - level) >= step) { s.fieldLit = false; s.fieldRef = level; }   // a fall
-    return level;
+  const bool open = strobeCoolDownExpired(s.fieldOnsetMs, nowMs, 2 * STROBE_MIN_STATE_MS);
+  const uint8_t aL = _fieldAsk(s.fieldLit, s.fieldRef, level, step, open);
+  const uint8_t aY = _fieldAsk(s.fieldLitY, s.fieldRefY, lum, step, open);
+  uint8_t scale = 255;
+  if (aL < level) scale = (uint8_t)(((uint16_t)aL * 255u) / level);
+  if (aY < lum) { const uint8_t sy = (uint8_t)(((uint16_t)aY * 255u) / lum); if (sy < scale) scale = sy; }
+  return scale;
+}
+// TELL: the frame the unit SHOWS has this level and this luminance (a frame the ask allowed:
+// as drawn, or scaled as it said). Both measures record it. Not what was drawn: a frame one
+// measure held down is dimmer in the other one too, and a peak that never reached the LEDs must
+// not be remembered. fieldOnsetMs = lookMs = now when either measure lit or got brighter.
+inline void contractFieldTell(ContractUnitState& s, uint8_t level, uint8_t lum, uint32_t nowMs) {
+  const uint8_t step = contractFieldStep(s.ceil);
+  bool brighter = false;
+  _fieldTell(s.fieldLit, s.fieldRef, level, step, brighter);
+  _fieldTell(s.fieldLitY, s.fieldRefY, lum, step, brighter);
+  if (brighter) _fieldBrighter(s, nowMs);
+}
+// Both in one call, for a fork that does not measure its frame again after scaling it: the
+// scaled frame is recorded as floor(level * scale / 255) and floor(lum * scale / 255). (A fork
+// that does measure the scaled frame asks, scales, measures and tells: per-LED rounding can
+// leave the frame a level under that.)
+inline uint8_t contractFieldScale(ContractUnitState& s, uint8_t level, uint8_t lum, uint32_t nowMs) {
+  const uint8_t scale = contractFieldAsk(s, level, lum, nowMs);
+  if (scale != 255) {
+    level = (uint8_t)(((uint16_t)level * scale) / 255u);
+    lum   = (uint8_t)(((uint16_t)lum * scale) / 255u);
   }
-  if (level < s.fieldRef) s.fieldRef = level;                                         // the trough
-  if ((uint8_t)(level - s.fieldRef) < step) return level;
-  if (strobeCoolDownExpired(s.fieldOnsetMs, nowMs, 2 * STROBE_MIN_STATE_MS)) {
-    s.fieldLit = true; s.fieldRef = level; s.fieldOnsetMs = nowMs;
-    return level;
-  }
-  return (uint8_t)(s.fieldRef + step - 1u);                                           // held
+  contractFieldTell(s, level, lum, nowMs);
+  return scale;
 }
 // ASK WITHOUT TELLING: what contractFieldGate() would return for `level` now, with no change to
 // the state. For light a fork cannot scale after the fact, see below.
 inline uint8_t contractFieldAllowed(const ContractUnitState& s, uint8_t level, uint32_t nowMs) {
-  if (s.fieldLit) return level;
   const uint8_t step = contractFieldStep(s.ceil);
-  const uint8_t trough = level < s.fieldRef ? level : s.fieldRef;
-  if ((uint8_t)(level - trough) < step) return level;
-  if (strobeCoolDownExpired(s.fieldOnsetMs, nowMs, 2 * STROBE_MIN_STATE_MS)) return level;
-  return (uint8_t)(trough + step - 1u);
+  const bool open = strobeCoolDownExpired(s.fieldOnsetMs, nowMs, 2 * STROBE_MIN_STATE_MS);
+  const uint8_t aL = _fieldAsk(s.fieldLit, s.fieldRef, level, step, open);
+  const uint8_t aY = _fieldAsk(s.fieldLitY, s.fieldRefY, level, step, open);
+  return aL < aY ? aL : aY;
+}
+// The gate for one measure (white or single-colour light, and every native look): the level the
+// unit may show, which is what both measures record. The same rule as contractFieldScale() with
+// lum = level, for a fork that then shows that level itself; a fork that scales a drawn frame
+// uses contractFieldScale(), which records the frame as the scaling rounds it.
+inline uint8_t contractFieldGate(ContractUnitState& s, uint8_t level, uint32_t nowMs) {
+  const uint8_t a = contractFieldAllowed(s, level, nowMs);
+  contractFieldTell(s, a, a, nowMs);
+  return a;
 }
 // A NATIVE LOOK is light the fork does not draw, cannot measure, and often cannot scale. It goes
 // through the same gate, by the level the fork knows it by: 0 for a native blackout, the
@@ -1118,7 +1218,122 @@ inline bool contractFieldMayLight(const ContractUnitState& s, uint32_t nowMs) {
 // native look. There is nothing to allow. The gate records it, so that what the CONTRACT does
 // next keeps its distance from it.
 inline void contractFieldForced(ContractUnitState& s, uint8_t level, uint32_t nowMs) {
-  if (contractFieldGate(s, level, nowMs) < level) { s.fieldLit = true; s.fieldRef = level; s.fieldOnsetMs = nowMs; }
+  if (contractFieldGate(s, level, nowMs) < level) {
+    s.fieldLit = s.fieldLitY = true; s.fieldRef = s.fieldRefY = level;
+    _fieldBrighter(s, nowMs);
+  }
+}
+
+// ===== S4 FOR EVERY PATH: THE LOOK GATE (core revision CA1.4) =====
+// The field gate limits how often a unit LIGHTS. A unit can also flicker without ever going dark:
+// red, blue, red, at one level. S4 held a live A to one change in 170 ms; nothing held a section
+// reached by a C seek, an accent thrown between two looks, or a display handed to a native look
+// and taken back. The rule is now the same for all of them, in two places:
+//   * a SECTION is applied only 170 ms after the unit's last look change, like a live A
+//     (contractSectionMayApply; a section that has to wait is applied by a later tick, if the
+//     beat is still in it). That keeps the old look moving while the new one waits;
+//   * at the OUTPUT, whatever asked: a frame that would show a different look than the field last
+//     showed lit is drawn only 170 ms after the field changed to that one (contractLookGate).
+//     Until then the fork leaves the frame that is up. A BLACK frame is never a look and is never
+//     held: a blackout is always immediate. "Changed to that one" is when it ARRIVED: the frame
+//     of the change, and after it every frame in which the field lit or got brighter (the field
+//     gate's own time, fieldOnsetMs: _fieldBrighter). So a look that fades in keeps the next
+//     change away until 170 ms after it stopped rising, and so does a field that lights.
+// A look is its effect and its colour (contractLookSig), or a native sequence
+// (contractLookSigNative). Brightness is not part of it: that is the field gate's business.
+inline uint32_t contractLookSig(ContractEffect e, const ContractRGB& c) {
+  return ((uint32_t)e << 24) | ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | (uint32_t)c.b;
+}
+inline uint32_t contractLookSigNative(int code) { return ((uint32_t)CE_NATIVE << 24) | (uint32_t)(uint16_t)code; }
+// ASK: may the field change to this look now? (For a native look: before handing the LEDs over.)
+inline bool contractLookAllowed(const ContractUnitState& s, uint32_t sig, uint32_t nowMs) {
+  return sig == s.lookSig || strobeCoolDownExpired(s.lookMs, nowMs, STROBE_MIN_STATE_MS);
+}
+// The gate, at the frame: true, draw it (and it is the field's look from now); false, leave what is up.
+inline bool contractLookGate(ContractUnitState& s, uint32_t sig, uint32_t nowMs) {
+  if (sig == s.lookSig) return true;
+  if (!strobeCoolDownExpired(s.lookMs, nowMs, STROBE_MIN_STATE_MS)) return false;
+  s.lookSig = sig; s.lookMs = nowMs;
+  return true;
+}
+// S11: "Re-applying the same look does not restart it." A fork asks this BEFORE it writes a live
+// A or a section into the unit. true: the unit's base look is this very look already (the same
+// effect, native code, colour and speed): its timeline carries on, and nothing changes for the
+// gate. false: the look starts again. The fork then sets its start time and calls
+// contractLookRestart(): a look whose timeline starts again (a gradient back at its first hue, a
+// scan at its first column) is a change of look even when its effect and colour are the old
+// ones, and the next lit frame goes through the gate as a new look.
+inline bool contractLookSame(const ContractUnitState& s, ContractEffect effect, int nativeCode, const ContractRGB& c, uint8_t speed) {
+  return (s.base == CB_LOOK || s.base == CB_NATIVE) && s.base == ((effect == CE_NATIVE && nativeCode >= 0) ? CB_NATIVE : CB_LOOK) &&
+         s.effect == effect && s.nativeCode == nativeCode && s.speed == speed &&
+         s.color.r == c.r && s.color.g == c.g && s.color.b == c.b;
+}
+inline void contractLookRestart(ContractUnitState& s) { s.lookSig = 0; }
+// A look nobody asked the gate about is on the LEDs (a native look that started; a button).
+inline void contractLookForced(ContractUnitState& s, uint32_t sig, uint32_t nowMs) {
+  if (sig != s.lookSig) { s.lookSig = sig; s.lookMs = nowMs; }
+}
+// ===== S10: NATIVE LOOKS (core revision CA1.4) =====
+// A native look on a fork's allow-list is one of two kinds (the spec's S10), and the fork's list
+// says which (nativeGated<Board>() below):
+//   * RUNS AS STOCK. Its whole field does not swing by more than a tenth more often than every
+//     340 ms, or what moves is a small lit area. Its frames are NOT passed through the gate. The
+//     gate governs its edges, with these four calls and nothing else:
+//         contractNativeMayStart(s, code, level, now)   ASK, before the LEDs are handed over.
+//                                                       false: keep what is up, ask again next pass.
+//                                                       Yes only when an ONSET is allowed (340 ms
+//                                                       after the field last lit or got brighter),
+//                                                       whether the unit is lit or dark just now: a
+//                                                       stock look may clear the unit and light it at
+//                                                       once, or be in a dark stretch of its own and
+//                                                       relight in its own time, and to anyone
+//                                                       watching that light follows the contract's
+//                                                       last. The same call hands a unit BACK to the
+//                                                       board's own idle look.
+//         contractNativeStarted(s, code, level, now)    TELL, at the frame it is on the LEDs.
+//         contractNativeLevel(s, level, now)            TELL: the fork moved its brightness.
+//         contractNativeEnded(s, known, now)            TELL: the fork draws again, from this frame.
+//     `level` is the field level the look runs at, as the fork knows it: 0 for a native blackout,
+//     the brightness the fork gives the look, the ceiling where it gives none. It is told ONCE,
+//     when the look starts (and again only when the fork itself changes it): the look's own
+//     frames are not the gate's business, and a fork does not report them.
+//   * GATED. Its whole field does swing faster, and the fork can scale its frames: it measures
+//     each one and passes it through contractFieldGate() (or contractFieldScale()) like a contract
+//     look. It still calls contractNativeMayStart() before, for the look gate, and
+//     contractLookForced(s, contractLookSigNative(code), now) when it starts.
+// A fork that cannot hold a hand-over back (the look is on the LEDs already: a button) skips the
+// ask and tells; the gate then records light it would have refused, and what the CONTRACT does
+// next keeps its distance from it.
+inline bool contractNativeMayStart(const ContractUnitState& s, int code, uint8_t level, uint32_t nowMs) {
+  if (level == 0) return true;                                                           // a blackout is never held
+  return strobeCoolDownExpired(s.fieldOnsetMs, nowMs, 2 * STROBE_MIN_STATE_MS) &&        // S9: its light is an onset
+         contractLookAllowed(s, contractLookSigNative(code), nowMs);                     // S4
+}
+inline void contractNativeLevel(ContractUnitState& s, uint8_t level, uint32_t nowMs) { contractFieldForced(s, level, nowMs); }
+inline void contractNativeStarted(ContractUnitState& s, int code, uint8_t level, uint32_t nowMs) {
+  contractFieldForced(s, level, nowMs);
+  if (level == 0) return;
+  contractLookForced(s, contractLookSigNative(code), nowMs);
+  // A stock look starting is light the gate did not draw, and its first frames may be an onset
+  // nobody can see from here. Whatever the contract lights next keeps 340 ms from this frame.
+  s.fieldOnsetMs = nowMs;
+}
+// `known`: the look that ends is on the fork's allow-list AND ran at the level the gate was told.
+// One that is not on the list (someone's button started it) may flash as it likes, and one that
+// draws at a level of its own may stand anywhere: nothing is known of the field, so it is taken
+// as dark and just lit, and the first lit frame the fork draws after it waits the window out.
+// A fork does not call this for its idle look, if that is steady light: a show starts from it.
+inline void contractNativeEnded(ContractUnitState& s, bool known, uint32_t nowMs) {
+  s.fieldOnsetMs = nowMs;
+  if (!known) { s.fieldLit = s.fieldLitY = false; s.fieldRef = s.fieldRefY = 0; }
+}
+
+// A scored section is due: may it be applied now? true: it may, and this is the unit's last look
+// change from now (the same anchor a live A uses, so the two keep their distance from each other).
+inline bool contractSectionMayApply(ContractUnitState& s, uint32_t nowMs) {
+  if (!strobeCoolDownExpired(s.lastApplyMs, nowMs, STROBE_MIN_STATE_MS)) return false;
+  s.lastApplyMs = nowMs;
+  return true;
 }
 
 // The accent overlay: is it still up at nowMs? Takes it down when its time is over. ONE definition
@@ -1234,15 +1449,21 @@ inline uint8_t contractFormatQuery(char* out, uint8_t outLen, uint8_t route, cha
 // and swept at different rates on the three boards. These are the shared definitions.
 // R1 adopts ONLY the pulse floor (S8: a pulse cycle is never shorter than 340 ms); the forks
 // switch flash and scan to these in R2, because that changes how those looks appear.
-inline uint32_t fxFlashHalfMs(uint8_t speed) { return STROBE_MIN_STATE_MS + (uint32_t)(255 - speed); }   // 170..425 ms a state
+// (CA1.5: the fastest state is 190 ms, not STROBE_MIN_STATE_MS. A flash that lights exactly
+// every 340 ms meets the S9 gate's 340 ms window with no room at all: a frame drawn a few
+// milliseconds late makes the next ON edge early by as much, the gate holds it for a frame, and
+// every held edge moves the next one later still, until a whole flash is lost. With 20 ms a
+// state to spare nothing is held with frames up to 40 ms apart: test/host/gate_held_table.cpp.)
+static const uint32_t FX_FLASH_MIN_STATE_MS = STROBE_MIN_STATE_MS + 20u;
+inline uint32_t fxFlashHalfMs(uint8_t speed) { return FX_FLASH_MIN_STATE_MS + (uint32_t)(255 - speed); }   // 190..445 ms a state
 inline bool fxFlashOn(uint32_t elapsed, uint8_t speed) {
   const uint32_t h = fxFlashHalfMs(speed);
   return (elapsed % (2u * h)) < h;
 }
-// pulse: a triangle breathe 0..255..0. The full cycle is 2000 ms at s=0 down to
-// 2 * STROBE_MIN_STATE_MS (340 ms) at s=255: S8, never faster than the photosensitivity cap.
+// pulse: a triangle breathe 0..255..0. The full cycle is 2000 ms at s=0 down to FX_CYCLE_MIN_MS
+// at s=255 (it was 340 ms until CA1.5: S8's floor, which the S9 gate then squared off).
 inline uint32_t fxPulsePeriodMs(uint8_t speed) {
-  return 2000u - ((uint32_t)speed * (2000u - 2u * STROBE_MIN_STATE_MS)) / 255u;
+  return 2000u - ((uint32_t)speed * (2000u - FX_CYCLE_MIN_MS)) / 255u;
 }
 inline uint8_t fxPulseBright(uint32_t elapsed, uint8_t speed) {
   const uint32_t period = fxPulsePeriodMs(speed);
@@ -1266,15 +1487,48 @@ inline int fxScanPos(uint32_t elapsed, uint8_t speed, int N, bool wrap) {
 // other code is dropped whole. The lists live here, not in the forks' render layers, so the
 // generated vector file can carry them and Studio's vocabulary is tested against the firmware's
 // own list.
-// RSeries logics (LogicEngine sequence ids): 0..24 without Leia (3) and the text effects 15..18
-// (they need a message), plus the fork's custom effects 101..105. Not 3: the stock Leia effect
-// sets its own brightness, 50..255, every frame (LogicEngine.h, LogicLeiaEffect), past the owner's
-// ceiling and deaf to verb B (S6). Not 25 (one past the engine's effect table, an out-of-bounds
-// call), not 99 (RANDOM can pick anything), not 100 (the bitmap needs an SD card), not 106 (the
-// contract's own renderer).
+// RSeries logics (LogicEngine sequence ids, and the fork's custom effects from 101). The engine
+// draws these itself, so there is no gated kind here (S10): a sequence is on the list when it
+// passes S10's test as the contract starts it (default colour, the speed below, no microphone
+// source): by brightness and by luminance, no two onsets closer than 340 ms, over the whole
+// field and over any region of a quarter of it or more. test/host/test_native_s10.cpp is that
+// test, on a model of the stock code, and DROIDNET_FORK.md has its table. On the list:
+//    0 normal, 1 alarm, 2 failure, 4 march, 5 solid colour, 6 flash colour, 7 and 8 flip flop,
+//    9 colour swap, 10 rainbow, 11 red alert, 12 and 13 the mic effects, 14 lights out,
+//    19 roaming pixel, 20 and 21 the scan lines, 22 fire, 23 PSI colour wipe, 24 pulse,
+//    101 plasma, 105 colour wheel.
+// Not on it:
+//    3 Leia           (sets its own brightness, 50..255, every frame: past the ceiling, deaf to B)
+//    15..18 text      (they need a message)
+//    102 metaballs, 103 fractal (whole-field colour and level changes, many a second)
+//    104 fade and scroll (what it does is drawn at random when it starts)
+//    25 (one past the engine's effect table, an out-of-bounds call), 99 (RANDOM can pick
+//    anything), 100 (the bitmap needs an SD card), 106 (the contract's own renderer).
 inline bool nativeAllowedLogics(int code) {
-  return (code >= 0 && code <= 14 && code != 3) || (code >= 19 && code <= 24) || (code >= 101 && code <= 105);
+  return (code >= 0 && code <= 14 && code != 3) || (code >= 19 && code <= 24) || code == 101 || code == 105;
 }
+// S10: "where a stock look's rate follows a speed setting, the contract starts it at the fastest
+// speed that passes". The engine's speed digit (0..9) a fork selects the sequence with:
+//    4 march            speed 1: its thirds flip every 300 ms, not every 150 (a region lights every 600 ms)
+//    19 roaming pixel   speed 1: a pixel every 50 ms, not every 10 (a rear row is a quarter of the field)
+//    20 horizontal scan speed 2: a row every 150 ms, not every 50 (the same rear row)
+//    22 fire            speed 1: the field is rolled again every 200 ms, not every 100
+// and 0, the engine's own, for every other code.
+inline uint8_t nativeSpeedLogics(int code) {
+  return code == 20 ? 2 : (code == 4 || code == 19 || code == 22) ? 1 : 0;
+}
+// S6: which of them draw at the board's brightness, so that b= and B reach them. The rest (19..24
+// and the custom effects) set their pixels at a level of their own: a native look selected
+// through the contract looks as it does when its button is pressed, and a host has no use for b=
+// on it. For the field gate such a look is lit at full scale, whatever the ceiling.
+inline bool nativeDimsLogics(int code) { return code >= 0 && code <= 14 && nativeAllowedLogics(code); }
+// Which of them hold the WHOLE field within a tenth of the level the gate is told, for as long
+// as they run (march and the flip flops do: their halves take turns). What a fork may rely on
+// when such a look ends; after any other the field may stand anywhere (contractNativeEnded).
+inline bool nativeSteadyLogics(int code) {
+  return code == 0 || code == 1 || code == 4 || code == 5 || code == 7 || code == 8 || (code >= 11 && code <= 14);
+}
+inline bool nativeGatedLogics(int) { return false; }
 // PSI Pro (its mode numbers): 0..22 and 92, WITHOUT Flash (2), Alarm (3) and Scream (5), which are
 // full-field white at 8.3 and 4 Hz — past the strobe floor this contract holds everywhere else.
 inline bool nativeAllowedPsi(int code) {
@@ -1283,3 +1537,8 @@ inline bool nativeAllowedPsi(int code) {
 // Flthy holoprojectors (its LED function numbers): Leia (1) and rainbow (6), until the contract's
 // own looks replace the rest of its native hatch.
 inline bool nativeAllowedFlthy(int code) { return code == 1 || code == 6; }
+// S10: which allow-listed looks are GATED (the fork passes their frames through the field gate)
+// rather than run as stock. The holoprojector's Leia re-rolls all seven pixels together, about
+// four whole-field swings a second as stock.
+inline bool nativeGatedPsi(int) { return false; }
+inline bool nativeGatedFlthy(int code) { return code == 1; }

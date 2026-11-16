@@ -437,18 +437,20 @@ static void a_reseed_accents_its_first_beat() {
         "beat 0 accents at the seed (1100) and again at the re-seed (1600): saw %u accents", (unsigned)on.size());
 }
 // ...and neither must a new show: its first beat accents although the last show accented beat 0.
+// (Play comes 300 ms after the second Send: the swipe is back by then, and S11's 170 ms between
+// two changes of look has passed, so the accent shows at the seed.)
 static void a_new_show_accents_its_first_beat() {
   boot();
   at(1000, "!**M:v=show"); at(1001, "!P*A:i=sparkle,c=00ff00,at=0,am=1,ae=solid,ac=ffffff"); at(1100, "!**C:bpm=60,bpb=4,beat=0");
-  at(2000, "!**M:v=show"); at(2001, "!P*A:i=sparkle,c=00ff00,at=0,am=1,ae=solid,ac=ffffff"); at(2100, "!**C:bpm=60,bpb=4,beat=0");
-  runTo(2500);
-  const std::vector<uint32_t> on = onsets(1100, 2500, WHITE);
-  CHECK(on.size() == 2 && on[1] >= 2100 && on[1] <= 2160, "each show accents its own beat 0: saw %u accents", (unsigned)on.size());
+  at(2000, "!**M:v=show"); at(2001, "!P*A:i=sparkle,c=00ff00,at=0,am=1,ae=solid,ac=ffffff"); at(2300, "!**C:bpm=60,bpb=4,beat=0");
+  runTo(2700);
+  const std::vector<uint32_t> on = onsets(1100, 2700, WHITE);
+  CHECK(on.size() == 2 && on[1] >= 2300 && on[1] <= 2360, "each show accents its own beat 0: saw %u accents", (unsigned)on.size());
 }
-// flash alternates lit and dark under 3 Hz, and it rides the pump. The look changes state every
-// 170 ms, but the panel only changes at a frame (every 26 ms), so on the panel a state is 6 or 7
-// frames: 156 or 182 ms, 170 on average. What is held here is what the eye gets: no state shorter
-// than 170 ms less one frame, and never more than 3 dark-to-lit changes in any second.
+// flash alternates lit and dark under 3 Hz, and it rides the pump. At s=255 the look changes state
+// every 190 ms (core CA1.5), but the panel only changes at a frame (every 26 ms), so on the panel a
+// state is 7 or 8 frames: 182 or 208 ms, 190 on average. What is held here is what the eye gets:
+// no state shorter than 190 ms less one frame, and never more than 3 dark-to-lit changes a second.
 static void flash_alternates_no_faster_than_the_cap() {
   boot(0x00, 0x01, 200);
   at(1000, "!P*A:i=flash,c=ffffff,s=255");
@@ -467,7 +469,7 @@ static void flash_alternates_no_faster_than_the_cap() {
     }
   }
   CHECK(sawLit && sawDark, "flash alternates a lit and a dark frame (lit=%d dark=%d)", sawLit, sawDark);
-  CHECK(shortest >= 170 - 26, "no flash state is shorter than 170 ms less one frame, saw %u ms", shortest);
+  CHECK(shortest + 26 >= fxFlashHalfMs(255), "no flash state is shorter than %u ms less one frame, saw %u ms", (unsigned)fxFlashHalfMs(255), shortest);
   for (size_t k = 3; k < litAt.size(); k++)
     CHECK(litAt[k] - litAt[k - 3] >= 1000, "4 dark-to-lit changes inside %u ms (at t=%u)", litAt[k] - litAt[k - 3], litAt[k]);
   uint8_t lo = 255, hi = 0;
@@ -485,7 +487,11 @@ static void the_accent_cool_down_cannot_be_bypassed() {
   for (const Frame& f : between(2000, 2390))
     if (f.allAre(MAGENTA)) { CHECK(false, "t=%u: a pulse 100 ms after the last one was taken", f.t); break; }
   CHECK(shown(2280).allAre(WHITE), "the refused pulse did not change the one on screen");
-  CHECK(shown(2450).allAre(CYAN), "a pulse 400 ms after the last accepted one is taken");
+  // The pulse 400 ms after the last accepted one is taken. It shows when S11 lets the look change
+  // again: 170 ms after the green look came back from under the first pulse.
+  uint32_t green = 0, cyan = 0;
+  for (const Frame& f : between(2290, 3000)) { if (!green && f.allAre(GREEN)) green = f.t; if (!cyan && f.allAre(CYAN)) cyan = f.t; }
+  CHECK(green != 0 && cyan >= green + 170 && cyan <= green + 170 + 27, "the third pulse shows 170 ms after the look returned at %u: saw %u", green, cyan);
 }
 
 // ---- sections 7 and 10: verb V and the routed Q reply ----------------------------------------------
@@ -622,7 +628,7 @@ done:
   CHECK(frames > 100, "the scan latches every frame (%u in 3 s)", frames);
   for (int c = 0; c < COLUMNS; c++) CHECK(seen[c], "the scan never reached column %d", c);
 }
-// flash: a state is fxFlashHalfMs(speed), 170 ms at s=255 up to 425 ms at s=0, to within a frame.
+// flash: a state is fxFlashHalfMs(speed), 190 ms at s=255 up to 445 ms at s=0, to within a frame.
 static void flash_speed_is_the_shared_timing() {
   boot();
   at(1000, "!P*A:i=flash,c=00ff00,s=0");
@@ -639,12 +645,12 @@ static void flash_speed_is_the_shared_timing() {
     }
     since = f.t; state = lit;
   }
-  CHECK(states >= 8, "flash at s=0 changes state about every 425 ms (%u states in 5 s)", states);
+  CHECK(states >= 8, "flash at s=0 changes state about every 445 ms (%u states in 5 s)", states);
 }
-// pulse: with nothing pumping the look it breathes on fxPulseBright(): 2 s a cycle at s=0, 340 ms
-// at s=255 and never faster (S8). Under the beat pump the envelope is the breathe.
-// At s=0 the panel is the core's breathe exactly. At s=255 the S9 field gate squares the rise off
-// (a fast pulse rises in a step, not a ramp), so there the panel is never ABOVE the breathe.
+// pulse: with nothing pumping the look it breathes on fxPulseBright(): 2 s a cycle at s=0, 680 ms
+// at s=255 and never faster (S8; core CA1.5 made the shortest cycle 680 ms so that the S9 gate
+// lets it through as drawn). Under the beat pump the envelope is the breathe.
+// The panel is the core's breathe exactly, at both speeds.
 static void pulse_breathes_on_the_shared_timing() {
   boot(0x00, 0x01, 200);
   at(1000, "!P*A:i=pulse,c=ffffff,s=0"); at(8000, "!P*A:i=pulse,c=ffffff,s=255");
@@ -653,13 +659,13 @@ static void pulse_breathes_on_the_shared_timing() {
     const uint8_t want = (uint8_t)(((uint16_t)200 * fxPulseBright(f.t - 1000, 0)) / 255u);
     if (f.scale != want) { CHECK(false, "t=%u: the breathe is %u, the core says %u", f.t, f.scale, want); break; }
   }
-  for (const Frame& f : between(8100, 12900)) {
-    const uint8_t most = (uint8_t)(((uint16_t)200 * fxPulseBright(f.t - 8000, 255)) / 255u);
-    if (f.scale > most) { CHECK(false, "t=%u: the panel is at %u, above the core's breathe (%u)", f.t, f.scale, most); break; }
+  for (const Frame& f : between(8400, 12900)) {
+    const uint8_t want = (uint8_t)(((uint16_t)200 * fxPulseBright(f.t - 8000, 255)) / 255u);
+    if (f.scale != want) { CHECK(false, "t=%u: the panel is at %u, the core's breathe is %u", f.t, f.scale, want); break; }
   }
   const unsigned slow = pumpPeaks(1500, 7500), fast = pumpPeaks(8100, 12900);
   CHECK(slow == 3, "s=0 is a 2 s cycle: 3 peaks in 6 s, saw %u", slow);
-  CHECK(fast >= 12 && fast <= 14, "s=255 is a 340 ms cycle: 14 peaks in 4.8 s, never more; saw %u", fast);
+  CHECK(fast == 7, "s=255 is a 680 ms cycle: 7 peaks in 4.8 s, saw %u", fast);
 }
 static void a_pumped_pulse_follows_the_beat() {
   boot(0x00, 0x01, 200);
@@ -1185,6 +1191,91 @@ static void s10_native_looks_are_classified_by_their_stock_field_swing() {
   }
 }
 
+// ---- core revisions CA1.4 and CA1.5: two measures, the look gate, S11, native looks as they are ----
+// S11: the same look applied again does not restart it. A scan carries on from where it was; a
+// different colour is another look, and starts at its first column.
+static void the_same_live_look_again_does_not_restart_it() {
+  boot();
+  at(1000, "!P*A:i=scan,c=00ff00,s=200"); at(2500, "!P*A:i=scan,c=00ff00,s=200"); at(4000, "!P*A:i=scan,c=ff00ff,s=200");
+  runTo(5000);
+  unsigned bad = 0, frames = 0;
+  for (const Frame& f : between(1030, 3900)) {
+    const int led = psiLed((uint8_t)fxScanPos(f.t - 1000, 200, COLUMNS, false), 2);
+    frames++;
+    if (led >= 0 && f.px[led].g != 255) bad++;
+  }
+  CHECK(frames > 100 && bad == 0, "the scan stays on the timeline it started at 1000 (%u of %u frames off it)", bad, frames);
+  uint32_t magenta = 0;
+  for (const Frame& f : between(4000, 4300)) if (f.lit && f.px[psiLed(0, 2)].r == 255 && f.px[psiLed(0, 2)].b == 255) { magenta = f.t; break; }
+  CHECK(magenta != 0, "another colour is another look: it starts at its first column");
+}
+// S11, S4 for every path: a C seek that moves the beat between a red section and a blue one every
+// 50 ms changes the field's colour at most once in 170 ms.
+static void a_seek_between_two_colours_is_held_to_170_ms() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=solid,c=ff0000,at=0"); at(1002, "!P*A:i=solid,c=0000ff,at=100");
+  for (uint32_t t = 1500; t < 4500; t += 100) { at(t, "!P*C:bpm=120,beat=100"); at(t + 50, "!P*C:bpm=120,beat=0"); }
+  runTo(5000);
+  std::vector<uint32_t> change; bool red = false, first = true;
+  for (const Frame& f : between(1500, 4600)) {
+    if (!f.lit) continue;
+    const bool isRed = f.px[0].r != 0;
+    if (!first && isRed != red) change.push_back(f.t);
+    red = isRed; first = false;
+  }
+  CHECK(change.size() >= 8, "the field does change colour (%u times in 3 s)", (unsigned)change.size());
+  for (size_t k = 1; k < change.size(); k++)
+    CHECK(change[k] - change[k - 1] >= 170, "two changes of colour %u ms apart (t=%u)", change[k] - change[k - 1], change[k]);
+}
+// S9 has two measures. Blue to white keeps the brightest channel where it was and multiplies the
+// light by ten: that is an onset. White, X, and white again 60 ms later: the second white waits
+// until 340 ms after the first.
+static void white_after_blue_is_an_onset() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=solid,c=0000ff"); at(2000, "!P*A:i=solid,c=ffffff"); at(2060, "!P*X");
+  at(2120, "!P*A:i=solid,c=ffffff");
+  runTo(3000);
+  uint32_t first = 0, second = 0; bool dark = false;
+  for (const Frame& f : between(2000, 3000)) {
+    const bool white = f.allAre(WHITE) && f.scale >= 100;
+    if (white && !first) first = f.t;
+    if (first && !f.lit) dark = true;
+    if (white && dark && !second) second = f.t;
+  }
+  CHECK(first != 0 && dark, "white, then X");
+  CHECK(second >= first + 340 && second <= first + 340 + 27, "white again within a frame of 340 ms after the first (t=%u), saw t=%u", first + 340, second);
+}
+// S10 on this board: the gate hears what a native mode puts on the field, not the brightness it
+// draws at. The owner's all-white mode (16) is grey, half the brightness. A pulse over it at full
+// level is a rise of half the ceiling: an onset. After it, X, and M:v=idle: the swipe comes back
+// 340 ms after the pulse lit, not 340 ms after the owner's command.
+static void a_rise_over_a_half_lit_native_mode_is_an_onset() {
+  boot(0x01, 0x01, 200);
+  at(1000, "!P*X"); at(1500, "0T16"); at(2100, "!PFP:c=ffffff,d=100"); at(2180, "!P*X"); at(2200, "!**M:v=idle");
+  runTo(3500);
+  uint32_t pulse = 0, back = 0;
+  for (const Frame& f : between(2100, 2200)) if (f.allAre(WHITE) && f.scale == 200) { pulse = f.t; break; }
+  CHECK(pulse != 0, "the pulse lights at the full level over the grey mode");
+  for (const Frame& f : between(2200, 3500)) if (f.lit && !f.allAre(WHITE)) { back = f.t; break; }
+  CHECK(back >= pulse + 340, "the swipe is back %u ms after the pulse lit; it waits 340", back - pulse);
+  CHECK(back <= pulse + 340 + 27 + 26, "and no later than a frame or two after that (saw %u ms)", back - pulse);
+}
+// A native look started with no brightness is not on the LEDs yet. When B brings it up, that is
+// its start: the change of look waits its 170 ms like any other.
+static void a_native_look_started_dark_is_a_look_change_when_it_lights() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=solid,c=0000ff"); at(2000, "!P*B:b=0"); at(2010, "!P*A:i=solid,c=00ff00");
+  at(2020, "!P*B:b=255"); at(2030, "!P*B:b=0"); at(2100, "!P*A:i=native:17"); at(2110, "!P*B:b=255");
+  runTo(3200);
+  uint32_t green = 0, red = 0;
+  for (const Frame& f : between(2000, 3200)) {
+    if (!green && f.allAre(GREEN) && f.scale > 0) green = f.t;
+    if (!red && f.lit == 48 && f.px[0].r == 255 && f.px[0].g == 0 && f.px[0].b == 0 && f.scale > 0) red = f.t;
+  }
+  CHECK(green != 0 && red != 0, "green shows, then the native red (green t=%u, red t=%u)", green, red);
+  CHECK(red >= green + 170, "the native look lights %u ms after the look before it did; a change of look waits 170", red - green);
+}
+
 // ---- core revision CA1.2: what a line may and may not do ---------------------------------------
 // A scored line delivered twice (a mesh retry) changes nothing: the section that is playing does
 // not restart. A DIFFERENT line for the same beat replaces the entry, and the look follows.
@@ -1335,6 +1426,11 @@ static const Scenario kScenarios[] = {
   {"l_does_not_reach_the_owners_vu_mode", l_does_not_reach_the_owners_vu_mode},
   {"l_does_not_reach_a_shows_native_vu", l_does_not_reach_a_shows_native_vu},
   {"s10_native_looks_are_classified_by_their_stock_field_swing", s10_native_looks_are_classified_by_their_stock_field_swing},
+  {"the_same_live_look_again_does_not_restart_it", the_same_live_look_again_does_not_restart_it},
+  {"a_seek_between_two_colours_is_held_to_170_ms", a_seek_between_two_colours_is_held_to_170_ms},
+  {"white_after_blue_is_an_onset", white_after_blue_is_an_onset},
+  {"a_rise_over_a_half_lit_native_mode_is_an_onset", a_rise_over_a_half_lit_native_mode_is_an_onset},
+  {"a_native_look_started_dark_is_a_look_change_when_it_lights", a_native_look_started_dark_is_a_look_change_when_it_lights},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},
   {"a_bpm_that_is_not_a_number_is_ignored", a_bpm_that_is_not_a_number_is_ignored},
 #ifdef PSI_ENABLE_I2C

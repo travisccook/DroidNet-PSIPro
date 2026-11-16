@@ -545,21 +545,42 @@ static void test_fx_spatial_helpers() {
   CHECK(fxCometBright(9, 0, 10) == 192);  // wraps around N: 1 behind head=0
   CHECK(fxCometBright(8, 0, 10) == 128);  // wraps around N: 2 behind head=0
 
-  // fxChaseLit: (p + elapsed/fxStepMs) % 3 == 0.
-  CHECK(fxChaseLit(0, 0, 255) == true);   // p+phase=0 -> lit
-  CHECK(fxChaseLit(1, 0, 255) == false);
-  CHECK(fxChaseLit(2, 0, 255) == false);
-  CHECK(fxChaseLit(3, 0, 255) == true);   // 3 % 3 == 0 -> lit
-  CHECK(fxChaseLit(0, 30, 255) == false); // one step elapsed -> phase 1
+  // fxChaseLit: every third position of a ring of N, ((p + elapsed/fxStepMs) % N) % 3 == 0.
+  CHECK(fxChaseLit(0, 0, 255, 6) == true);   // p+phase=0 -> lit
+  CHECK(fxChaseLit(1, 0, 255, 6) == false);
+  CHECK(fxChaseLit(2, 0, 255, 6) == false);
+  CHECK(fxChaseLit(3, 0, 255, 6) == true);   // 3 % 3 == 0 -> lit
+  CHECK(fxChaseLit(0, 30, 255, 6) == false); // one step elapsed -> phase 1
+  CHECK(fxChaseLit(0, 0, 255, 0) == false && fxChaseLit(0, 0, 255, -3) == false);
+  // CA1.5: the lit count is the same at every step, ceil(N / 3), for every N (it was 3, 3, 2 on
+  // 8, which moved the field mean by an eighth at every step), and where N is a multiple of 3
+  // it is the old pattern exactly
+  for (int N = 1; N <= 60; N++)
+    for (uint32_t step = 0; step < 200; step++) {
+      int count = 0;
+      for (int p = 0; p < N; p++) {
+        const bool lit = fxChaseLit(p, step * 30u, 255, N);
+        if (lit) count++;
+        if (N % 3 == 0) CHECK(lit == ((((uint32_t)p + step) % 3u) == 0u));
+      }
+      CHECK(count == (N + 2) / 3);
+    }
+  // ...and it still turns: what is lit at one step is lit one position lower at the next
+  for (int p = 1; p < 8; p++) CHECK(fxChaseLit(p, 0, 255, 8) == fxChaseLit(p - 1, 30, 255, 8));
 
   // fxWipeLit: a PING-PONG. Fill 0 -> N-1, then drain BACK from the far end.
   // Exact vectors captured by running the real implementation.
   CHECK(fxWipeLit(0, 0, 255, 10) == true);    // front at 0, p<=front
   CHECK(fxWipeLit(9, 0, 255, 10) == false);
   CHECK(fxWipeLit(1, 0, 255, 10) == false);
-  CHECK(fxWipeLit(0, 300, 255, 10) == true);  // ph==N: drain begins at the FAR end, so 0 stays lit
-  CHECK(fxWipeLit(9, 300, 255, 10) == false); // ph==N: the far end is the first to go dark
-  CHECK(fxWipeLit(5, 300, 255, 10) == true);
+  // (CA1.5: a wipe of 10 at the top speed takes 34 ms a step, not 30: one cycle is never under 680 ms)
+  CHECK(fxWipeStepMs(255, 10) == 34 && fxWipeStepMs(255, 8) == 43 && fxWipeStepMs(255, 12) == 30 && fxWipeStepMs(0, 8) == fxStepMs(0));
+  CHECK(fxWipeStepMs(255, 1) == 340 && fxWipeStepMs(255, 60) == 30);
+  for (int N = 1; N <= 80; N++) for (int sp = 0; sp <= 255; sp += 15)
+    CHECK(fxWipeStepMs((uint8_t)sp, N) * 2u * (uint32_t)N >= FX_CYCLE_MIN_MS && fxWipeStepMs((uint8_t)sp, N) >= fxStepMs((uint8_t)sp));
+  CHECK(fxWipeLit(0, 340, 255, 10) == true);  // ph==N: drain begins at the FAR end, so 0 stays lit
+  CHECK(fxWipeLit(9, 340, 255, 10) == false); // ph==N: the far end is the first to go dark
+  CHECK(fxWipeLit(5, 340, 255, 10) == true);
 
   // IT MUST ACTUALLY PING-PONG. The drain used to read `p > (ph - N)`, which empties from
   // position 0 upward — the erase head running the SAME direction as the fill head. The
@@ -569,7 +590,7 @@ static void test_fx_spatial_helpers() {
   // the fill and only ever shrinks from the top during the drain.
   {
     const int N = 10;
-    const uint32_t STEP = 30;   // fxStepMs(255)
+    const uint32_t STEP = fxWipeStepMs(255, N);   // 34 ms: fxStepMs(255) is 30, stretched so that the cycle takes 680 ms
     int prevCount = -1;
     for (uint32_t ph = 0; ph < (uint32_t)N; ph++) {           // FILL: 0..N-1 light up in order
       int count = 0, highest = -1;
