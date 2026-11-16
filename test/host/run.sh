@@ -151,6 +151,8 @@ echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # command line that produced the committed .psig files; any regenerated capture
 # that doesn't cmp byte-identical to its committed twin means the mocks or Neil's
 # unmodified main.cpp no longer reproduce what we locked in as ground truth.
+# A <cmd> holding '@' is a script, "<ms>@<line>;<ms>@<line>...": the seq_* and timing_* rows are
+# sequences and |timing commands, each also a `same` row of the upstream differential (stage 6b).
 # Matrix columns: <name> <cmd> <ms> <jumper> <eeprom> <pot> [at_ms] — the optional
 # 7th column delays the command feed so buffer-transforming modes (FadeOut) get a
 # painted default-swipe buffer to work on instead of dimming an all-black one.
@@ -191,6 +193,13 @@ echo "[6b] upstream differential: Neil's PSIPro v1.7 and the fork on the same mo
 # that changes sides fails. The goldens above are captured from the fork itself; this is the stage
 # that ties them to upstream.
 bash diff_upstream.sh "$T" "$CXX_SAN"
+
+echo "[6c] timeline scenarios: the firmware on the mocks, scripted wire timelines"
+# src/main.cpp verbatim, a scripted timeline of wire lines, assertions on the frames show() latched
+# and on the bytes written to Serial1. One scenario per process (the firmware keeps static state).
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_timeline.cpp -o "$T/psi_timeline"
+for s in $("$T/psi_timeline" --list); do "$T/psi_timeline" "$s"; done
 
 echo "[7/9] scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock"
 # include/FastLED.h replaced FastLED with a from-scratch WS2812 driver. The 31 goldens

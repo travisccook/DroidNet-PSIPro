@@ -32,8 +32,7 @@ git clone --depth 1 https://github.com/nhutchison/PSIPro.git /tmp/PSIPro   # rev
 | ---- | -------------------- |
 | `scenarios/scen.cpp` | The firmware (`src/main.cpp` verbatim) on the host mocks with a scripted command timeline; prints a frame log. Fourteen scenarios, one per review finding (see the table below) |
 | `scenarios/results.txt` | Its output on the firmware as reviewed |
-| `timeline/test_timeline.cpp` | The same idea as an assertion harness: one scenario per process, pass or fail. The plan's Task 3 moves it to `test/host/` |
-| `timeline/timeline_scenarios.inc` | 27 v1.3 scenarios. On the reviewed firmware 25 fail (`timeline/result_current_firmware.txt`) |
+| `timeline/timeline_scenarios.inc` | 35 scenarios for contract v1.3 as amended on 2026-11-16, for `test/host/test_timeline.cpp` (the harness moved there in the plan's Task 3). On the firmware as reviewed 31 fail (`timeline/result_current_firmware.txt`) |
 | `updiff/diffdrv.cpp` | Upstream `PSIPro.ino` and the fork, each built on the fork's mocks, dumping every `show()` frame (the `Wire` stub is now `test/host/native_mocks/Wire.h`) |
 | `updiff/build.sh`, `updiff/rundiff.sh`, `updiff/matrix.sh` | Build both, compare one timeline, run the 71 timelines the review ran |
 | `updiff/results.txt` | 67 same (51 frame for frame, 16 once repeated frames are collapsed), 4 different |
@@ -46,6 +45,7 @@ git clone --depth 1 https://github.com/nhutchison/PSIPro.git /tmp/PSIPro   # rev
 | `proto/millis_exact.diff` | The exact `millis()` credit for `include/FastLED.h` (plan Task 6) |
 | `proto/golden_script.diff` | `golden_native.cpp --cmd` takes a script `<ms>@<line>;<ms>@<line>` (plan Task 3) |
 | `proto/psi-r1-prototype.diff` | An unreviewed prototype of the PSI-side R1 changes that need no core change. Applies to `abba59d` with `git apply` |
+| `proto/ContractPSI.v13.h` | The render layer ported to the CA1 core's `ContractUnitState`: all of R1 except three later spec items (`B` only in show mode, the take-over when armed, the shared flash, pulse and scan timing). Compiled for the ATmega32U4 and run against the scenarios: all pass (`proto/result_timeline_v13_port.txt`) |
 | `proto/result_*.txt` | The probes, the timeline scenarios and the differential re-run on the prototype |
 
 `scenarios/scen.cpp` scenario numbers:
@@ -78,10 +78,11 @@ g++ -std=gnu++17 -O1 -fsigned-char -w -I .. -I ../native_mocks -I ../../../inclu
     scenarios/scen.cpp -o "$OUT/scen"
 for n in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do "$OUT/scen" $n; done
 
-# timeline assertions (-I timeline finds timeline_scenarios.inc)
+# the v1.3 scenarios, through the harness in test/host
 g++ -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w \
-    -I .. -I ../native_mocks -I timeline -I ../../../include '-DWDP_FW="abcdef0"' \
-    timeline/test_timeline.cpp -o "$OUT/tl"
+    -I .. -I ../native_mocks -I ../../../include '-DWDP_FW="abcdef0"' \
+    '-DTIMELINE_SCENARIOS="review-2026-11-15/timeline/timeline_scenarios.inc"' \
+    ../test_timeline.cpp -o "$OUT/tl"
 for s in $("$OUT/tl" --list); do "$OUT/tl" "$s"; done
 
 # upstream against the fork
@@ -118,4 +119,5 @@ simavr prints what the sketch writes to `Serial1`. The probes never exit, so `ti
 - `simavr/wave/result.txt`: T0H 250 ns, T1H 750 ns, 1250 ns bits (1437.5 ns at a byte boundary), the wire bytes are
   the frame's bytes in G, R, B order, and two `show()` calls with nothing between them are 107 µs apart.
 - `simavr/bench/result.txt`: `show()` 1607 µs, twinkle 6784 µs a frame, wipe, chase and gradient about 800 µs.
-- `proto/result_timeline_prototype.txt`: the prototype passes the 17 scenarios that need no core change.
+- `proto/result_timeline_prototype.txt`: the first prototype (before the core existed) against the first draft
+  of the scenarios; `proto/result_timeline_v13_port.txt`: the port on the CA1 core, every scenario passing.

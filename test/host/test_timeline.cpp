@@ -1,4 +1,4 @@
-// test_timeline.cpp — the firmware (src/main.cpp, verbatim) on the golden harness's host
+// test/host/test_timeline.cpp — the firmware (src/main.cpp, verbatim) on the golden harness's host
 // mocks, driven by a scripted wire timeline, with assertions on the frames it shows.
 //
 // One scenario per process (the firmware keeps static state): `test_timeline --list` prints the
@@ -15,7 +15,7 @@
 #include <string>
 #include <vector>
 
-#include "../../../../src/main.cpp"  // the firmware, verbatim
+#include "../../src/main.cpp"  // the firmware, verbatim
 
 struct Frame {
   uint32_t t;
@@ -99,8 +99,15 @@ static void score_mixes_native_and_contract() {
   CHECK(most > 0 && most <= 6, "beats 8+ should be Knight Rider (one column, <= 6 lit), saw up to %u lit", most);
 }
 
+#ifndef PSI_SCORE_CAP
+#define PSI_SCORE_CAP 8   // firmware before v1.3
+#endif
 struct Scenario { const char* name; void (*fn)(); };
-#include "timeline_scenarios.inc"
+// -DTIMELINE_SCENARIOS='"<file>"' runs another scenario file through the same harness.
+#ifndef TIMELINE_SCENARIOS
+#define TIMELINE_SCENARIOS "timeline_scenarios.inc"
+#endif
+#include TIMELINE_SCENARIOS
 static const Scenario kBase[] = { {"score_mixes_native_and_contract", score_mixes_native_and_contract} };
 
 int main(int argc, char** argv) {
