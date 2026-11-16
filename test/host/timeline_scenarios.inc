@@ -990,18 +990,68 @@ static void a_native_look_runs_as_stock_under_a_show() {
   }
   CHECK(frames > 60 && lit > 30, "Leia and Knight Rider draw (%u frames, %u lit)", frames, lit);
 }
-// The start of a native look is the contract's edge. Started from dark inside the gate's window, it
-// comes up dim (the brightness the show gives it is held) and is at its level when the window ends.
-static void a_native_look_started_in_the_window_comes_up_dim() {
+// The start of a native look is the contract's edge. Asked for inside the gate's window, from a
+// dark panel, it waits: the panel stays dark until the window ends, then the look starts at its level.
+static void a_native_look_started_in_the_window_waits_for_it() {
   boot(0x00, 0x01, 200);
   at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=ffffff"); at(2200, "!P*X"); at(2260, "!P*A:i=native:17");
   runTo(3200);
-  uint32_t lit = 0;
+  uint32_t lit = 0, back = 0;
   for (const Frame& f : between(2000, 2100)) if (f.scale == 200 && f.lit == 48) { lit = f.t; break; }
   CHECK(lit != 0, "the look lights");
-  for (const Frame& f : between(2260, lit + 339))
-    if (f.lit && f.scale > 50) { CHECK(false, "t=%u: native:17 at %u only %u ms after the panel last lit", f.t, f.scale, f.t - lit); break; }
-  CHECK(shown(lit + 400).lit == 48 && shown(lit + 400).scale == 200, "then it is at the show's level (saw %u)", shown(lit + 400).scale);
+  for (const Frame& f : between(2260, 3200)) if (f.lit) { back = f.t; break; }
+  CHECK(back >= lit + 340 && back <= lit + 340 + 27, "native:17 starts within a frame of the window's end (t=%u), saw t=%u", lit + 340, back);
+  CHECK(shown(back).lit == 48 && shown(back).scale == 200, "and at the show's level from its first frame (saw %u)", shown(back).scale);
+}
+// From a LIT panel too. Most native modes clear the panel and draw at once when they start (I heart
+// U does): that dark-then-lit is the contract's doing, so the start waits for the window and the
+// panel keeps the look it shows until then.
+static void a_native_look_started_while_lit_waits_for_the_window() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=ffffff"); at(2180, "!P*A:i=native:7");
+  runTo(3500);
+  uint32_t lit = 0, change = 0;
+  for (const Frame& f : between(2000, 2100)) if (f.scale == 200 && f.allAre(WHITE)) { lit = f.t; break; }
+  CHECK(lit != 0, "the look lights");
+  for (const Frame& f : between(lit, 3500)) if (!f.allAre(WHITE)) { change = f.t; break; }
+  CHECK(change >= lit + 340 && change <= lit + 340 + 27,
+        "the white look stays until the window ends (t=%u), then native:7 starts; the panel changed at t=%u", lit + 340, change);
+  unsigned heart = 0;
+  for (const Frame& f : between(change, 3500)) if (f.lit && !f.allAre(WHITE)) heart++;
+  CHECK(heart > 0, "and I heart U draws");
+}
+// The hand-back is the contract's edge as well. M:v=idle from a lit look: the look stays until the
+// window ends, then the swipe has the panel.
+static void idle_from_a_lit_look_waits_for_the_window() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=00ff00"); at(2100, "!**M:v=idle");
+  runTo(3200);
+  uint32_t lit = 0, change = 0;
+  for (const Frame& f : between(2000, 2100)) if (f.scale == 200 && f.allAre(GREEN)) { lit = f.t; break; }
+  CHECK(lit != 0, "the look lights");
+  for (const Frame& f : between(lit, 3200)) if (!f.allAre(GREEN)) { change = f.t; break; }
+  CHECK(change >= lit + 340 && change <= lit + 340 + 27, "the swipe returns when the window ends (t=%u), saw t=%u", lit + 340, change);
+  CHECK(shown(3100).lit >= 24 && shown(3100).scale == 200, "and it is the swipe at the owner's brightness");
+}
+// L3: a pulse over a native mode the owner runs. Knight Rider is dark across most of the field and
+// redraws every 260 ms; after the pulse its frame would take the panel from lit to (nearly) dark
+// and its next relight would follow the pulse closely. So the panel keeps the pulse until 340 ms
+// after it lit, and Knight Rider carries on from there.
+static void a_pulse_over_a_native_mode_holds_until_the_window_ends() {
+  static const uint32_t when[] = {3000, 5130, 7270, 9410};
+  boot(0x01);                                          // alwaysOn: the native mode keeps running
+  at(1000, "0T15");
+  for (uint32_t t : when) at(t, "!PFP:c=ffffff,d=60");
+  runTo(11000);
+  for (uint32_t t : when) {
+    uint32_t lit = 0, back = 0;
+    for (const Frame& f : between(t, t + 60)) if (f.allAre(WHITE)) { lit = f.t; break; }
+    CHECK(lit != 0, "the pulse at %u lights", t);
+    for (const Frame& f : between(lit, t + 1000)) if (!f.allAre(WHITE)) { back = f.t; break; }
+    CHECK(back >= lit + 340, "Knight Rider is back %u ms after the pulse lit (t=%u); it waits 340", back - lit, back);
+    CHECK(back <= lit + 340 + 27 + 260, "and no later than its next step after that (saw %u ms)", back - lit);
+    CHECK(shown(back).lit > 0 && shown(back).lit <= 6, "with one column, as before (%u lit)", shown(back).lit);
+  }
 }
 // So is the brightness a show gives it: B up under a native look is held like any other relight.
 static void b_under_a_native_look_is_held() {
@@ -1019,6 +1069,23 @@ static void b_under_a_native_look_is_held() {
   for (size_t k = 1; k < on.size(); k++) CHECK(on[k] - on[k - 1] >= 340, "two relights %u ms apart (t=%u)", on[k] - on[k - 1], on[k]);
   CHECK(shown(5900).scale == 200, "and it ends at the show's level");
 }
+
+// S10: verb L feeds the contract's own meter look and nothing else. A native VU mode, the owner's
+// or a show's native:92, keeps its own random walk: no line can empty its bars and fill them again.
+static void lDoesNotReach(bool show) {
+  boot(0x01);                                          // alwaysOn: the native VU mode keeps running
+  if (show) { at(1000, "!**M:v=show"); at(1100, "!P*A:i=native:92"); } else at(1000, "0T92");
+  for (uint32_t t = 3000; t < 8000; t += 100) at(t, "!P*L:v=0");
+  for (uint32_t t = 8000; t < 13000; t += 100) at(t, "!P*L:v=255");
+  runTo(13000);
+  unsigned emptyKinds = 0, fullKinds = 0, most = 0; unsigned seenEmpty[49] = {0}, seenFull[49] = {0};
+  for (const Frame& f : between(3500, 8000)) { if (!seenEmpty[f.lit]++) emptyKinds++; if (f.lit > most) most = f.lit; }
+  for (const Frame& f : between(8500, 13000)) if (!seenFull[f.lit]++) fullKinds++;
+  CHECK(most > 0 && emptyKinds >= 3, "under L:v=0 the native meter keeps walking (%u shapes, up to %u lit)", emptyKinds, most);
+  CHECK(fullKinds >= 3, "and under L:v=255 (%u shapes)", fullKinds);
+}
+static void l_does_not_reach_the_owners_vu_mode() { lDoesNotReach(false); }
+static void l_does_not_reach_a_shows_native_vu() { lDoesNotReach(true); }
 
 // ---- core revision CA1.2: what a line may and may not do ---------------------------------------
 // A scored line delivered twice (a mesh retry) changes nothing: the section that is playing does
@@ -1162,8 +1229,13 @@ static const Scenario kScenarios[] = {
   {"a_show_never_exceeds_the_ceiling", a_show_never_exceeds_the_ceiling},
   {"no_pulse_over_a_contract_native_look", no_pulse_over_a_contract_native_look},
   {"a_native_look_runs_as_stock_under_a_show", a_native_look_runs_as_stock_under_a_show},
-  {"a_native_look_started_in_the_window_comes_up_dim", a_native_look_started_in_the_window_comes_up_dim},
+  {"a_native_look_started_in_the_window_waits_for_it", a_native_look_started_in_the_window_waits_for_it},
+  {"a_native_look_started_while_lit_waits_for_the_window", a_native_look_started_while_lit_waits_for_the_window},
+  {"idle_from_a_lit_look_waits_for_the_window", idle_from_a_lit_look_waits_for_the_window},
+  {"a_pulse_over_a_native_mode_holds_until_the_window_ends", a_pulse_over_a_native_mode_holds_until_the_window_ends},
   {"b_under_a_native_look_is_held", b_under_a_native_look_is_held},
+  {"l_does_not_reach_the_owners_vu_mode", l_does_not_reach_the_owners_vu_mode},
+  {"l_does_not_reach_a_shows_native_vu", l_does_not_reach_a_shows_native_vu},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},
   {"a_bpm_that_is_not_a_number_is_ignored", a_bpm_that_is_not_a_number_is_ignored},
 #ifdef PSI_ENABLE_I2C

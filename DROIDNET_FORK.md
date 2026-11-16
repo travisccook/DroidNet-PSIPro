@@ -16,7 +16,7 @@ with a timing, a 200 µs latch gap), and the I2C intake is an opt-in build.
   Flthy HPs). This is the tightest of the three and the pacing item.
 - **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), clean-room WS2812 driver (`include/FastLED.h`).
   `platformio.ini` is checked in and builds out of the box. `pio run` (serial-only, shipped default)
-  links at 27,424 B of 28,672 B (95.6%); `pio run -e PSIPro-i2c` links at 27,876 B (97.2%), WDP
+  links at 27,494 B of 28,672 B (95.9%); `pio run -e PSIPro-i2c` links at 27,942 B (97.5%), WDP
   device announce and contract v1.3 (first release) included. `run.sh` stage 9b fails a build over
   28,416 B (serial-only) or 28,160 B (I2C), under 256 B or 128 B of worst-case stack headroom, or
   with any soft-float routine linked. The I2C build leaves out six contract looks
@@ -61,10 +61,10 @@ bash test/host/run.sh
 
 What it runs, in order: the shared core's unit tests and its fuzz model (and that the shared files
 are the commit in `src/contract/CORE_PIN`); the WDP announce; the animation VM's bytecode; 36
-golden captures of the native modes; 78 timelines against upstream v1.7 on the same mocks; 84
+golden captures of the native modes; 78 timelines against upstream v1.7 on the same mocks; 89
 contract scenarios on each build (`test_timeline.cpp`: the firmware's own `src/main.cpp`, scripted
 wire lines, assertions on the frames it latches); contract S9 as a property of the firmware under
-17 hostile scripts and 1,500 random streams (`test_property.cpp`); the scale and HSV oracles; the
+23 hostile scripts and 1,500 random streams (`test_property.cpp`); the scale and HSV oracles; the
 cross-compile of both builds with the flash, stack and no-float gates; and five simavr probes
 (`test/simavr/README.md`). There is no mock of the board API.
 
@@ -80,6 +80,8 @@ here is about the host, the cross-compiler and the simulator.
 - **Lifecycle:** `M:v=show` arms and keeps the swipe until the first `C`, live `A` or `P`; `X` is
   dark until `M:v=idle` or a look, in a show or not; `M:v=idle`, the watchdog (`wd=`) and a failed
   `V` return to the swipe. A pulse with no show overlays the native look and returns to it.
+  Every return to the board's own look waits until an onset is allowed (340 ms after the field
+  last lit or got brighter), the panel keeping what it shows.
 - **Native take-over:** a native `T` or `D` command addressed to the PSI ends the show and runs. In
   the I2C build the command may arrive in the TWI interrupt; the show ends at the next loop pass.
 - **Score:** 16 sections (12 with I2C), `b=` and every-N accents carried, overflow is a bad load.
@@ -89,8 +91,10 @@ here is about the host, the cross-compiler and the simulator.
   (at most three dark-to-lit swings of the whole field a second, never above the ceiling).
 - **Native modes a show may select:** 0 to 22 and 92, without 2, 3 and 5. They run as stock: their
   frames are never altered. All of them draw at `brightness()`, so all of them dim with `b=`/`B`.
-  What the contract holds is their edges (the brightness it gives them, and the hand-over back to
-  the swipe).
+  What the contract holds is their edges: the start of a `native:<n>` look and the hand-over back
+  to the board's own look both wait until an onset is allowed, and a rise of the brightness it
+  gives a native look is held like any relight. `L` feeds the contract's `meter` look only, never
+  a native VU mode.
 - **WDP caps:** `droidnet.contract` and `contract.1.3` (`contract.1.3s` from the I2C build).
 
 ## Layout

@@ -45,8 +45,9 @@
 //     command ends a show (L6).
 //   * The accent overlay is ONE primitive with two triggers: verb P (live) and the board's own
 //     per-beat score edge (a scored A's ae=/ac=/ad=). Same code path, same look.
-//   * Verb L feeds level[] for the meter, honouring the VU inversion (VUMeter in main.cpp:
-//     level[c] > i => pixel OFF, so high energy => LOW level).
+//   * Verb L feeds the contract's own meter look (A:i=meter) and nothing else, honouring the VU
+//     inversion (VUMeter in main.cpp: level[c] > i => pixel OFF, so high energy => LOW level).
+//     A native VU mode (the owner's, or a show's native:21 / native:92) runs as stock (S10).
 //   * Addressing = the JUMP_FRONT_REAR jumper: open (pulled up) = front (!P F), closed = rear (!P R).
 #pragma once
 // NO <stdio.h>. The verb-Q ack (CV_QUERY) was the one and only stdio call site in this
@@ -267,12 +268,18 @@ inline void contractYieldToNative() { _yieldNow(); }
 static inline void _serviceYield() { }
 #endif
 
-// The meter's level[] is the contract's while verb L feeds it. With no L for 2 s the stock random
-// walk in VUMeter() (main.cpp) runs again, so a meter look with no level feed still moves, and a
-// native VU mode is never left frozen by a show that has ended.
+// Verb L feeds the contract's OWN meter look, and only while the contract is drawing it. The fed
+// level is kept here and goes into level[] (main.cpp) when the contract runs VUMeter() for
+// A:i=meter; a native VU mode (the owner's 21 or 92, or a show's native:21 / native:92) never
+// sees it and runs as stock (S10): its bars are its own random walk, which no line can empty and
+// refill. With no L for 2 s the random walk runs under the contract's meter too, so a meter look
+// with no level feed still moves.
+static uint8_t  g_levelRows = 0;                       // rows dark in every column: 0 full .. 6 empty
 static bool     g_levelFed = false;
+static bool     g_meterMine = false;                   // VUMeter() is running for the contract's meter look
 static uint32_t g_levelMs  = 0;
 inline bool contractHoldsLevels() {
+  if (!g_meterMine) return false;
   if (g_levelFed && (uint32_t)(millis() - g_levelMs) >= 2000u) g_levelFed = false;
   return g_levelFed;
 }
@@ -287,9 +294,10 @@ inline bool contractHoldsLevels() {
 //   * A frame of a native look is never changed (S10: native looks run as stock), whether the
 //     owner started the look or a show selected it from the allow-list. The gate is only told
 //     about it, so that what the contract does next keeps its distance. What the contract may
-//     hold is the look's EDGES, and it does that before the look draws: the brightness a show
-//     gives a native:<n> look, from its start on (contractLoopTick), and the hand-over back to
-//     the board's own look (_givePanelBack).
+//     hold is the look's EDGES, and it does that before the look draws: the start of a
+//     native:<n> look and the brightness a show gives it from then on (contractLoopTick), and
+//     the hand-over back to the board's own look (_givePanelBack). An accent overlay still up
+//     when its section gives way to a native:<n> one is the contract's own drawing: gated.
 // The level is computed exactly, floor(sum * scale / (n * 255)): at a low brightness a unit of
 // level is several percent of the ceiling, and a measure that rounded twice would miss a rise
 // an observer can see. The measuring is 48 compares and two divides; nothing here blocks.
@@ -309,7 +317,7 @@ uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
   const uint8_t sreg = SREG;                           // a native frame can be drawn from the TWI
   cli();                                               // interrupt: keep the gate's state whole
 #endif
-  const bool drawn = g_owned && g_u.base != CB_NATIVE;  // the contract drew this frame itself
+  const bool drawn = g_owned && (g_u.base != CB_NATIVE || g_u.pulseActive);   // the contract drew this frame itself
   if (drawn && scale > g_u.ceil) scale = g_u.ceil;
   const uint8_t level = (uint8_t)((uint16_t)(((uint32_t)sum * scale) / 255u) / n);
   if (drawn) {
@@ -326,9 +334,18 @@ uint8_t contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
 }
 
 // The gate, asked without being told: how far may the field rise to `level` right now? One copy
-// of the core's contractFieldAllowed() for the two native edges (brightness, hand-over).
+// of the core's contractFieldAllowed() for the brightness a show gives a native look.
 static PSI_NOINLINE uint8_t _gateAllows(uint8_t level) { return contractFieldAllowed(g_u, level, millis()); }
-static inline bool _gateLetsNativeLight() { return _gateAllows(g_u.ceil) >= g_u.ceil; }   // contractFieldMayLight()
+// May a native look be given the panel now? Yes when a dark-to-lit onset would be allowed: 340 ms
+// after the field last lit or got brighter, whether the panel is lit or dark at this moment. The
+// contract cannot see what the look will draw. It may clear the panel and light it at once (most
+// native modes do when they start), or be in a dark stretch of its own and relight at its own
+// time: to anyone watching, that light follows the contract's last one. So the two edges where
+// frames of the contract's give way to a native look's (a native:<n> starting, the hand-back to
+// the board's own look) both wait for this, and the panel keeps what it shows until then.
+static PSI_NOINLINE bool _gateLetsNativeLight() {
+  return strobeCoolDownExpired(g_u.fieldOnsetMs, millis(), 2 * STROBE_MIN_STATE_MS);
+}
 
 // ---- the looks this build has ----------------------------------------------------
 // PSI_NO_STRIP_LOOKS (set only in the PSIPro-i2c environment) builds R1 without the six strip and
@@ -446,7 +463,12 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
     case CE_TWINKLE: _renderTwinkle(col);                           break;
 #endif
     case CE_SPARKLE: vmContractSparkle(d, col);                     break;
-    case CE_METER:   VUMeter(d, 0, 0);                              break;  // level[] fed by verb L
+    case CE_METER:                                                          // level[] fed by verb L
+      g_meterMine = true;
+      if (contractHoldsLevels()) for (uint8_t c = 0; c < COLUMNS; c++) level[c] = g_levelRows;
+      VUMeter(d, 0, 0);
+      g_meterMine = false;
+      break;
     case CE_NATIVE:  runPattern(g_u.nativeCode);                    break;
     default:         allON(col, true, 0);                           break;
   }
@@ -563,11 +585,10 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
       g_u.bright = pr.hasBright ? pr.bright : (pr.hasLevel ? pr.level : g_u.bright);
       break;
 
-    case CV_LEVEL: {                                   // feed the VU meter from Studio energy
+    case CV_LEVEL: {                                   // feed the contract's meter look from Studio energy
       // honor the inversion (main.cpp VUMeter: level[c] > i => pixel OFF): high energy => LOW level
       uint8_t v = pr.hasLevel ? pr.level : 0;
-      int lvl = LEDS_PER_COLUMN - ((int)v * LEDS_PER_COLUMN) / 255;   // v=255 -> 0 (full), v=0 -> 6 (empty)
-      for (int c = 0; c < COLUMNS; c++) level[c] = lvl;
+      g_levelRows = (uint8_t)(LEDS_PER_COLUMN - ((uint16_t)v * LEDS_PER_COLUMN) / 255u);   // v=255 -> 0 (full), v=0 -> 6 (empty)
       g_levelMs = now;
       g_levelFed = true;
       break;
@@ -660,9 +681,10 @@ inline bool contractLoopTick() {
   }
 
   if (!_owns()) {                                      // nothing of ours left to show: the native look runs
-    // S10: handing the panel to the native look is a look change and, from dark, an onset. The
-    // gate is asked first; while it says no, the panel keeps what it shows (dark, or it would not
-    // say no). The native look's own frames then tell the gate (contractFrameScale).
+    // S10: handing the panel to the native look is the contract's edge, and the light that look
+    // shows next is counted as the contract's doing. So the hand-over waits until an onset is
+    // allowed (_gateLetsNativeLight); until then the panel keeps what it shows. The native look's
+    // own frames then tell the gate (contractFrameScale).
     if (g_owned) {
       if (!_gateLetsNativeLight()) return true;
       _givePanelBack();
@@ -689,9 +711,10 @@ inline bool contractLoopTick() {
   const ContractEffect eff = (g_u.base == CB_DARK) ? CE_OFF : g_u.effect;
   if (g_u.base == CB_NATIVE) {
     // S10: a native:<n> look runs as stock and its frames are not held. What the contract holds is
-    // the brightness it gives the look: at the start, and at every rise after it (B, b=, the
-    // pump), only as far as the gate allows now. Every native mode draws at brightness(), so a
-    // look started inside the gate's window comes up dim and reaches its level when the window ends.
+    // the brightness it gives the look: every rise of it (B, b=, the pump) goes only as far as the
+    // gate allows now. Every native mode draws at brightness(), so a look that is dark when the
+    // brightness comes up inside the gate's window stays dim until the window ends. (The start of
+    // the look is held as a whole, below.)
     const uint8_t allowed = _gateAllows(effBright);
     if (allowed < effBright) effBright = allowed;
   }
@@ -703,6 +726,10 @@ inline bool contractLoopTick() {
     return true;
   }
   if (eff != g_lastEffect) {                           // a new look: re-init the native state machines
+    // S10: a native:<n> look starts. That is the contract's edge, and one the brightness cannot
+    // soften: most modes clear the panel and draw at once, whatever was on it. So the start waits
+    // until an onset is allowed, the panel keeping what it shows.
+    if (g_u.base == CB_NATIVE && !_gateLetsNativeLight()) return true;
     firstTime = true;
     g_lastEffect = eff;
   }

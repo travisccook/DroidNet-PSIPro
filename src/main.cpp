@@ -758,7 +758,8 @@ void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime)
 
     // Set a default start level for each column.
     // Contract verb L drives level[] from Studio energy, so skip the random seed
-    // while the contract holds the panel (keeps the meter tracking L, not noise).
+    // while the contract draws its own meter look (keeps the meter tracking L, not noise).
+    // A native VU mode (21, 92) is never held: contractHoldsLevels() is false for it.
     if (!contractHoldsLevels()) {
       for (int i=0; i< COLUMNS; i++)
       {
@@ -788,7 +789,7 @@ void VUMeter(unsigned long time_delay, uint8_t loops, unsigned long runtime)
     updateLed = 1;
 
     // calc the next position of the bars.
-    // Suppressed while the contract holds the panel: verb L owns level[] (Studio energy).
+    // Suppressed while the contract draws its own meter look: verb L owns level[] (Studio energy).
     if (!contractHoldsLevels())
     for (int y = 0; y < COLUMNS; y++)
     {

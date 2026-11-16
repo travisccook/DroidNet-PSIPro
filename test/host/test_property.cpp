@@ -11,7 +11,9 @@
 //     (d) is dark at once after X, and stays dark until a line that may relight it;
 //     (e) L6: runs the mode a native command started, and the contract does not take the panel
 //         back by itself;
-//     (f) S7: never runs, for a show, a native mode that is off the allow-list.
+//     (f) S7: never runs, for a show, a native mode that is off the allow-list;
+//     (g) S10: never writes into a native look: no line changes the levels the native VU mode
+//         shows while a native look (the owner's, or a native:<n> of the show's) has the panel.
 //
 // What is measured is the frame on its way to the LEDs: the full-field level of every frame
 // FastLED.show() sends (the mean over the LEDs of each LED's brightest channel, times the master
@@ -32,11 +34,13 @@
 //
 // The firmware keeps static state, so every stream runs in its own forked child, which reports its
 // numbers through a pipe. What the test knows about the layer's inside is little: g_owned (does
-// the contract hold the panel, for (b), (c) and (e)) and g_u.inShow (did show mode end without a
-// line saying so). Everything else it asserts is on the frames.
+// the contract hold the panel, for (b), (c) and (e)), g_u.inShow (did show mode end without a
+// line saying so), and who draws a frame, the contract or a native look (S10, below). Everything
+// else it asserts is on the frames.
 //
 // For hunting: PROPERTY_SEED=<n> and PROPERTY_STREAMS=<n> run other streams; PROPERTY_JOB=<n>
-// runs one job in this process and prints the lines and level changes that led to its first break.
+// runs one job in this process and prints the lines and level changes that led to its first break
+// (with PROPERTY_LOG=1, those of the whole stream). PROPERTY_EACH=1 names every failing job.
 #include "native_mocks/Arduino.h"
 // (native_mocks/FastLED.h is not included here: main.cpp names the S9 frame gate and then includes
 // <FastLED.h> itself. ContractPSI.h refuses to build if the mock was compiled without the gate.)
@@ -62,19 +66,22 @@ static const char* pick(std::initializer_list<const char*> l) { return *(l.begin
 // ---- (a): one observer, with its own idea of dark and lit ----
 // S10: a native look runs as stock, so what its OWN frames do is the stock firmware's look and not
 // the contract's doing. An onset seen on a native frame is therefore counted only when the
-// contract caused it: when one of its edges (it started the look, handed the panel back to it, or
-// raised the brightness it gives it; `edge`) came while the panel was dark for this observer.
-// That one relight is the contract's and is counted when it shows. Every other onset on a native
-// frame is the look's own and is set aside (counted in `own`, never in the limit). Frames the
-// contract draws are counted as ever, and nothing else is excluded.
+// contract caused it: after one of its edges (it started or restarted the look, handed the panel
+// back to it, or raised the brightness it gives it; `edge`), the NEXT relight on a native frame is
+// the contract's, whenever it shows and whether or not the panel was lit at the edge. (A native
+// look that clears and redraws when it starts has been made to do that by the contract. A look
+// that was dark when the panel came back to it relights at its own time, but the light before it
+// was the contract's, and the two are one flash after another to anyone watching.) Every other
+// onset on a native frame is the look's own and is set aside (counted in `own`, never in the
+// limit). Frames the contract draws are counted as ever, and nothing else is excluded.
 struct Onsets {
   int darkPct = 10, litPct = 50;
   bool lit = false; uint32_t at[128]; long n = 0, total = 0, own = 0;
-  bool armed = false;            // a contract edge came while dark: the next native relight is the contract's
+  bool armed = false;            // a contract edge came: the next native relight is the contract's
   int worst = 0; uint32_t minGap = 0xFFFFFFFFu;
   void see(int level, int ceil, uint32_t now, bool nativeFrame, bool edge) {
-    if (edge && !lit) armed = true;
     if (!nativeFrame) armed = false;                 // the contract draws: its frames answer for themselves
+    else if (edge) armed = true;
     if (!lit && level * 100 >= ceil * litPct) {
       lit = true;
       if (nativeFrame && !armed) { own++; return; }
@@ -93,7 +100,7 @@ static int gCeil = 20;                    // the owner's brightness in this stre
 static bool gButtons = false;             // this stream has an owner at the controller
 static Onsets gObs[3];
 static int gLevel = 0, gScale = 0, gLit = 0;
-static long gOverCeiling = 0, gNotNative = 0, gNotDark = 0, gNotButton = 0, gWdLate = 0, gOffList = 0;
+static long gOverCeiling = 0, gNotNative = 0, gNotDark = 0, gNotButton = 0, gWdLate = 0, gOffList = 0, gReached = 0;
 static long gDarkChecked = 0, gNativeChecked = 0, gButtonChecked = 0, gContractFrames = 0, gLines = 0, gPresses = 0;
 static bool gExpectNative = false, gExpectDark = false; static uint32_t gNativeFrom = 0, gDarkFrom = 0;
 static int gExpectButton = -1; static uint32_t gButtonFrom = 0; static int gButtonPasses = 0;
@@ -102,7 +109,7 @@ static int gPassesSincePress = 1000;     // loop passes since the last native co
 static uint32_t gFrameMs = 0;            // when the last frame was latched
 static bool gTrace = false, gBroken = false;
 // S10 bookkeeping: has the contract done something to the panel since the last frame?
-static bool gEdge = false;                // a line (re)started a native look, or show mode ended by itself
+static bool gEdge = false;                // a line (re)started a native look or wrote into it, or show mode ended by itself
 static long gSig = -1;                    // who drew the last frame, and what: a change is an edge
 static int gHanded = 0;                   // the brightness a show last gave a native:<n> look
 static long gOwnOnsets = 0;
@@ -115,6 +122,8 @@ static void broke(const char* why) {
   for (size_t i = gLog.size() > 60 ? gLog.size() - 60 : 0; i < gLog.size(); i++) puts(gLog[i].c_str());
 }
 
+// Is the panel a native look's (the board's own, or a native:<n> a show selected)?
+static bool nativeHasPanel() { return !g_owned || (g_u.base == CB_NATIVE && !g_u.pulseActive); }
 static void hook(const CRGB* l, int n, uint8_t scale) {
   long sum = 0; int lit = 0;
   for (int i = 0; i < n; i++) {
@@ -128,11 +137,13 @@ static void hook(const CRGB* l, int n, uint8_t scale) {
     logf(b);
   }
   gLevel = level; gScale = scale; gLit = lit; gFrameMs = gNow;
-  // A native frame: the board's own look, or a native:<n> a show selected. Its edges: the drawer
-  // or the look changed since the last frame, a line restarted the look, or a show raised the
-  // brightness it gives the look.
-  const bool nativeFrame = !g_owned || g_u.base == CB_NATIVE;
-  const long sig = ((long)g_owned << 24) | ((long)g_u.base << 16) | ((long)(g_u.nativeCode & 0xFF) << 8) | (long)(g_u.curSection & 0xFF);
+  // A native frame: the board's own look, or a native:<n> a show selected (not an accent overlay
+  // still up from the section before it: that is the contract's own drawing). Its edges: the
+  // drawer or the look changed since the last frame, a line restarted the look, or a show raised
+  // the brightness it gives the look.
+  const bool nativeFrame = nativeHasPanel();
+  const long sig = ((long)nativeFrame << 25) | ((long)g_owned << 24) | ((long)g_u.base << 16) | ((long)(g_u.nativeCode & 0xFF) << 8) |
+                   (long)(g_u.curSection & 0xFF);
   const int handed = (g_owned && g_u.base == CB_NATIVE) ? tempGlobalBrightnessValue : 0;
   bool edge = gEdge || sig != gSig || handed > gHanded;
   if (gPassesSincePress <= 2) edge = false;         // a native command: the owner's light, not an edge
@@ -166,8 +177,14 @@ static void deliver(const std::string& line) {
   ParsedContract p;
   const char* l = line.c_str();
   if (Serial1.rxHead == Serial1.rxTail) Serial1.rxHead = Serial1.rxTail = 0;
+  // (g): S10. The levels a meter shows are the native VU mode's own while a native look has the
+  // panel: no line may write them (verb L feeds the contract's meter look, and only that).
+  int levelsBefore = 0; for (int c = 0; c < COLUMNS; c++) levelsBefore = levelsBefore * 7 + level[c];
+  const bool nativeHad = nativeHasPanel();
   Serial1.feed("!"); Serial1.feed(l); Serial1.feed("\r");
   serialEventRun();
+  int levelsAfter = 0; for (int c = 0; c < COLUMNS; c++) levelsAfter = levelsAfter * 7 + level[c];
+  if (nativeHad && nativeHasPanel() && levelsAfter != levelsBefore) { gReached++; gEdge = true; broke("a line wrote a native meter's levels"); }
   gLines++;
   logf(("line  " + line).c_str());
   if (!contractParse(l, p) || (p.cls != 'P' && p.cls != '*') || (p.unit != 'F' && p.unit != '*')) return;
@@ -259,7 +276,7 @@ static std::string randomLine() {
   const char* unit = pick({ "F", "F", "R", "*", "*", "T" });
   const char* fx = pick({ "solid", "solid", "off", "flash", "pulse", "rainbow", "scan", "sparkle", "meter", "comet", "chase",
                           "wipe", "gradient", "colorcycle", "twinkle", "native:0", "native:4", "native:15", "native:2",
-                          "native:25", "bogus" });
+                          "native:25", "bogus", "native:7", "native:9", "native:17", "native:21", "native:22" });
   const char* col = pick({ "ffffff", "ffffff", "ff0000", "000000", "0000ff", "101010", "zzzzzz" });
   const uint32_t kind = rnd(17);
   const uint32_t r1 = rnd(256), r2 = rnd(2) ? 255 : rnd(300), r3 = rnd(2) ? 255 : rnd(256), r4 = rnd(6), r5 = rnd(5), r6 = rnd(4);
@@ -310,6 +327,8 @@ static std::string randomLine() {
 // ---- the hostile profiles: the ways a host was found able to flash a display ----
 struct Profile { const char* name; void (*setup)(); void (*at)(uint32_t t); uint32_t period; };
 static void pShow() { tx("**M:v=show"); }
+// The owner keeps native mode `code` running (the board's alwaysOn setting, then the command).
+static void ownerRuns(int code) { alwaysOn = true; gButtons = true; press(code); }
 static const Profile kProfiles[] = {
   { "X between live A lines", pShow,
     [](uint32_t t) { if (t == 0) tx("PFA:i=solid,c=ffffff"); if (t == 50) tx("PFX"); if (t == 100) tx("PFA:i=solid,c=ffffff"); }, 170 },
@@ -346,6 +365,33 @@ static const Profile kProfiles[] = {
   // and again; a show's brightness toggled under a native look; the beat pump under one.
   { "a native look started from dark, again and again", pShow,
     [](uint32_t t) { if (t == 0) tx("PFX"); if (t == 60) tx("PFA:i=native:17"); if (t == 180) tx("PFX"); if (t == 230) tx("PFA:i=native:22"); }, 300 },
+  // Modes 7 and 9 clear the panel when they start and draw at once; 22 builds up from dark. Started
+  // while the panel is lit, that relight is the contract's doing.
+  { "a native look that clears as it starts, started while lit", pShow,
+    [](uint32_t t) { if (t == 0) tx("PFA:i=off"); if (t == 400) tx("PFA:i=solid,c=ffffff"); if (t == 600) tx("PFA:i=native:7");
+                     if (t == 800) tx("PFA:i=native:9"); if (t == 1000) tx("PFA:i=native:22"); }, 1400 },
+  // L writes the levels a meter shows. The board's own VU mode (a native command), and a native:21
+  // a show selected, are native looks: L must not reach into them.
+  { "L 0/255 at a native VU meter a show selected", []() { pShow(); tx("PFA:i=native:92"); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=0"); if (t == 50) tx("P*L:v=255"); }, 100 },
+  // The meter redraws every 250 ms: L empties it, a pulse lights the panel, L fills the meter.
+  { "L at the board's own VU meter, around a pulse", []() { ownerRuns(92); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=0"); if (t == 300) tx("PFP:c=ffffff,d=60"); if (t == 310) tx("P*L:v=255"); }, 1010 },
+  // PSI, L3 and S10: a pulse over a native look the owner started that goes dark and relights by
+  // itself (7 and 9: once in 1,040 ms; 22: once in 1,612 ms). The pulse lights the panel; the
+  // look's own relight after it must keep its distance from that.
+  { "P over a native look that blinks by itself", []() { ownerRuns(7); },
+    [](uint32_t t) { if (t == 0) tx("PFP:c=ffffff,d=60"); }, 350 },
+  { "P over a native look that builds up from dark", []() { ownerRuns(22); },
+    [](uint32_t t) { if (t == 0) tx("PFP:c=ffffff,d=60"); if (t == 400) tx("PFP:c=ffffff,d=200"); }, 790 },
+  // An accent overlay that is still flashing when its section gives way to a native:<n> one: the
+  // overlay is the contract's own drawing for as long as it is up, whatever the base look is.
+  { "an accent still flashing when a native section starts",
+    []() { pShow(); for (int b = 0; b < 24; b += 6) { char l[96];     // one beat dark with the accent, five of native:0
+             snprintf(l, sizeof l, "PFA:i=off,s=255,at=%d,am=2,ae=flash,ac=ffffff,ad=2500", b); tx(l);
+             snprintf(l, sizeof l, "PFA:i=native:0,s=255,at=%d", b + 1); tx(l); }
+           tx("**C:bpm=120,ph=0,bpb=4,beat=0"); },
+    [](uint32_t t) { if (t == 0) tx("**C:bpm=120,ph=0,bpb=4,beat=0"); }, 11900 },
   { "B 0/255 under a native look", []() { pShow(); tx("PFA:i=native:17"); },
     [](uint32_t t) { if (t == 0) tx("PFB:b=0"); if (t == 50) tx("PFB:b=255"); }, 100 },
   { "the pump under a native look at 300 BPM", []() { pShow(); tx("PFA:i=native:16,m=255,am=2"); tx("**C:bpm=300,ph=0,bpb=4,beat=0"); },
@@ -357,11 +403,11 @@ static const Profile kProfiles[] = {
 static const int kProfileCount = (int)(sizeof kProfiles / sizeof kProfiles[0]);
 
 struct Result {
-  int worst = 0; uint32_t minGap = 0xFFFFFFFFu; long overCeiling = 0, notNative = 0, notDark = 0, wdLate = 0, notButton = 0, offList = 0;
+  int worst = 0; uint32_t minGap = 0xFFFFFFFFu; long overCeiling = 0, notNative = 0, notDark = 0, wdLate = 0, notButton = 0, offList = 0, reached = 0;
   long onsets = 0, own = 0, darkChecked = 0, nativeChecked = 0, contractFrames = 0, lines = 0, presses = 0, buttonChecked = 0;
   void take() {
     for (const Onsets& o : gObs) { if (o.worst > worst) worst = o.worst; if (o.minGap < minGap) minGap = o.minGap; }
-    overCeiling = gOverCeiling; notNative = gNotNative; notDark = gNotDark; wdLate = gWdLate; notButton = gNotButton; offList = gOffList;
+    overCeiling = gOverCeiling; notNative = gNotNative; notDark = gNotDark; wdLate = gWdLate; notButton = gNotButton; offList = gOffList; reached = gReached;
     onsets = gObs[0].total; own = gObs[0].own; darkChecked = gDarkChecked; nativeChecked = gNativeChecked; contractFrames = gContractFrames;
     lines = gLines; presses = gPresses; buttonChecked = gButtonChecked;
   }
@@ -369,13 +415,13 @@ struct Result {
     if (o.worst > worst) worst = o.worst;
     if (o.minGap < minGap) minGap = o.minGap;
     overCeiling += o.overCeiling; notNative += o.notNative; notDark += o.notDark; wdLate += o.wdLate; notButton += o.notButton;
-    offList += o.offList;
+    offList += o.offList; reached += o.reached;
     onsets += o.onsets; own += o.own; darkChecked += o.darkChecked; nativeChecked += o.nativeChecked; contractFrames += o.contractFrames;
     lines += o.lines; presses += o.presses; buttonChecked += o.buttonChecked;
   }
   bool holds() const {
     return worst <= 3 && minGap >= 2 * STROBE_MIN_STATE_MS && overCeiling == 0 && notNative == 0 && notDark == 0 && wdLate == 0 &&
-           notButton == 0 && offList == 0;
+           notButton == 0 && offList == 0 && reached == 0;
   }
   void print(const char* verdict, const char* name) const {
     printf("%s S9 %s: %d onsets in one second", verdict, name, worst);
@@ -386,6 +432,7 @@ struct Result {
     if (wdLate)      printf(", the watchdog was late %ld times", wdLate);
     if (notButton)   printf(", %ld ms not on the mode a native command started", notButton);
     if (offList)     printf(", %ld frames of a native mode off the allow-list", offList);
+    if (reached)     printf(", %ld lines wrote a native meter's levels", reached);
     printf("\n");
   }
 };
@@ -431,6 +478,7 @@ int main() {
   if (const char* one = getenv("PROPERTY_JOB")) {  // hunt: one job, in this process, traced
     gTrace = true;
     runJob(atoi(one), seed);
+    if (getenv("PROPERTY_LOG")) for (const std::string& l : gLog) puts(l.c_str());   // the whole stream
     Result r; r.take(); r.print(r.holds() ? "ok   " : "FAIL ", "job");
     return r.holds() ? 0 : 1;
   }
@@ -458,6 +506,7 @@ int main() {
       continue;
     }
     if (!r.holds() && firstBad < 0) firstBad = job;
+    if (!r.holds() && getenv("PROPERTY_EACH")) { char name[24]; snprintf(name, sizeof name, "job %d", job); r.print("FAIL ", name); }
     if (job < kProfileCount * kRounds) profile[job / kRounds].add(r); else random.add(r);
     all.add(r);
   }

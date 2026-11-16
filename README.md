@@ -102,9 +102,9 @@ What it buys, measured:
 
 | | serial-only (default) | with I2C |
 | --- | --- | --- |
-| flash | 27,424 B (95.6%) | 27,876 B (97.2%) |
-| SRAM | 1,595 B (62.3%) | 1,800 B (70.3%) |
-| worst-case stack | 435 B of 965 B (45%) | 533 B of 760 B (70%) |
+| flash | 27,494 B (95.9%) | 27,942 B (97.5%) |
+| SRAM | 1,597 B (62.4%) | 1,802 B (70.4%) |
+| worst-case stack | 435 B of 963 B (45%) | 533 B of 758 B (70%) |
 | score sections a show may hold | 16 | 12 |
 | contract looks | all | six drawn as stand-ins (above) |
 | can an interrupt reach a render? | **no** | yes (upstream's native path) |
@@ -130,8 +130,8 @@ own supply.
 **Testing.** `bash test/host/run.sh` is the whole suite. It runs the firmware's own `src/main.cpp`
 on host mocks of the hardware (no mock of the board API: that one lied twice and is retired) and
 compares it, frame for frame, with captures of every native mode (36 goldens) and with upstream
-v1.7 on the same mocks (78 scripted timelines); runs 84 scripted contract scenarios on each of the
-two builds; feeds the firmware 17 hostile line scripts and 1,500 random streams and measures the
+v1.7 on the same mocks (78 scripted timelines); runs 89 scripted contract scenarios on each of the
+two builds; feeds the firmware 23 hostile line scripts and 1,500 random streams and measures the
 frames (at most three dark-to-lit swings a second, nothing above the owner's brightness); then
 cross-compiles both builds with the real avr-gcc, gates their flash and worst-case stack, and runs
 five probes in simavr: `millis()` against a hardware timer for each look, the show lifecycle,
@@ -143,10 +143,10 @@ tightest board of the three, and the numbers are worth knowing before you build:
 | Build | Flash | of 28,672 B |
 | --- | --- | --- |
 | Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
-| **This fork, as shipped (serial-only)** | **27,424 B** | **95.6%** |
+| **This fork, as shipped (serial-only)** | **27,494 B** | **95.9%** |
 | …serial-only, without `-mcall-prologues` | 28,492 B | 99.4% |
 | …serial-only, with `PSI_NOINLINE` removed | 28,262 B | 98.6% |
-| This fork with the I2C intake (`-e PSIPro-i2c`) | 27,876 B | 97.2% |
+| This fork with the I2C intake (`-e PSIPro-i2c`) | 27,942 B | 97.5% |
 | …I2C, with `PSI_NOINLINE` removed | 28,424 B | 99.1% |
 | …I2C, without `-mcall-prologues` | 28,942 B | 100.9% — **will not link** |
 
@@ -158,7 +158,7 @@ which is *why* there is headroom at all: it replaced the hand-written per-mode s
 one. That headroom is not evenly spread, though.
 Since the contract's version 1.3 neither build has room to spare. `run.sh` fails the serial-only
 build over 28,416 B and the I2C build over 28,160 B, so a change that would not leave room for a fix
-is caught when it is made: the serial-only build is 992 B under its line, the I2C build 284 B. Both
+is caught when it is made: the serial-only build is 922 B under its line, the I2C build 218 B. Both
 need the AVR codegen flags in `platformio.ini` and the `PSI_NOINLINE` outlining in
 `src/contract/ContractPSI.h` (the last four rows above). (For scale: as originally published,
 before any of the flash or VM work, this fork linked at 38,790 B — 135.3%. There used to be a
@@ -178,21 +178,21 @@ that one `float` expression had linked). `run.sh` fails a build that links any o
 
 ### SRAM and the stack
 
-SRAM sits at 1,595 B of 2,560 B (62.3%), leaving **965 B for the stack** in the default
+SRAM sits at 1,597 B of 2,560 B (62.4%), leaving **963 B for the stack** in the default
 serial-only build. That used to be an open question here. It has now been analysed statically
 (`test/host/stack_report.py` computes the bound directly from the linked ELF — see the tool's own
 `--help` for why `-fstack-usage` can't be trusted under `-flto`), and in the shipped configuration
 the answer is good:
 
-- **Worst-case stack: 435 B of 965 B (45%), and the bound is SOUND** — with the TWI vector gone,
+- **Worst-case stack: 435 B of 963 B (45%), and the bound is SOUND** — with the TWI vector gone,
   **no interrupt in the image can reach a render at all**, and no interrupt can nest.
 
-- **In the I2C build (`-e PSIPro-i2c`) the worst case is 533 B of 760 B (70%), 227 B spare, and that
+- **In the I2C build (`-e PSIPro-i2c`) the worst case is 533 B of 758 B (70%), 225 B spare, and that
   bound is SOUND too** — 346 B of synchronous stack plus the worst single interrupt, 187 B. (That is
   a conservative charge: the tool bounds the USB interrupt's indirect calls by the largest
   address-taken function, the I2C `receiveEvent`.) No recursion anywhere, no `alloca`/VLA
   (every frame is a compile-time constant), and **no heap at all** — nothing links `malloc`, so the
-  whole 760 B really is stack. It is the tightest margin on the board, which is why this build holds
+  whole 758 B really is stack. It is the tightest margin on the board, which is why this build holds
   12 score sections and not 16. `run.sh` fails the build under 128 B of headroom (256 B serial-only).
 
 - **It used to be unsound, and you should know why.** Stock FastLED's `showPixels()` executes an
@@ -319,7 +319,9 @@ The contract's specification and its plan are in the DroidNet Signal Booster rep
   it and the board is given back at it.
 - **A show begins and ends cleanly.** `M:v=show` arms and keeps the swipe until the show's first
   `C`, `A` or `P`. `X` is dark until `M:v=idle` or a look. `M:v=idle` returns to the swipe, whatever
-  the show selected. A `P` with no show overlays the board's own look and returns to it.
+  the show selected. A `P` with no show overlays the board's own look and returns to it. The
+  return waits until the panel may light again (340 ms after it last lit or got brighter), and
+  the panel keeps what it shows until then: a short pulse can stay up that long.
 - **The owner's controller always wins.** A native `T` or `D` command addressed to the PSI ends a
   show on it and then runs.
 - **A dead host gives the board back.** `M:v=show,wd=<seconds>`: that long with no line addressed
@@ -333,7 +335,10 @@ The contract's specification and its plan are in the DroidNet Signal Booster rep
   a second, whatever lines arrive.
 - **Native modes run as stock.** A show may select modes 0 to 22 and 92, without 2, 3 and 5
   (Flash, Alarm, Scream: whole-field strobes). Their frames are never altered. Every one of them
-  draws at the brightness the show gives it, so `b=` and `B` dim all of them.
+  draws at the brightness the show gives it, so `b=` and `B` dim all of them. A mode starts only
+  when the panel may light again, the look before it staying up until then (most modes clear the
+  panel and draw at once). `L` feeds the contract's own `meter` look and nothing else: the board's
+  VU modes (21 and 92) keep their own bars, from a button or in a show.
 
 ### The animation VM: modes are data now
 
@@ -441,7 +446,7 @@ credit him for it; not part of the contract layer either:
 | Path | Lines | What it is |
 | --- | --- | --- |
 | `src/contract/contract_core.h` | 1,285 | Pure, dependency-free, integer-only C++: the wire parser, the beat clock, the safety limits, the score, the effect math. Byte-identical across all three DroidNet forks; `src/contract/CORE_PIN` names the commit it was copied from. |
-| `src/contract/ContractPSI.h` | 799 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`VUMeter` primitives and the `vmContractSparkle` animation-VM shim (`include/psi_vm.h`). Adds no new render primitives of its own. |
+| `src/contract/ContractPSI.h` | 826 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`VUMeter` primitives and the `vmContractSparkle` animation-VM shim (`include/psi_vm.h`). Adds no new render primitives of its own. |
 | `include/psi_vm.h` | 1,321 | The animation interpreter and the bytecode of every upstream mode it plays (see "The animation VM", above). |
 | `include/FastLED.h` | 460 | The clean-room WS2812 driver that replaced the FastLED package (`docs/FASTLED_DRIVER_VERIFICATION.md`). |
 | `test/host/`, `test/simavr/` | 7,600 | The host suite and the simavr probes. They run `src/main.cpp` itself; there is no mock of the board API. |
