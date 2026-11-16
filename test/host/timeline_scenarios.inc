@@ -580,6 +580,70 @@ static void a_native_vu_mode_walks_after_a_show() {
 }
 
 
+// ---- C1, C2, S4: corrections and live looks that do not disturb the show ---------------------------
+// C1: Studio corrects the clock every 4 s. A correction that lands well into a beat must not fire
+// that beat's accent a second time; the next real beat still accents.
+static void reanchor_does_not_refire_the_accent() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=solid,c=000040,at=0,am=2,ae=solid,ac=ffffff,ad=180");
+  at(2000, "!**C:bpm=60,bpb=4,beat=0"); at(4500, "!**C:ph=1500,beat=4");   // "beat 4 is 1500 ms away": no change
+  runTo(6400);
+  CHECK(onsets(2000, 4400, WHITE).size() == 3, "beats 0, 1 and 2 accent (saw %u)", (unsigned)onsets(2000, 4400, WHITE).size());
+  for (const Frame& f : between(4300, 4950))
+    if (f.allAre(WHITE)) { CHECK(false, "t=%u: an accent fired mid-beat after the re-anchor", f.t); break; }
+  CHECK(shown(5100).allAre(WHITE), "the next real beat (5000) still accents");
+}
+// ...and the same when a scored line arrives mid-beat while the clock runs (a late or re-sent line).
+static void a_scored_line_mid_beat_does_not_refire() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=solid,c=000040,at=0,am=2,ae=solid,ac=ffffff,ad=180");
+  at(2000, "!**C:bpm=60,bpb=4,beat=0"); at(4500, "!P*A:i=solid,c=000040,at=64");
+  runTo(5400);
+  for (const Frame& f : between(4300, 4950))
+    if (f.allAre(WHITE)) { CHECK(false, "t=%u: an accent fired mid-beat when a scored line arrived", f.t); break; }
+  CHECK(shown(5100).allAre(WHITE), "the next real beat (5000) still accents");
+}
+// C2: a correction that moves the beat position by less than a beat never moves the section
+// cursor backwards (it would replay the end of the last section for a few frames).
+static void a_nudge_never_flips_the_section_back() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=solid,c=ff00ff,at=0"); at(1002, "!P*A:i=solid,c=00ffff,at=8");
+  at(2000, "!**C:bpm=120,bpb=4,beat=0");               // beat 8 lands at 6000
+  at(6040, "!**C:ph=50,beat=8");                       // a correction: "beat 8 is still 50 ms away"
+  runTo(6500);
+  CHECK(shown(6030).allAre(CYAN), "section 2 started at beat 8");
+  for (const Frame& f : between(6040, 6500))
+    if (f.allAre(MAGENTA)) { CHECK(false, "t=%u: the correction flipped the show back to section 1", f.t); break; }
+}
+// ...but a seek does: a C with a tempo, or one that moves a beat or more, goes where it says.
+static void a_seek_goes_back() {
+  boot();
+  at(1000, "!**M:v=show"); at(1001, "!P*A:i=solid,c=ff00ff,at=0"); at(1002, "!P*A:i=solid,c=00ffff,at=8");
+  at(2000, "!**C:bpm=120,bpb=4,beat=0"); at(7000, "!**C:bpm=120,bpb=4,beat=2");
+  runTo(8000);
+  CHECK(shown(6900).allAre(CYAN), "section 2 is playing at beat 10");
+  CHECK(shown(7900).allAre(MAGENTA), "a seek back to beat 2 plays section 1 again");
+}
+// S4: a live look less than 170 ms after the last applied one is held, the lines held in that window
+// merge key by key, and the result is applied when the window ends.
+static void live_looks_inside_170ms_are_held_and_merged() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!P*A:i=solid,c=00ff00"); at(1050, "!P*A:c=ff00ff"); at(1090, "!P*A:b=128");
+  runTo(1400);
+  CHECK(shown(1150).allAre(GREEN) && shown(1150).scale == 200, "inside 170 ms the first look holds");
+  CHECK(shown(1300).allAre(MAGENTA) && shown(1300).scale == 100, "then the held lines apply together: colour and b=128");
+  uint32_t change = 0;
+  for (const Frame& f : between(1000, 1400)) if (f.allAre(MAGENTA)) { change = f.t; break; }
+  CHECK(change >= 1170 && change <= 1200, "the held look applies when the window ends (1170), saw t=%u", change);
+}
+// A held look does not outlive a reset: X while one is waiting stays dark.
+static void x_drops_a_held_look() {
+  boot();
+  at(1000, "!P*A:i=solid,c=00ff00"); at(1050, "!P*A:c=ff00ff"); at(1100, "!P*X");
+  runTo(2000);
+  CHECK(mostLit(1130, 2000) == 0, "after X nothing is applied late (saw %u lit)", mostLit(1130, 2000));
+}
+
 // ---- L2: the host-silence watchdog ----------------------------------------------------------------
 static void watchdog_gives_the_panel_back() {
   boot();
@@ -784,6 +848,12 @@ static const Scenario kScenarios[] = {
   {"no_accent_on_a_native_section", no_accent_on_a_native_section},
   {"a_meter_with_no_level_feed_walks", a_meter_with_no_level_feed_walks},
   {"a_native_vu_mode_walks_after_a_show", a_native_vu_mode_walks_after_a_show},
+  {"reanchor_does_not_refire_the_accent", reanchor_does_not_refire_the_accent},
+  {"a_scored_line_mid_beat_does_not_refire", a_scored_line_mid_beat_does_not_refire},
+  {"a_nudge_never_flips_the_section_back", a_nudge_never_flips_the_section_back},
+  {"a_seek_goes_back", a_seek_goes_back},
+  {"live_looks_inside_170ms_are_held_and_merged", live_looks_inside_170ms_are_held_and_merged},
+  {"x_drops_a_held_look", x_drops_a_held_look},
   {"watchdog_gives_the_panel_back", watchdog_gives_the_panel_back},
   {"watchdog_is_fed_by_any_addressed_line", watchdog_is_fed_by_any_addressed_line},
   {"watchdog_is_not_fed_by_another_boards_lines", watchdog_is_not_fed_by_another_boards_lines},

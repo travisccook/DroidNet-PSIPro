@@ -473,7 +473,7 @@ static PSI_NOINLINE bool _fireAccent(ContractEffect fx, const ContractRGB& c, ui
   return true;
 }
 
-// A live look.
+// A live look: now, or when its S4 hold ends.
 static PSI_NOINLINE void _applyLook(ContractLookPatch lp, uint32_t now) {
   lookPatchDefault(lp, g_u.base);                      // L5: no i= and no look yet is solid
   if (lp.has & LP_COLOR)   g_u.color = lp.color;
@@ -513,12 +513,16 @@ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint16_t lineCr
     // The entry keeps the CRC of its line: the core tells a line delivered twice (which changes
     // nothing, the playing section included) from a new line for the same beat (which replaces).
     scoreAccept(g_u, g_score, PSI_SCORE_CAP, e, lineCrc);
-    // A new score invalidates the beat edge the last one accented (a resend re-anchors).
-    g_u.lastAccentBeat = BEAT_NONE;
+    // C1, as after a C: with the clock running and the beat well under way, that beat counts as
+    // accented already, so a section that arrives mid-beat does not fire it again.
+    g_u.lastAccentBeat = accentEdgeAfterSeed(g_clock, now);
     return;
   }
   _showBegin();
-  _applyLook(lookPatchFrom(pr), now);
+  // S4: a live look less than 170 ms after the last one applied is held, and lines held in the
+  // same window merge key by key; contractLoopTick() applies it when the window ends.
+  const ContractLookPatch lp = lookPatchFrom(pr);
+  if (liveLookOffer(g_u, lp, now)) _applyLook(lp, now);
 }
 
 inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t now) {
@@ -541,9 +545,10 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
       ContractSeed k = beatClockSeed(g_clock, pr, now);
       if (k == CS_IGNORED || k == CS_HOLD) break;      // C6: a hold freezes the cursor and keeps the look
       _showBegin();
-      // Studio re-anchors on every Play and seek: the beat origin moved, so a beat index from the
-      // old timeline must not gate the new one.
-      g_u.lastAccentBeat = BEAT_NONE;
+      // C1: a seek that lands on a beat still accents it; a correction that lands more than 60 ms
+      // into a beat does not fire that beat again.
+      g_u.lastAccentBeat = accentEdgeAfterSeed(g_clock, now);
+      g_u.pinForward = (k == CS_NUDGE);                // C2: a correction never moves the cursor back
       break;
     }
 
@@ -615,18 +620,19 @@ inline void contractPulseTick() {
 }
 
 // Called inside the 25 ms loop gate. Returns true when the contract owns the frame (so the native
-// runPattern path is skipped). Watchdog, score, accent, envelope, then render.
+// runPattern path is skipped). Watchdog, held look, score, accent, envelope, then render.
 inline bool contractLoopTick() {
   _serviceYield();                                     // L6: a native command since the last pass
   uint32_t now = millis();
   // L2: wd seconds with no well-formed line addressed to this board, in show mode: as M:v=idle.
   if (contractWatchdogExpired(g_u, g_lastLineMs, now)) _boundary('i', 0);
+  { ContractLookPatch lp; if (liveLookDue(g_u, now, lp)) _applyLook(lp, now); }   // S4: a held look's window ended
 
   BeatPos bp;                                          // ONE beat position for the whole tick
   if (g_clock.running) {
     bp = beatPosAt(g_clock, now);
     if (g_u.scoreLen) {
-      int idx = scoreActiveIndex(g_score, g_u.scoreLen, bp.beatIndex);
+      int idx = scoreCursor(g_u.curSection, scoreActiveIndex(g_score, g_u.scoreLen, bp.beatIndex), g_u.pinForward);
       if (idx >= 0 && idx != g_u.curSection) {         // a section boundary
         const ScoreEntry& e = g_score[idx];
         _holdPanel();

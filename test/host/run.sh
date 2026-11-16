@@ -177,7 +177,9 @@ echo "      the committed goldens bit-for-bit (test/host/golden/)."
 # the ground truth. golden_matrix.txt's first 30 rows are not 30 modes: 28 of them are captures of
 # the 23 upstream modes' (0-21 and 92) native ground truth (several modes get more than one row —
 # front/rear jumper, alwaysOn); one more (contract_sparkle) is the contract CE_SPARKLE look
-# captured from the pre-shim native (DiscoBall at 9502cad), which the VM shim must reproduce
+# captured from the pre-shim native (DiscoBall at 9502cad), which the VM shim must reproduce.
+# Its line is fed at 1000 ms, not at boot: a live look in the first 170 ms of uptime is held (S4),
+# and the swipe that runs meanwhile draws from the same PRNG
 # (contract scan is not a capture any more: v1.3 defines it by fxScanPos() in the core, and the
 # timeline scenario scan_is_the_shared_ping_pong checks the panel against that function);
 # the last, mode22_process, has "ground truth" from the
@@ -224,7 +226,7 @@ fi
 echo "[6d] the I2C build's stand-in looks"
 # The PSIPro-i2c environment builds without the six strip and hue looks (PSI_NO_STRIP_LOOKS). A
 # line naming one must draw the nearest look that build has, frame for frame: comet, chase and wipe
-# are scan, twinkle is the sparkle golden, gradient and colorcycle are solid in c=.
+# are scan, twinkle is sparkle, gradient and colorcycle are solid in c=.
 "$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -w -DPSI_ENABLE_I2C -DPSI_NO_STRIP_LOOKS \
     -I native_mocks -I "$BUILD/config_full" -I ../../include -o "$BUILD/golden_i2c" golden_native.cpp
 frames() { python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); sys.stdout.buffer.write(d[d.index(b"\nFRAMES\n"):])' "$1"; }
@@ -239,7 +241,7 @@ standin() {  # <look named on the wire> <look drawn> [committed golden of the lo
   cmp -s <(frames "$want") <(frames "$GOLD/i2c_$1.psig") || { echo "FAIL: on the I2C build i=$1 is not i=$2"; exit 1; }
 }
 standin comet scan; standin chase scan; standin wipe scan
-standin twinkle sparkle contract_sparkle
+standin twinkle sparkle
 standin gradient solid; standin colorcycle solid
 # ...and the build still has the looks it keeps: rainbow is not solid there.
 standin rainbow rainbow
