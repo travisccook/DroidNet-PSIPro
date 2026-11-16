@@ -877,7 +877,7 @@ static void a_relight_right_after_x_is_held() {
     if (f.lit && f.scale > 50) { CHECK(false, "t=%u: relit at %u only %u ms after the panel last lit (t=%u)", f.t, f.scale, f.t - lit, lit); break; }
   CHECK(shown(lit + 380).allAre(WHITE) && shown(lit + 380).scale == 200, "340 ms after it last lit the look is at its level");
 }
-// The native look the panel is given back to is held the same way: X, then M:v=idle, again and again.
+// The native look the panel is given back to starts no sooner either: X, then M:v=idle, again and again.
 static void the_swipe_after_idle_is_held_too() {
   boot(0x00, 0x01, 200);
   at(1000, "!P*A:i=off");
@@ -893,17 +893,20 @@ static void the_swipe_after_idle_is_held_too() {
   for (size_t k = 1; k < on.size(); k++) CHECK(on[k] - on[k - 1] >= 340, "two relights %u ms apart (t=%u)", on[k] - on[k - 1], on[k]);
   CHECK(shown(5900).lit == 48 && shown(5900).scale == 200, "when the stream ends the swipe is back at the owner's 200");
 }
-// A held frame is released the moment the window ends, not at the look's next step: the swipe
-// draws only every 120 ms or so while it starts, and must not sit dimmed that long.
-static void a_held_frame_is_released_when_the_window_ends() {
+// S10: the native look's frames are never dimmed. What waits is the hand-over: the panel stays as
+// it is (dark) until the gate's window ends, and then the swipe is there at the owner's brightness
+// with its first frame.
+static void the_swipe_starts_when_the_window_ends() {
   boot(0x00, 0x01, 200);
   at(1000, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=ffffff"); at(2200, "!P*X"); at(2260, "!**M:v=idle");
   runTo(3000);
   uint32_t lit = 0, back = 0;
   for (const Frame& f : between(2000, 2100)) if (f.scale == 200 && f.lit == 48) { lit = f.t; break; }
-  for (const Frame& f : between(2260, 3000)) if (f.scale == 200 && f.lit > 24) { back = f.t; break; }
-  CHECK(lit != 0 && shown(2300).scale <= 50, "the swipe's first frames after idle are held (scale %u)", shown(2300).scale);
-  CHECK(back >= lit + 340 && back <= lit + 344, "the swipe is at the owner's 200 within 4 ms of the window's end (t=%u), saw t=%u", lit + 340, back);
+  for (const Frame& f : between(2260, 3000)) if (f.lit) { back = f.t; break; }
+  CHECK(lit != 0, "the look lights");
+  CHECK(back >= lit + 340 && back <= lit + 340 + 27, "the swipe starts within a frame of the window's end (t=%u), saw t=%u", lit + 340, back);
+  for (const Frame& f : between(2260, 3000))
+    if (f.lit && f.scale != 200) { CHECK(false, "t=%u: a swipe frame at %u; native frames are never dimmed", f.t, f.scale); break; }
 }
 // Nothing the contract holds is ever brighter than the ceiling, whatever the primitive asked for
 // (upstream's bare show() latches a brightness stored at boot, not the owner's current one). Boot
@@ -931,6 +934,50 @@ static void no_pulse_over_a_contract_native_look() {
   runTo(4000);
   CHECK(onsets(2500, 4000, WHITE).empty(), "a P over native:15 draws nothing");
   CHECK(mostLit(2500, 4000) > 0 && mostLit(2500, 4000) <= 6, "Knight Rider runs on");
+}
+
+// ---- S10: native looks run as stock; the contract holds only their edges ---------------------------
+// Leia (6) and Knight Rider (15) move a small lit area fast. Under a show their frames go out
+// exactly as the stock firmware draws them: never scaled down, at the show's level.
+static void a_native_look_runs_as_stock_under_a_show() {
+  boot();
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=native:6"); at(5000, "!P*A:i=native:15");
+  runTo(9000);
+  unsigned frames = 0, lit = 0;
+  for (const Frame& f : between(1500, 9000)) {
+    frames++; if (f.lit) lit++;
+    if (f.lit && f.scale != 20) { CHECK(false, "t=%u: a native frame at scale %u; the show's level is 20", f.t, f.scale); break; }
+  }
+  CHECK(frames > 60 && lit > 30, "Leia and Knight Rider draw (%u frames, %u lit)", frames, lit);
+}
+// The start of a native look is the contract's edge. Started from dark inside the gate's window, it
+// comes up dim (the brightness the show gives it is held) and is at its level when the window ends.
+static void a_native_look_started_in_the_window_comes_up_dim() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(2000, "!P*A:i=solid,c=ffffff"); at(2200, "!P*X"); at(2260, "!P*A:i=native:17");
+  runTo(3200);
+  uint32_t lit = 0;
+  for (const Frame& f : between(2000, 2100)) if (f.scale == 200 && f.lit == 48) { lit = f.t; break; }
+  CHECK(lit != 0, "the look lights");
+  for (const Frame& f : between(2260, lit + 339))
+    if (f.lit && f.scale > 50) { CHECK(false, "t=%u: native:17 at %u only %u ms after the panel last lit", f.t, f.scale, f.t - lit); break; }
+  CHECK(shown(lit + 400).lit == 48 && shown(lit + 400).scale == 200, "then it is at the show's level (saw %u)", shown(lit + 400).scale);
+}
+// So is the brightness a show gives it: B up under a native look is held like any other relight.
+static void b_under_a_native_look_is_held() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=native:17");
+  for (uint32_t t = 2000; t < 5000; t += 100) { at(t, "!P*B:v=0"); at(t + 50, "!P*B:v=255"); }
+  runTo(6000);
+  std::vector<uint32_t> on; bool was = true;
+  for (const Frame& f : between(1900, 5100)) {
+    const bool is = f.lit >= 24 && f.scale >= 100;
+    if (is && !was) on.push_back(f.t);
+    was = is;
+  }
+  CHECK(on.size() >= 3, "the look does come back up between the dips (%u times in 3 s)", (unsigned)on.size());
+  for (size_t k = 1; k < on.size(); k++) CHECK(on[k] - on[k - 1] >= 340, "two relights %u ms apart (t=%u)", on[k] - on[k - 1], on[k]);
+  CHECK(shown(5900).scale == 200, "and it ends at the show's level");
 }
 
 // ---- core revision CA1.2: what a line may and may not do ---------------------------------------
@@ -1068,9 +1115,12 @@ static const Scenario kScenarios[] = {
   {"x_leaves_the_watchdog_armed", x_leaves_the_watchdog_armed},
   {"a_relight_right_after_x_is_held", a_relight_right_after_x_is_held},
   {"the_swipe_after_idle_is_held_too", the_swipe_after_idle_is_held_too},
-  {"a_held_frame_is_released_when_the_window_ends", a_held_frame_is_released_when_the_window_ends},
+  {"the_swipe_starts_when_the_window_ends", the_swipe_starts_when_the_window_ends},
   {"a_show_never_exceeds_the_ceiling", a_show_never_exceeds_the_ceiling},
   {"no_pulse_over_a_contract_native_look", no_pulse_over_a_contract_native_look},
+  {"a_native_look_runs_as_stock_under_a_show", a_native_look_runs_as_stock_under_a_show},
+  {"a_native_look_started_in_the_window_comes_up_dim", a_native_look_started_in_the_window_comes_up_dim},
+  {"b_under_a_native_look_is_held", b_under_a_native_look_is_held},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},
   {"a_bpm_that_is_not_a_number_is_ignored", a_bpm_that_is_not_a_number_is_ignored},
 #ifdef PSI_ENABLE_I2C
