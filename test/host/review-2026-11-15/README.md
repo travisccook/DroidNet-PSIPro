@@ -34,10 +34,10 @@ git clone --depth 1 https://github.com/nhutchison/PSIPro.git /tmp/PSIPro   # rev
 | `scenarios/results.txt` | Its output on the firmware as reviewed |
 | `timeline/test_timeline.cpp` | The same idea as an assertion harness: one scenario per process, pass or fail. The plan's Task 3 moves it to `test/host/` |
 | `timeline/timeline_scenarios.inc` | 27 v1.3 scenarios. On the reviewed firmware 25 fail (`timeline/result_current_firmware.txt`) |
-| `updiff/Wire.h`, `updiff/diffdrv.cpp` | Upstream `PSIPro.ino` and the fork, each built on the fork's mocks, dumping every `show()` frame |
+| `updiff/diffdrv.cpp` | Upstream `PSIPro.ino` and the fork, each built on the fork's mocks, dumping every `show()` frame (the `Wire` stub is now `test/host/native_mocks/Wire.h`) |
 | `updiff/build.sh`, `updiff/rundiff.sh`, `updiff/matrix.sh` | Build both, compare one timeline, run the 71 timelines the review ran |
 | `updiff/results.txt` | 67 same (51 frame for frame, 16 once repeated frames are collapsed), 4 different |
-| `updiff/diff_upstream.cpp`, `updiff/diff_upstream.sh` | The same comparison as a pass/fail stage with an expectation per row (77 timelines), written for `test/host/` with upstream vendored at `test/host/upstream-v1.7/`; the plan's Task 2 moves them there |
+| `test/host/diff_upstream.cpp`, `test/host/diff_upstream.sh` | Moved out of here by the plan's Task 2: the same comparison as a `run.sh` stage with an expectation per row (77 timelines), against upstream vendored at `test/host/upstream-v1.7/` |
 | `simavr/millis_probe/` | The WS2812 driver alone behind the firmware's 26 ms gate: `millis()` against Timer1 for a range of compute times before `show()` |
 | `simavr/fwprobe/` | The real firmware with one contract look at a time: `millis()` error per look |
 | `simavr/check_millis.py` | Gate on the `fwprobe` log: `python3 simavr/check_millis.py <log> --limit-ppm 1000` |

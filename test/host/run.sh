@@ -184,6 +184,14 @@ if [ "$matrix_names" != "$golden_names" ]; then
   exit 1
 fi
 
+echo "[6b] upstream differential: Neil's PSIPro v1.7 and the fork on the same mocks"
+# 77 scripted timelines (mode after mode, |timing, alwaysOn, rear jumper, brightness commands)
+# through test/host/upstream-v1.7/PSIPro.ino and through src/main.cpp. Each row states whether the
+# visible frame sequence must be identical or is a known, explained difference; either way a row
+# that changes sides fails. The goldens above are captured from the fork itself; this is the stage
+# that ties them to upstream.
+bash diff_upstream.sh "$T" "$CXX_SAN"
+
 echo "[7/9] scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock"
 # include/FastLED.h replaced FastLED with a from-scratch WS2812 driver. The 31 goldens
 # gate the firmware's STAGING against native_mocks/FastLED.h, NOT against that driver, so

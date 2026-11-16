@@ -9,7 +9,7 @@ up="$1"
 out="${2:-$(mktemp -d)}"
 mkdir -p "$out"
 cp "$up/PSIPro.ino" "$out/up_main.cpp"
-cp "$up/config.h" "$up/matrices.h" "$here/Wire.h" "$out/"
+cp "$up/config.h" "$up/matrices.h" "$repo/test/host/native_mocks/Wire.h" "$out/"
 CXX="${CXX:-g++}"
 FLAGS="-std=gnu++17 -O1 -fsigned-char -w"
 # Upstream: a flat Arduino sketch, so it needs the fork's prototype header (include/functions.h)
