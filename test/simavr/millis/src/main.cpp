@@ -62,12 +62,12 @@ void loop() {
   if (!started) { started = true; startRow(); }
   fw_loop();
   uint32_t t = trueTicks();
-  if ((t - t0) < 2000000UL) return;    // 8 s of true time a look
+  if ((t - t0) < 4000000UL) return;    // 16 s of true time a look: 1 ms of millis() is 62 ppm
   uint32_t dm = millis() - m0, dus = (t - t0) * 4UL;
   for (const char* p = gRow;; p++) { char c = (char)pgm_read_byte(p); if (c == '|' || c == '\n') break; Serial1.write(c); }
   Serial1.print(F(": millis=")); Serial1.print(dm);
   Serial1.print(F(" true_us=")); Serial1.print(dus);
-  Serial1.print(F(" err_ppm=")); Serial1.println((long)(((int32_t)(dm * 1000UL) - (int32_t)dus) / 8));   // dus is 8,000,0xx
+  Serial1.print(F(" err_ppm=")); Serial1.println((long)(((int32_t)(dm * 1000UL) - (int32_t)dus) / 16));   // dus is 16,000,0xx
   Serial1.flush();
   while (pgm_read_byte(gRow) != '\n') gRow++;
   gRow++;

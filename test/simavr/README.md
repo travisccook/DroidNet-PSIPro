@@ -11,7 +11,7 @@ pio pkg install -g --tool platformio/tool-simavr      # ~/.platformio/packages/t
 
 | Probe | What it runs | Gate |
 | ----- | ------------ | ---- |
-| `millis/` | The firmware, `src/main.cpp` verbatim, with one contract look at a time for 8 s each; prints `millis()` elapsed against Timer1, which a masked LED frame cannot disturb | `check_millis.py`: every look within the limit in ppm |
+| `millis/` | The firmware, `src/main.cpp` verbatim, with one contract look at a time for 16 s each; prints `millis()` elapsed against Timer1, which a masked LED frame cannot disturb | `check_millis.py`: every look within the limit in ppm |
 | `lifecycle/` | The firmware, `src/main.cpp` verbatim, through a show, `X`, `M:v=idle`, a native take-over, a pulse over the native look and a watchdog expiry; prints what is on the panel at 16 checkpoints | `check_lifecycle.py`: each checkpoint shows the swipe, the look, dark or the native mode it should |
 | `gate/` | The firmware, `src/main.cpp` verbatim, fed two hostile line streams (a relight right after `X`; `X` and `M:v=idle` alternating) while simavr traces the LED pin | `check_gate.py`: decodes every frame off the wire and counts dark-to-lit onsets for three observers: never more than 3 a second, never two inside 340 ms, nothing above the owner's brightness |
 | `wave/` | Three frames from `include/FastLED.h`, the last two with nothing between them; simavr traces PD4 to a VCD | `check_wave.py`: T0H, T1H, bit period, the wire bytes, and the gap between frames |

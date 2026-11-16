@@ -394,9 +394,10 @@ if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
       > "$log.raw" 2>&1 || true
     sed 's/\x1b\[[0-9;]*m//g; s/\.\.$//' "$log.raw" > "$log"
   }
-  simrun millis 240 "$T/millis.txt"
-  # 1000 ppm is a fifth of the contract's +/-0.5 % clock budget; the exact credit measures under 400.
-  python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 1000
+  simrun millis 300 "$T/millis.txt"
+  # 16 s a look, so 1 ms of millis() is 62 ppm and reading it twice is worth up to 125. The exact
+  # credit measures inside that; 300 ppm is the gate (the contract's clock budget is 5000).
+  python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 300
   simrun lifecycle 45 "$T/lifecycle.txt"
   python3 ../simavr/check_lifecycle.py "$T/lifecycle.txt"
   simrun gate 60 "$T/gate.txt" -o "$T/gate.vcd" -at "led=trace@0x2b/0x10"

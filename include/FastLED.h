@@ -325,22 +325,30 @@ public:
     const uint8_t sreg = SREG;
     cli();
     // Exact millis() credit (v1.3 C4). Timer0 runs at clk/64 (4 us a tick) and overflows every
-    // 256 ticks; the hardware can queue ONE overflow while interrupts are masked. Count the
-    // overflows the frame spans from TCNT0 itself and credit every one the hardware cannot queue.
-    // Is one already queued on entry (ISR context, or an overflow in the last cycles before cli)?
-    // The flag is read on both sides of TCNT0: an overflow that lands between the reads is
-    // "before t0" when TCNT0 has just wrapped, and otherwise it is the frame's own first wrap.
+    // 256 ticks; the frame masks interrupts for 366 ticks, and the hardware can hold only ONE
+    // overflow for the ISR. So this block takes every overflow up to the end of the frame away
+    // from the hardware and credits them itself, counted from TCNT0:
+    //   - one that was already queued on entry (ISR context, or an overflow in the last cycles
+    //     before cli). The flag is read on both sides of TCNT0: an overflow that lands between
+    //     the reads is "before t0" when TCNT0 has just wrapped, and otherwise it is the frame's;
+    //   - the frame's own wraps: one for certain (nbytes * 163 cycles is between 256 and 511
+    //     ticks for 48 LEDs), a second when TCNT0 ended below where it started;
+    //   - one that wraps while the flag is being cleared (TCNT0 read on both sides of the clear:
+    //     if it wrapped and the flag is clear, the clear took it).
+    // From the clear on, the flag is the hardware's again, so an overflow during the crediting
+    // below is served by the ISR as usual. (Leaving the frame's first wrap in the flag instead,
+    // as the first version did, lost every overflow that landed between the last TCNT0 read and
+    // the ISR: with frames phase-locked to the timer by the 26 ms gate, one look ran 750 ppm slow.)
     const uint8_t before = TIFR0 & _BV(TOV0);
     const uint8_t t0 = TCNT0;
-    const uint8_t pending = (TIFR0 & _BV(TOV0)) && (before || t0 < 128);
+    uint8_t owed = ((TIFR0 & _BV(TOV0)) && (before || t0 < 128)) ? 1 : 0;
     emitFrame(sWire, nbytes);
     const uint8_t t1 = TCNT0;
-    // The frame is nbytes * 163 cycles (7 bits of 20 cy + one of 23 cy a byte) = kFrameTicks
-    // timer ticks, between 256 and 511 for 48 LEDs: one wrap for certain, a second when TCNT0
-    // ended below where it started.
-    uint8_t lost = (uint8_t)(kFrameTicks >> 8) + (t1 < t0 ? 1 : 0);
-    if (!pending) lost--;                        // the hardware keeps one for the ISR
-    if (lost) {
+    TIFR0 = _BV(TOV0);                           // writing 1 clears TOV0 and nothing else
+    const uint8_t t2 = TCNT0;
+    owed += (uint8_t)(kFrameTicks >> 8) + (t1 < t0 ? 1 : 0);
+    if (t2 < t1 && !(TIFR0 & _BV(TOV0))) owed++;
+    {
       extern volatile unsigned long timer0_millis;          // Arduino core wiring.c, non-static
       extern volatile unsigned long timer0_overflow_count;  // keeps micros() in step
       static uint8_t fract = 0;                  // 8 us units, as wiring.c's own timer0_fract
@@ -349,7 +357,7 @@ public:
         timer0_overflow_count += 1u;
         fract += 3u;
         if (fract >= 125u) { fract -= 125u; timer0_millis += 1u; }
-      } while (--lost);
+      } while (--owed);
     }
     SREG = sreg;                                 // interrupts return only after the credit
   }
