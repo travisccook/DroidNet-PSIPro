@@ -13,7 +13,7 @@ claim about R1 is about the host, the cross-compiler and the simulator.
 | Looks | solid, off, flash, pulse, scan, sparkle, rainbow, meter, `native:<n>` | native modes only |
 | Stand-ins | comet, chase, wipe draw as scan; twinkle as sparkle; gradient, colorcycle as solid | none |
 | WDP caps | `droidnet.contract`, `contract.1.3s` | none |
-| Flash | 28,150 B (98.2 %) | 16,960 B (59.2 %) |
+| Flash | 28,172 B (98.3 %) | 16,982 B (59.2 %) |
 
 Both builds carry all 23 upstream modes and mode 22, the exact `millis()` credit, the 200 µs latch gap,
 the bounded command buffer and the WDP announce. The images are built from a clean checkout with

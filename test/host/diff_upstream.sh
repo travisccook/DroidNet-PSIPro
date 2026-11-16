@@ -3,7 +3,8 @@
 # usage: diff_upstream.sh <tmp-dir> <c++>        STRICT=1 treats every row as `same`
 #
 # row <same|diff> <name> <jumper> <ee0> <ee1> <ee2> <pot> <seed> <dur_ms> [<t_ms> <cmd>]...
-#   same  the visible frame sequence is identical (repeated shows of an unchanged frame collapsed)
+#   same  the frames are identical: every show(), with its millisecond, its scale and its pixels
+#         (repeated shows of an unchanged frame included: the swipe's redraws are upstream's too)
 #   diff  a known difference, with its reason on the line above the row; it must STAY different,
 #         so a row that starts matching is reported too
 set -u
@@ -21,9 +22,8 @@ row() {
   "$T/diff_up" "$T/up.txt" "$@" 2>/dev/null
   "$T/diff_fork" "$T/fork.txt" "$@" 2>/dev/null
   "$T/diff_fork_i2c" "$T/fork_i2c.txt" "$@" 2>/dev/null
-  for f in up fork fork_i2c; do awk '{k=$2" "$3; if (k!=p) print; p=k}' "$T/$f.txt" > "$T/n_$f.txt"; done
   for f in fork fork_i2c; do
-    if cmp -s "$T/n_up.txt" "$T/n_$f.txt"; then got=same; else got=diff; fi
+    if cmp -s "$T/up.txt" "$T/$f.txt"; then got=same; else got=diff; fi
     [ "$got" = "$want" ] || { echo "FAIL: '$name' is $got on $f, expected $want"; bad=1; }
   done
 }
@@ -33,8 +33,7 @@ rowi() {
   want=$1; name=$2; shift 2; n=$((n + 1))
   "$T/diff_up" "$T/up.txt" "$@" 2>/dev/null
   "$T/diff_fork_i2c" "$T/fork_i2c.txt" "$@" 2>/dev/null
-  for f in up fork_i2c; do awk '{k=$2" "$3; if (k!=p) print; p=k}' "$T/$f.txt" > "$T/n_$f.txt"; done
-  if cmp -s "$T/n_up.txt" "$T/n_fork_i2c.txt"; then got=same; else got=diff; fi
+  if cmp -s "$T/up.txt" "$T/fork_i2c.txt"; then got=same; else got=diff; fi
   [ "$got" = "$want" ] || { echo "FAIL: '$name' is $got on fork_i2c, expected $want"; bad=1; }
 }
 D="front 00 01 14 512 1"        # front jumper, alwaysOn=0, internal brightness 20, pot 512, seed 1
@@ -84,16 +83,15 @@ row same "timing_leia_3s" $D 9000 2000 "0T6|3"
 row same "timing_knight_rear" rear 00 01 14 512 1 9000 2000 "0T15|3"
 row same "timing_vu_3s" $D 9000 2000 "0T21|3"
 
-# Review finding 7: three places where the fork was not upstream, none of them listed. Two are fixed.
-# (1) NOT FIXED, and listed in the README. Upstream's mode functions clear a flag its swipe shares
-# (updateLed), and the swipe, back after a mode, redraws 100 ms after its last frame or at its
-# next change of colour: the fork's bytecode modes leave the flag set, and the swipe is back up
-# to 90 ms sooner (and follows the brightness pot sooner) when a D, an A or 0T1 comes just after
-# a mode command. The frames are the same.
-row diff "0T2 @1000, 0D @1030" front 00 01 14 512 1 9000 1000 0T2 1030 0D
-row diff "0T6 @1000, 0A @1050" front 00 01 14 512 1 9000 1000 0T6 1050 0A
-row diff "0T15 @1000, 0T1 @1040" front 00 01 14 512 1 9000 1000 0T15 1040 0T1
-row diff "pot path, 0T5|2 @324, 0D5 @354" rear 00 00 05 100 3738 20000 324 "0T5|2" 354 0D5
+# Review finding 7: three places where the fork was not upstream, none of them listed.
+# (1) Upstream's mode functions clear a flag its swipe shares (updateLed), and the swipe, back
+# after a mode, redraws 100 ms after its last frame or at its next change of colour: the fork's
+# bytecode modes left the flag set, and the swipe was back up to 90 ms sooner (and followed the
+# brightness pot sooner) when a D, an A or 0T1 came just after a mode command.
+row same "0T2 @1000, 0D @1030" front 00 01 14 512 1 9000 1000 0T2 1030 0D
+row same "0T6 @1000, 0A @1050" front 00 01 14 512 1 9000 1000 0T6 1050 0A
+row same "0T15 @1000, 0T1 @1040" front 00 01 14 512 1 9000 1000 0T15 1040 0T1
+row same "pot path, 0T5|2 @324, 0D5 @354" rear 00 00 05 100 3738 20000 324 "0T5|2" 354 0D5
 # (2) The rebel symbol is redrawn every poll. A mode command in the same millisecond as a redraw
 # started one poll (26 ms) later than upstream's, behind the 1 ms delay the bytecode set there...
 row same "0T14 @2790, 0T11 @2990" front 00 01 14 512 1 9000 2790 0T14 2990 0T11

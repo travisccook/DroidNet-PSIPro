@@ -287,7 +287,7 @@ echo "[6b] upstream differential: Neil's PSIPro v1.7 and the fork on the same mo
 # through test/host/upstream-v1.7/PSIPro.ino and through src/main.cpp as each of the two
 # environments builds it (with the contract layer; with the I2C intake and without it), and 447
 # more through upstream and the I2C build, with an I2C command that lands inside a show() (every
-# pair of modes). Each row states whether the visible frame sequence must be identical or is a known,
+# pair of modes). Each row states whether every show() must be identical or is a known,
 # explained difference; either way a row that changes sides fails. The goldens above are captured
 # from the fork itself; this is the stage that ties them to upstream.
 bash diff_upstream.sh "$T" "$CXX_SAN"

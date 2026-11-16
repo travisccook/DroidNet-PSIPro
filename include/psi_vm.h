@@ -1294,11 +1294,14 @@ inline void vmPlay(uint8_t progId) {
     }
   }
 
+  // updateLed: upstream's mode functions clear it on every call and set it on a call that draws,
+  // and its swipe, back after a mode, redraws at once only if the mode's last call drew.
   // VMF_IMMEDIATE (the rebel symbol): upstream's displayMatrixColor() draws on every poll and
   // never reads or sets the step delay, so the delay the mode BEFORE the symbol left running is
   // still running for the mode after it. The symbol is stepped whatever that delay says, and its
   // show sets none (OP_SHOW in vmStep()).
-  if (!g_vmDone && ((g_vmFlags & VMF_IMMEDIATE) || checkDelay())) vmStep();
+  updateLed = 0;
+  if (!g_vmDone && ((g_vmFlags & VMF_IMMEDIATE) || checkDelay())) { vmStep(); updateLed = 1; }
 
   if (g_vmDone) {
     // oneshot end (lightsaberBattle semantics, arriving Task 13)

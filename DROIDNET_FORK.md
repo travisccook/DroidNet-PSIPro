@@ -17,13 +17,13 @@ build has no contract layer.
   Flthy HPs). This is the tightest of the three and the pacing item.
 - **MCU/toolchain:** ATmega32U4 (Sparkfun Pro Micro), clean-room WS2812 driver (`include/FastLED.h`).
   `platformio.ini` is checked in and builds out of the box. `pio run` (serial-only, shipped default,
-  the build with the contract layer) links at 28,150 B of 28,672 B (98.2%). `pio run -e PSIPro-i2c`
-  links at 16,960 B (59.2%): it has the I2C intake and **no contract layer** (`PSI_NO_CONTRACT`),
-  because the two do not fit this part together (29,840 B). `run.sh` stage 9b fails a build over
+  the build with the contract layer) links at 28,172 B of 28,672 B (98.3%). `pio run -e PSIPro-i2c`
+  links at 16,982 B (59.2%): it has the I2C intake and **no contract layer** (`PSI_NO_CONTRACT`),
+  because the two do not fit this part together (29,860 B). `run.sh` stage 9b fails a build over
   28,416 B (serial-only) or 28,160 B (I2C), under 256 B or 128 B of worst-case stack headroom, or
   with any soft-float routine linked. R1 is built without six contract looks
   (`PSI_NO_STRIP_LOOKS`: comet, chase, wipe, gradient, colorcycle, twinkle draw as scan, sparkle or
-  solid), which are 1,264 B: with them the image is 29,414 B. The total also includes mode 22
+  solid), which are 1,264 B: with them the image is 29,436 B. The total also includes mode 22
   ("processing sweep"), a fork-added demo animation that is not one of the 23 upstream modes — it
   exists to measure the marginal cost of a new one: 94 B. All 23 upstream modes (0-21
   and 92) ship in both builds; every upstream mode's animation except the four deliberate native
@@ -135,7 +135,7 @@ The default, serial-only build. The I2C build has no contract layer.
 
 | | PSIPro (serial-only, the contract) | PSIPro-i2c (I2C, no contract) |
 | --- | --- | --- |
-| flash | 28,150 B of 28,672 (98.2%); gate 28,416 | 16,960 B (59.2%); gate 28,160 |
+| flash | 28,172 B of 28,672 (98.3%); gate 28,416 | 16,982 B (59.2%); gate 28,160 |
 | SRAM | 1,630 B of 2,560 (63.7%) | 1,217 B (47.5%) |
 | worst-case stack, sound bound | 446 B of 930 B | 312 B of 1,343 B |
 | stack headroom | 484 B; floor 256 | 1,031 B; floor 128 |

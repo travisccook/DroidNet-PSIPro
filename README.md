@@ -111,7 +111,7 @@ What it buys, measured:
 
 | | serial-only (default) | with I2C |
 | --- | --- | --- |
-| flash | 28,150 B (98.2%) | 16,960 B (59.2%) |
+| flash | 28,172 B (98.3%) | 16,982 B (59.2%) |
 | SRAM | 1,630 B (63.7%) | 1,217 B (47.5%) |
 | worst-case stack | 446 B of 930 B (48%) | 312 B of 1,343 B (23%) |
 | the contract layer (the light show) | **yes** | **no** |
@@ -152,18 +152,18 @@ the real avr-gcc, gates their flash and worst-case stack, and runs five probes i
 show lifecycle; the frames on the LED pin under hostile streams; the WS2812 waveform; and the cost
 of a frame.
 
-**The default build fits with 266 B under its gate; the contract with I2C does not fit at all.**
+**The default build fits with 244 B under its gate; the contract with I2C does not fit at all.**
 This is the tightest board of the three, and the numbers are worth knowing before you build:
 
 | Build | Flash | of 28,672 B |
 | --- | --- | --- |
 | Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
-| **This fork, as shipped (serial-only)** | **28,150 B** | **98.2%** |
-| …with `PSI_NOINLINE` removed | 28,726 B | 100.2% — **will not link** |
-| …without `-mcall-prologues` | 28,952 B | 101.0% — **will not link** |
-| …with the six strip and hue looks (no `PSI_NO_STRIP_LOOKS`) | 29,414 B | 102.6% — **will not link** |
-| …with the I2C intake as well (no strip looks) | 29,840 B | 104.1% — **will not link** |
-| This fork's I2C build (`-e PSIPro-i2c`): I2C, no contract layer | 16,960 B | 59.2% |
+| **This fork, as shipped (serial-only)** | **28,172 B** | **98.3%** |
+| …with `PSI_NOINLINE` removed | 28,746 B | 100.3% — **will not link** |
+| …without `-mcall-prologues` | 28,972 B | 101.0% — **will not link** |
+| …with the six strip and hue looks (no `PSI_NO_STRIP_LOOKS`) | 29,436 B | 102.7% — **will not link** |
+| …with the I2C intake as well (no strip looks) | 29,860 B | 104.1% — **will not link** |
+| This fork's I2C build (`-e PSIPro-i2c`): I2C, no contract layer | 16,982 B | 59.2% |
 
 Neil's firmware already used 87.6% of this chip. All 23 upstream modes (0-21 and 92) ship, and every
 upstream mode's animation except the four deliberate native holdouts
@@ -317,8 +317,8 @@ says so in its announce; see "This fork is SERIAL-ONLY by default".)
 **Every native command of the original firmware still works.** The whole JawaLite `<addr>T` / `A` /
 `D` / `xPy` grammar, all the modes 0-21 and 92, the pot, the EEPROM settings, the jumper. With no
 contract line on the wire the board draws what upstream v1.7 draws: `run.sh` runs both on the same
-mocks through 91 scripted timelines and compares the visible frames (repeated shows of an unchanged frame are not compared);
-84 are identical. What differs, all of it:
+mocks through 91 scripted timelines and compares frame for frame, every `show()` of them;
+88 are identical. What differs, all of it:
 
 - the three defaults above (serial-only, `alwaysOn`, 9600 baud);
 - `0T19|n`: the lightsaber battle plays whole, as upstream's own comment says it should (upstream's
@@ -326,11 +326,6 @@ mocks through 91 scripted timelines and compares the visible frames (repeated sh
 - under `alwaysOn` (the EEPROM default, or `0P1`), the tail of mode 4 (short circuit), when two
   pixels are left lit, repeats differently: upstream's 8-bit loop counter wraps there (two
   timelines);
-- back on the swipe within a tenth of a second of its last frame (a `D`, an `A` or `0T1` just
-  after a mode command), the fork's swipe is on the panel up to 90 ms sooner than upstream's, with
-  the same frames: upstream's mode functions clear a flag its swipe shares, and the swipe then
-  redraws only 100 ms after its last frame; the fork's bytecode modes leave the flag alone. For
-  the same reason the swipe's redraws of an unchanged frame are not compared here;
 - every frame is preceded by 200 µs of quiet line, so that two frames sent in the same tick latch
   on every WS2812 revision;
 - on the I2C build, a mode command whose I2C interrupt lands inside the running mode's `show()`
@@ -341,6 +336,9 @@ mocks through 91 scripted timelines and compares the visible frames (repeated sh
   4 s without flashing. The fork's bytecode step finishes the same way (it draws, shows and sets
   its delay) and leaves the new mode at its first step. `test/host/diff_upstream.sh` lists the
   pairs.
+
+An independent fuzz of 6,000 random command timelines against upstream (the reviewer's, run on
+this tree, not part of `run.sh`) found no difference outside this list.
 
 This is not a rewrite.
 
@@ -503,7 +501,7 @@ credit him for it; not part of the contract layer either:
 | --- | --- | --- |
 | `src/contract/contract_core.h` | 1,653 | Pure, dependency-free, integer-only C++: the wire parser, the beat clock, the safety limits, the score, the effect math. Byte-identical across all three DroidNet forks; `src/contract/CORE_PIN` names the commit it was copied from. |
 | `src/contract/ContractPSI.h` | 1,010 | The PSI render layer — maps the contract onto the board's existing `allON`/`fill_column`/`VUMeter` primitives and the `vmContractSparkle` animation-VM shim (`include/psi_vm.h`). Adds no new render primitives of its own. |
-| `include/psi_vm.h` | 1,376 | The animation interpreter and the bytecode of every upstream mode it plays (see "The animation VM", above). |
+| `include/psi_vm.h` | 1,379 | The animation interpreter and the bytecode of every upstream mode it plays (see "The animation VM", above). |
 | `include/FastLED.h` | 466 | The clean-room WS2812 driver that replaced the FastLED package (`docs/FASTLED_DRIVER_VERIFICATION.md`). |
 | `test/host/`, `test/simavr/` | 9,700 | The host suite and the simavr probes. They run `src/main.cpp` itself; there is no mock of the board API. |
 
