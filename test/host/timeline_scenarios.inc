@@ -630,6 +630,75 @@ done:
   CHECK(frames > 100, "the scan latches every frame (%u in 3 s)", frames);
   for (int c = 0; c < COLUMNS; c++) CHECK(seen[c], "the scan never reached column %d", c);
 }
+// CA1.7: a scan there and back laps no faster than a second (FX_SCAN_LAP_MIN_MS), whatever s= asks
+// for. At 30 ms a step the lit column crossed each of the two middle bands of columns (3-4 and
+// 5-6, a quarter of the panel each) four times a second. On 10 columns the fastest step is 56 ms.
+static void the_fastest_scan_laps_in_a_second() {
+  boot();
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=scan,c=00ff00,s=255");
+  runTo(8000);
+  std::vector<uint32_t> atZero, inBand; int was = -1; bool lit = false;
+  for (const Frame& f : between(2000, 8000)) {
+    int col = -1; unsigned band = 0;
+    for (int c = 0; c < COLUMNS; c++) { const int led = psiLed((uint8_t)c, 2); if (led >= 0 && f.px[led].g == 255) col = c; }
+    for (int c = 3; c <= 4; c++) for (int r = 0; r < LEDS_PER_COLUMN; r++) { const int led = psiLed((uint8_t)c, (uint8_t)r); if (led >= 0 && f.px[led].g) band++; }
+    if (col == 0 && was != 0) atZero.push_back(f.t);
+    if (col >= 0) was = col;
+    if (!lit && band >= 6) { lit = true; inBand.push_back(f.t); } else if (lit && band == 0) lit = false;   // half the band's 12 LEDs
+  }
+  CHECK(atZero.size() >= 4, "the scan laps (%zu times at column 0 in 6 s)", atZero.size());
+  for (size_t i = 1; i < atZero.size(); i++)
+    CHECK(atZero[i] - atZero[i - 1] >= 1000 - 27 && atZero[i] - atZero[i - 1] <= 1100, "a lap of %u ms (t=%u); it is a second, to within a frame", atZero[i] - atZero[i - 1], atZero[i]);
+  int most = 0;
+  for (size_t i = 0; i < inBand.size(); i++) { int k = 0; for (size_t j = i; j < inBand.size() && inBand[j] - inBand[i] < 1000; j++) k++; if (k > most) most = k; }
+  CHECK(most >= 1 && most <= 3, "the band of columns 3 and 4 lights %d times in a second at the most; three is the limit", most);
+}
+// CA1.7: a change of colour alone recolours the look in place. The same scan in red, sent while
+// the green one runs, goes on from the column the scan is at: its timeline is the first line's.
+// (Restarted by every change of colour, a scan passed the same part of the panel again and again.)
+static void a_change_of_colour_alone_does_not_restart_the_look() {
+  boot();
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=scan,c=00ff00,s=128"); at(3333, "!P*A:i=scan,c=ff0000,s=128");
+  runTo(6000);
+  // the look's time zero: the millisecond for which every green frame is where fxScanPos() says
+  auto column = [](const Frame& f, bool red) { int col = -1; for (int c = 0; c < COLUMNS; c++) { const int led = psiLed((uint8_t)c, 2); if (led >= 0 && (red ? f.px[led].r : f.px[led].g) == 255) col = c; } return col; };
+  uint32_t zero = 0;
+  for (uint32_t z = 1100; z <= 1130 && !zero; z++) {
+    bool fits = true; unsigned n = 0;
+    for (const Frame& f : between(1200, 3300)) { const int c = column(f, false); if (c < 0) continue; n++; if (c != fxScanPos(f.t - z, 128, COLUMNS, false)) { fits = false; break; } }
+    if (fits && n > 40) zero = z;
+  }
+  CHECK(zero != 0, "the green scan runs from the line's own time");
+  unsigned red = 0, off = 0; uint32_t firstRed = 0;
+  for (const Frame& f : between(3333, 6000)) {
+    const int c = column(f, true);
+    if (c < 0) continue;
+    if (!firstRed) firstRed = f.t;
+    red++; if (c != fxScanPos(f.t - zero, 128, COLUMNS, false)) off++;
+  }
+  CHECK(red > 60 && firstRed <= 3333 + 170 + 27, "the scan turns red (%u frames, the first at t=%u)", red, firstRed);
+  CHECK(off == 0, "%u of the %u red frames are not where the scan that began at %u ms is: the look was restarted", off, red, zero);
+}
+// A line that cuts an accent short leaves the accent's image in the frame buffer, and sparkle adds
+// its LEDs to what the buffer holds. With the look itself not restarted (the same look sent again,
+// S11; the same look in another colour, CA1.7) the panel showed the accent's whole field under
+// the sparkle, for as long as the look ran. The look's state machines start again instead.
+static void sparkleAfterACutAccent(const char* line) {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=sparkle,c=ff0000,s=128"); at(2000, "!P*P:c=ffffff,d=435"); at(2100, line);
+  runTo(5000);
+  unsigned white = 0, wide = 0, frames = 0;
+  for (const Frame& f : between(2000, 2099)) if (f.lit == 48) white++;
+  for (const Frame& f : between(2130, 5000)) { frames++; if (f.lit > 12) wide++; }
+  CHECK(white > 0, "the accent is up when the line comes (%s)", line);
+  CHECK(frames > 5 && wide == 0, "%s: %u of %u frames after it light more than a sparkle does: the accent's image is still there", line, wide, frames);
+}
+static void a_line_that_cuts_an_accent_short_clears_its_image() {
+  sparkleAfterACutAccent("!P*A:c=0000ff");
+}
+static void the_same_look_sent_over_an_accent_clears_its_image() {
+  sparkleAfterACutAccent("!P*A:i=sparkle,c=ff0000,s=128");
+}
 // flash: a state is fxFlashHalfMs(speed), 190 ms at s=255 up to 445 ms at s=0, to within a frame.
 static void flash_speed_is_the_shared_timing() {
   boot();
@@ -1343,6 +1412,30 @@ static void l_cannot_blink_half_the_panel() {
   CHECK(on.size() >= 3, "the top half does follow L (%u times in 4 s)", (unsigned)on.size());
   for (size_t k = 1; k < on.size(); k++) CHECK(on[k] - on[k - 1] >= 340, "the top half lit twice %u ms apart (t=%u)", on[k] - on[k - 1], on[k]);
 }
+// CA1.7, the second review's N1: verb B had no rise limit. The meter at a third (its two bottom
+// rows) under B between nothing and full every 30 ms lit those rows 17 times a second, with the
+// whole field's level under the gate's step. A brighter B is taken at most once in 340 ms, a
+// lower one at once. (L and B by turns, which share the one window: the property test's profile.)
+static std::vector<uint32_t> bottomRowsLit(uint32_t from, uint32_t to) {
+  std::vector<uint32_t> on; bool lit = true;
+  for (const Frame& f : between(from, to)) {
+    unsigned low = 0, n = 0;
+    for (int c = 0; c < COLUMNS; c++) for (int r = 4; r < 6; r++) { const int led = psiLed((uint8_t)c, (uint8_t)r); if (led < 0) continue; n++; if (f.px[led].r | f.px[led].g | f.px[led].b) low++; }
+    const bool dark = f.scale == 0 || low * 10 <= n, bright = f.scale >= 100 && low * 2 >= n;
+    if (!lit && bright) { on.push_back(f.t); lit = true; } else if (lit && dark) lit = false;
+  }
+  return on;
+}
+static void b_cannot_blink_the_rows_of_a_meter() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=meter,c=ffffff,s=255");
+  for (uint32_t t = 1500; t < 6200; t += 500) at(t, "!P*L:v=86");
+  for (uint32_t t = 2000; t < 6000; t += 60) { at(t, "!P*B:b=0"); at(t + 30, "!P*B:b=200"); }
+  runTo(6500);
+  const std::vector<uint32_t> on = bottomRowsLit(1900, 6100);
+  CHECK(on.size() >= 3, "the rows do follow B (%u times in 4 s)", (unsigned)on.size());
+  for (size_t k = 1; k < on.size(); k++) CHECK(on[k] - on[k - 1] >= 340, "the bottom rows lit twice %u ms apart (t=%u)", on[k] - on[k - 1], on[k]);
+}
 // Review finding 4. D and A reset every PSI that hears them, whatever their address (upstream).
 // During a show a D for another board (3D is a logic display's, on a shared line) is not this
 // PSI's owner taking it back: the show plays on, and no frame of the swipe slips in. A D for this
@@ -1667,6 +1760,10 @@ static const Scenario kScenarios[] = {
   {"the_query_reply_is_byte_exact", the_query_reply_is_byte_exact},
   {"a_query_that_cannot_be_routed_is_not_answered", a_query_that_cannot_be_routed_is_not_answered},
   {"scan_is_the_shared_ping_pong", scan_is_the_shared_ping_pong},
+  {"the_fastest_scan_laps_in_a_second", the_fastest_scan_laps_in_a_second},
+  {"a_change_of_colour_alone_does_not_restart_the_look", a_change_of_colour_alone_does_not_restart_the_look},
+  {"a_line_that_cuts_an_accent_short_clears_its_image", a_line_that_cuts_an_accent_short_clears_its_image},
+  {"the_same_look_sent_over_an_accent_clears_its_image", the_same_look_sent_over_an_accent_clears_its_image},
   {"flash_speed_is_the_shared_timing", flash_speed_is_the_shared_timing},
   {"pulse_breathes_on_the_shared_timing", pulse_breathes_on_the_shared_timing},
   {"a_pumped_pulse_follows_the_beat", a_pumped_pulse_follows_the_beat},
@@ -1712,6 +1809,7 @@ static const Scenario kScenarios[] = {
   {"a_pulse_never_stays_on_a_native_mode", a_pulse_never_stays_on_a_native_mode},
   {"a_native_command_takes_the_panel_back_for_a_mode_that_had_ended", a_native_command_takes_the_panel_back_for_a_mode_that_had_ended},
   {"l_cannot_blink_half_the_panel", l_cannot_blink_half_the_panel},
+  {"b_cannot_blink_the_rows_of_a_meter", b_cannot_blink_the_rows_of_a_meter},
   {"a_d_for_another_board_does_not_end_the_show", a_d_for_another_board_does_not_end_the_show},
   {"a_stale_timing_does_not_cut_a_shows_native_look", a_stale_timing_does_not_cut_a_shows_native_look},
   {"white_again_after_a_blackout_waits_for_the_whites_own_window", white_again_after_a_blackout_waits_for_the_whites_own_window},

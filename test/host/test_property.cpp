@@ -644,6 +644,28 @@ static const Profile kProfiles[] = {
   { "from dark: blue, then white 171 ms later (one brightness onset, two in luminance)", pShow,
     [](uint32_t t) { if (t == 0) tx("PFA:i=off"); if (t == 400) tx("PFA:i=solid,c=0000ff"); if (t == 571) tx("PFA:i=solid,c=ffffff"); }, 1200 },
   // (the battle lasts 5.4 s; the pulse comes after it, and then nothing for 2.8 s)
+  // CA1.7, the second review's N1: verb B had no rise limit and the gate measures the whole field.
+  // A meter at a third (two rows of six) under B between nothing and full every 30 ms lit those
+  // rows, a third of the panel, 17 times a second, the whole field's level staying under the step.
+  { "B between 0 and 200 every 30 ms over a meter at a third (rows 4 and 5)", []() { pShow(); tx("PFA:i=meter,c=ffffff,s=255"); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=86"); if (t % 60 == 0) tx("P*B:b=0"); if (t % 60 == 30) tx("P*B:b=200"); }, 600 },
+  // ...and L and B by turns: the rows light when L goes up and when B does. With a window each,
+  // the two verbs could take turns and light them twice in every 340 ms; they share one.
+  { "L and B up by turns, 85 ms apart, at the meter", []() { pShow(); tx("PFA:i=meter,c=ffffff,s=255"); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=255"); if (t == 85) tx("P*B:b=0"); if (t == 170) tx("P*B:b=255"); if (t == 255) tx("P*L:v=86"); }, 340 },
+  // The same at three slower meters, redrawn every 100 to 190 ms. (The holds are taken on a pass
+  // that redraws the meter, so that the gate's time for a raise is the time it is on the LEDs.
+  // Taken on every pass the time would lead the LEDs by up to one redraw; no script here has
+  // made that light a part of the panel twice inside 340 ms, so these three prove nothing about
+  // it: they are the hold at other speeds.)
+  { "L between a third and full at a meter redrawn every 160 ms", []() { pShow(); tx("PFA:i=meter,c=ffffff,s=161"); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=255"); if (t == 50) tx("P*L:v=86"); }, 100 },
+  { "L and B at a meter redrawn every 190 ms", []() { pShow(); tx("PFA:i=meter,c=ffffff,s=141"); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=255"); if (t == 30) tx("P*B:b=0"); if (t == 60) tx("P*B:b=255"); if (t == 90) tx("P*L:v=0"); }, 130 },
+  { "B between 0 and 255 at a meter at two thirds redrawn every 100 ms", []() { pShow(); tx("PFA:i=meter,c=ffffff,s=201"); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=170"); if (t % 70 == 0) tx("P*B:b=255"); if (t % 70 == 35) tx("P*B:b=0"); }, 490 },
+  { "b= on a live look between 0 and 255 every 40 ms, over a scan", pShow,
+    [](uint32_t t) { if (t == 0) tx("PFA:i=scan,c=ffffff,s=255,b=255"); if (t == 40) tx("PFA:i=scan,c=ffffff,s=255,b=0"); }, 80 },
   // CA1.6, from the Flthy fork's streams: a look that comes up through a few levels has not
   // changed the field's colour at its first frame. Another colour 171 ms after that first frame
   // must still be 170 ms after the frame at which the first one could be seen.

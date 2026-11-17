@@ -8,6 +8,8 @@
 #   1. contract_core.h parser unit tests
 #   1f. contract_core.h v1.3 unit tests (safety limits, clock rules, lifecycle, score, query)
 #   1g. the same, built with stand-ins for this fork's flash-string hooks (PSTR / pgm_read_byte)
+#   1j. every shared look by itself, on strands of 6 to 28 positions: no part of a strand lights more
+#       than three times a second (shared with the RSeries and Flthy forks; core CA1.7)
 #   1h. the shared core files are the commit in src/contract/CORE_PIN (when that checkout is here)
 #   1i. no floating point in the core or in the contract layer (and, stage 9b, none in the linked image)
 #   1b. wdp_announce_core.h WDP device announce unit tests (shared with the RSeries and Flthy forks)
@@ -59,6 +61,12 @@ echo "[1g] contract_core v1.3 unit tests, flash-string hooks on"
 # it faults here instead of reading garbage from RAM on the board.
 "$CXX_HOST" -std=c++11 -Wall -Wextra -O0 -DCONTRACT_TEST_FLASH_HOOKS test_contract_v13.cpp -o "$T/psi_contract_v13_hooks"
 "$T/psi_contract_v13_hooks"
+echo "[1j] every shared look by itself: no part of a strand lights more than three times a second"
+# Pure core, shared like stages 1 and 1f: every look the core times (chase, scan, comet, pulse,
+# wipe, flash, twinkle, gradient, colorcycle), alone, at every speed, on every strand length. The
+# PSI draws scan, pulse and flash from it in R1, on 10 columns.
+"$CXX_HOST" -std=c++11 -Wall -Wextra -O2 test_fx_regions.cpp -o "$T/psi_fx_regions"
+"$T/psi_fx_regions"
 echo "[1h] shared core files match src/contract/CORE_PIN"
 # The core lives in the RSeries fork; this repo carries a byte-identical copy of every file in that
 # repo's test/host/core-files.txt at the pinned commit. Checked when that checkout is on this
@@ -321,7 +329,7 @@ for bin in psi_timeline psi_timeline_nocontract psi_timeline_all psi_timeline_i2
 done
 
 echo "[6e] contract S9 as a property: hostile and random line streams, the frames measured"
-# test_property.cpp: 44 hostile profiles x 8 rounds and 1500 random streams, each in a fresh copy
+# test_property.cpp: 50 hostile profiles x 8 rounds and 1500 random streams, each in a fresh copy
 # of the firmware, as the default environment builds it (the one with the contract layer).
 # Dark-to-lit onsets (at most 3 a second, never two inside 340 ms; on a native look's frames, the
 # ones a contract edge led to), counted by seven observers of the brightest channel and three of

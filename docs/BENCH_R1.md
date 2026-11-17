@@ -9,11 +9,11 @@ claim about R1 is about the host, the cross-compiler and the simulator.
 | | `PSIPro` (default) | `PSIPro-i2c` |
 | --- | --- | --- |
 | Intake | serial header | serial header and I2C (address 22) |
-| Contract layer (the light show) | yes, v1.3, shared core CA1.6 | **no**: a `!` line means nothing to it |
+| Contract layer (the light show) | yes, v1.3, shared core CA1.7 | **no**: a `!` line means nothing to it |
 | Looks | solid, off, flash, pulse, scan, sparkle, rainbow, meter, `native:<n>` | native modes only |
 | Stand-ins | comet, chase, wipe draw as scan; twinkle as sparkle; gradient, colorcycle as solid | none |
 | WDP caps | `droidnet.contract`, `contract.1.3s` | none |
-| Flash | 28,210 B (98.4 %) | 16,998 B (59.3 %) |
+| Flash | 28,286 B (98.7 %) | 16,998 B (59.3 %) |
 
 Both builds carry all 23 upstream modes and mode 22, the exact `millis()` credit, the 200 µs latch gap,
 the bounded command buffer and the WDP announce. The images are built from a clean checkout with
@@ -24,18 +24,39 @@ Known limits of R1, to have in mind while watching:
 - A pulse over the board's own look is on the panel for at least 170 ms, and for 340 ms when it made
   the panel brighter: the return to the board's look waits for the gate.
 - A look or a colour that follows another within 170 ms is held until then. The look before it stays up.
-- A frame the gate holds is not sent at all (core CA1.6): the panel keeps what it shows, for up to
+- A frame the gate holds is not sent at all: the panel keeps what it shows, for up to
   340 ms, and the look then appears at its level. Nothing is shown dimmed in between.
-- The gate measures the whole panel. A look that moves by itself can light a part of the panel
-  just before a blackout and a full look light that part again: the meter's bars with no `L` feed,
-  or a meter restarted by a new colour, then `X` and a solid. In the host's random streams (27
-  seeds, 3,000 streams each) one part of the panel (a half, a quarter or a band) lit twice
-  104 ms apart at the closest, and never more than three times in one second;
-  each look by itself, and the scripts made for a part of the panel, keep to 340 ms. Closing it
-  takes a gate that knows regions (the logics fork has the same limit with its comet). Watch for
-  it at steps 12 and 22.
+- **A part of the panel.** The gate measures the whole panel. What is held for a part of it: `L`,
+  `B` and `b=` go up at most once in 340 ms (one window for all three); the meter with no `L`
+  redraws every 170 ms at the fastest; a scan laps in a second or more; a change of colour alone
+  does not restart a look. What is NOT held: a look that moves by itself followed by a blackout
+  and a full look. The script: `A:i=meter` with no `L`, `X` half a second later, a solid 60 ms
+  after that, again and again: a half or a band of the panel lit twice 182 ms apart, and four
+  times in one second, in 4 of 8 runs. (Two looks by turns every 170 ms, a scan and a solid, the
+  meter and a solid, a scan and the fed meter, hold here: this panel's scan is one column, under
+  a quarter of it. On the logics displays those scripts do not hold.) Each look by itself, and
+  the 50 scripts of the host's property test, keep every half, quarter and band of the panel to
+  340 ms between two onsets; in its random streams (27 seeds, 3,000 streams each) one part of
+  the panel lit twice 104 ms apart at the closest, and never more than three times in one
+  second. Closing it takes a gate with a state for each region, which no board of the family has.
+  Watch for it at steps 12, 22 and 33.
+- **A pulse the gate never lets out** (it would light the panel inside 340 ms of the board's own
+  look lighting it, and ends before it may) still stops the board's look for as long as the pulse
+  lasts, and a look that builds up (the processing sweep) loses what it had built. Rare: 6 of
+  2,112 single pulses in the host's scan.
+- **The build with all the looks is not R1.** No environment links it and `run.sh` does not put
+  it through the property test. In it, a colour observer sees a change of look under 170 ms in
+  some random streams, each time with the comet or the chase on the panel. To settle before the
+  six looks come back.
 - A look is taken to be on the panel from its first frame with an LED at 4 levels or more (of
   255). At a brightness under 4 nothing the contract draws counts as a change of look.
+- `L`, `B` and `b=` follow a raise with up to 340 ms of delay (the newest raise is the one taken),
+  and a scan cannot be made faster than a second there and back: that is the price of the hold.
+- Against upstream v1.7 the native modes differ in three listed places only (README, "Every
+  native command of the original firmware still works"): `0T19|n` plays the battle whole, the
+  tail of short circuit under `alwaysOn`, and, on the I2C image, 70 of 441 pairs of modes when
+  the second command lands inside the first mode's redraw (upstream's own new mode is then a
+  step off; the fork's starts at its first step).
 - The six strip and hue looks draw as stand-ins.
 - A droid that drives its PSI over I2C has no light show on that board.
 
@@ -77,6 +98,9 @@ Record for each step: pass or fail, what was seen, and a short phone video. Seri
 | 27 | A look that comes up slowly (CA1.6): in a show at brightness 200 (`3P200` first, on a 3 A supply), `!P*A:i=off`, `!P*A:i=pulse,c=ff0000,s=0,b=80`, and 171 ms later `!P*A:i=solid,c=00ff00,b=80` | Red comes up for about a quarter of a second before the green: the green does not cut in on a red that has only just become visible | |
 | 28 | A timing sent to a running short circuit (review finding 7): `0T4`, and one second later `0T4\|20`; then `0T19` and `0T23\|2` during the battle | The fade goes on to its end as if nothing had been sent. The battle stops at its next step and the swipe returns, as upstream's does | |
 | 31 | A pulse as the battle ends, `alwaysOn` off (second review, N4): `0P0`, `0T19`, and `!P*P:c=ffffff,d=170` in the half second its last frame stands (about 5.5 s after the command) | The swipe is back when it would have been without the pulse, give or take the pulse: the battle is not played again (it was: the swipe came back 5 s late). Then `0P1` again | |
+| 33 | `B` under a meter (second review, N1; core CA1.7): in a show, `!P*A:i=meter,s=255`, `!P*L:v=86` once a second, and `!P*B:b=0` / `!P*B:b=200` alternating every 30 ms for 10 s | The two bottom rows light about three times a second at the most, never a flicker (they lit 17 times a second before). They do follow `B` | |
+| 34 | The fastest scan (core CA1.7): `!P*A:i=scan,c=00ff00,s=255`, filmed for 10 s | The column goes there and back in one second: ten laps in the ten seconds, not eighteen | |
+| 35 | A change of colour alone (core CA1.7): `!P*A:i=scan,c=00ff00,s=128`, then `!P*A:i=scan,c=ff0000,s=128` at any moment | The column turns red where it is and goes on; it does not jump back to the first column | |
 
 ## The I2C image
 

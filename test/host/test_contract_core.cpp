@@ -552,12 +552,16 @@ static void test_fx_spatial_helpers() {
   CHECK(fxCometBright(9, 0, 10) == 192);  // wraps around N: 1 behind head=0
   CHECK(fxCometBright(8, 0, 10) == 128);  // wraps around N: 2 behind head=0
 
-  // fxChaseLit: every third position of a ring of N, ((p + elapsed/fxStepMs) % N) % 3 == 0.
+  // fxChaseLit: every third position of a ring of N, ((p + elapsed/fxChaseStepMs) % N) % 3 == 0.
+  // CA1.7: a step is never under 130 ms (fxChaseStepMs: at 30 ms every position blinked eleven
+  // times a second, and so did any quarter of a strand of eight).
+  CHECK(FX_CHASE_STEP_MIN_MS == 130 && fxChaseStepMs(255) == 130 && fxChaseStepMs(56) == 130 && fxChaseStepMs(50) == fxStepMs(50) && fxChaseStepMs(0) == 157);
+  for (int sp = 0; sp < 256; sp++) CHECK(fxChaseStepMs((uint8_t)sp) >= 130u && fxChaseStepMs((uint8_t)sp) >= fxStepMs((uint8_t)sp));
   CHECK(fxChaseLit(0, 0, 255, 6) == true);   // p+phase=0 -> lit
   CHECK(fxChaseLit(1, 0, 255, 6) == false);
   CHECK(fxChaseLit(2, 0, 255, 6) == false);
   CHECK(fxChaseLit(3, 0, 255, 6) == true);   // 3 % 3 == 0 -> lit
-  CHECK(fxChaseLit(0, 30, 255, 6) == false); // one step elapsed -> phase 1
+  CHECK(fxChaseLit(0, 129, 255, 6) == true && fxChaseLit(0, 130, 255, 6) == false); // one step elapsed -> phase 1
   CHECK(fxChaseLit(0, 0, 255, 0) == false && fxChaseLit(0, 0, 255, -3) == false);
   // CA1.5: the lit count is the same at every step, ceil(N / 3), for every N (it was 3, 3, 2 on
   // 8, which moved the field mean by an eighth at every step), and where N is a multiple of 3
@@ -566,14 +570,14 @@ static void test_fx_spatial_helpers() {
     for (uint32_t step = 0; step < 200; step++) {
       int count = 0;
       for (int p = 0; p < N; p++) {
-        const bool lit = fxChaseLit(p, step * 30u, 255, N);
+        const bool lit = fxChaseLit(p, step * 130u, 255, N);
         if (lit) count++;
         if (N % 3 == 0) CHECK(lit == ((((uint32_t)p + step) % 3u) == 0u));
       }
       CHECK(count == (N + 2) / 3);
     }
   // ...and it still turns: what is lit at one step is lit one position lower at the next
-  for (int p = 1; p < 8; p++) CHECK(fxChaseLit(p, 0, 255, 8) == fxChaseLit(p - 1, 30, 255, 8));
+  for (int p = 1; p < 8; p++) CHECK(fxChaseLit(p, 0, 255, 8) == fxChaseLit(p - 1, 130, 255, 8));
 
   // fxWipeLit: a PING-PONG. Fill 0 -> N-1, then drain BACK from the far end.
   // Exact vectors captured by running the real implementation.

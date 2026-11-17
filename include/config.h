@@ -94,10 +94,10 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 // with `pio run && pio run -e PSIPro-i2c` and test/host/stack_report.py rather than
 // trusting this comment as it ages):
 //                                serial-only      + I2C (no contract layer)
-//     flash                  28,210 B (98.4%)   16,998 B (59.3%)
-//     SRAM                    1,630 B (63.7%)    1,217 B (47.5%)
-//     stack budget                      930 B          1,343 B
-//     worst-case stack           446 B (48%)       312 B (23%)
+//     flash                  28,286 B (98.7%)   16,998 B (59.3%)
+//     SRAM                    1,632 B (63.8%)    1,217 B (47.5%)
+//     stack budget                      928 B          1,343 B
+//     worst-case stack           444 B (48%)       312 B (23%)
 //     can an ISR reach a render?          NO      yes (native path)
 //
 // WHAT IT DOES NOT COST: all 23 upstream modes ship in BOTH configurations — there is
@@ -114,7 +114,7 @@ uint8_t defaultPattern = 1; //Mode 1 is Swipe
 //#define PSI_ENABLE_I2C
 
 // DroidNet, contract v1.3 (R1): the contract layer and the I2C intake do not fit this part
-// together (29,878 B of 28,672). The I2C build is therefore built WITHOUT the contract layer:
+// together (29,954 B of 28,672). The I2C build is therefore built WITHOUT the contract layer:
 // `pio run -e PSIPro-i2c` sets PSI_ENABLE_I2C and PSI_NO_CONTRACT (platformio.ini). That build is
 // upstream's firmware with this fork's fixes; it has no '!' path and runs no show. If you
 // uncomment the line above instead, define PSI_NO_CONTRACT with it.

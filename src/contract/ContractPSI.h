@@ -585,18 +585,16 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
       // The top rows are a region of the panel like any other, and the gate sees only the whole
       // field (review finding 1): L alternating between half and full blinked the top half ten
       // times a second, and with no level feed the meter's random walk at 20 ms a step did the same.
-      //   * Fed by L: the level is the core's (CA1.6, contractLevelOffer / contractLevelDue). A
-      //     higher one is taken at most once in 340 ms and a fall at once, so no row lights more
-      //     than three times a second through L. It is taken where the bars are redrawn, so a
-      //     level that is taken is a level shown (taken on every pass, a raise was mostly undone
-      //     by the next lower L before the meter drew it).
+      //   * Fed by L: the level is the core's (contractLevelOffer; contractHoldsDue() in
+      //     contractLoopTick(), on a pass that redraws the bars). A higher one is taken at most
+      //     once in 340 ms and a fall at once, so no row lights more than three times a second
+      //     through L, nor through B, which shares the window (CA1.7).
       //   * Not fed: the walk is the board's own, redrawn every 170 ms at the fastest (the native
       //     meter: every 250 ms) whatever s= asks for, so a row that goes dark and lights again
       //     does it 340 ms after it last lit.
       // main.cpp's VUMeter() counts the rows that are DARK: v=255 -> 0 (full), v=0 -> 6 (empty).
       g_meterMine = true;
       if (contractHoldsLevels()) {
-        if (checkDelay()) contractLevelDue(g_u, millis());
         const uint8_t rows = (uint8_t)(LEDS_PER_COLUMN - ((uint16_t)g_u.level * LEDS_PER_COLUMN) / 255u);
         for (uint8_t c = 0; c < COLUMNS; c++) level[c] = rows;
       } else if (d < STROBE_MIN_STATE_MS) d = STROBE_MIN_STATE_MS;
@@ -633,14 +631,17 @@ static PSI_NOINLINE void _applyLook(ContractLookPatch lp, uint32_t now) {
   // S11: re-applying the same look does not restart it. Asked before anything is written: the
   // look this line makes, against the one the unit has.
   const ContractEffect effect = (lp.has & LP_EFFECT) ? _lookHere(lp.effect, false) : g_u.effect;
-  const bool same = contractLookSame(g_u, effect, (lp.has & LP_EFFECT) ? lp.nativeCode : g_u.nativeCode,
-                                     (lp.has & LP_COLOR) ? lp.color : g_u.color, (lp.has & LP_SPEED) ? lp.speed : g_u.speed);
+  // (CA1.7: nor does a change of colour alone. The look is recoloured in place and its timeline
+  // carries on; the look gate still times the change of colour.)
+  const bool same = contractLookContinues(g_u, effect, (lp.has & LP_EFFECT) ? lp.nativeCode : g_u.nativeCode,
+                                          (lp.has & LP_SPEED) ? lp.speed : g_u.speed);
   if (lp.has & LP_COLOR)   g_u.color = lp.color;
   if (lp.has & LP_SPEED)   g_u.speed = lp.speed;
-  if (lp.has & LP_BRIGHT)  g_u.bright = lp.bright;
+  if (lp.has & LP_BRIGHT)  contractBrightOffer(g_u, lp.bright);   // CA1.7: taken by contractHoldsDue()
   if (lp.has & LP_BEATMOD) g_u.beatMod = lp.beatMod;
   if (lp.has & LP_AM)      g_u.accentMode = lp.accentMode;
   if (lp.has & LP_EVERY)   g_u.accentEvery = lp.every;
+  const bool overlay = g_u.pulseActive;                // the line ends an accent that is up
   g_u.pulseActive = false;
   if (lp.has & LP_EFFECT) {
     _holdPanel();
@@ -651,8 +652,11 @@ static PSI_NOINLINE void _applyLook(ContractLookPatch lp, uint32_t now) {
   if (!same) {                                         // another look: its timeline starts, and what
     g_u.startMs = now;                                 // the field shows next is a change of look
     contractLookRestart(g_u);
-    g_lastEffect = CE_NONE;                            // force a retrigger on the next tick
   }
+  // Its state machines start again on the next tick: for another look, and for the same look when
+  // this line cut an accent short. The accent's image is in the frame buffer, and a look that adds
+  // to the buffer (sparkle) went on over it: a field of the accent's colour under the look's name.
+  if (!same || overlay) g_lastEffect = CE_NONE;
 }
 
 // ---- verb dispatch ----------------------------------------------------------
@@ -724,11 +728,11 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
 
     case CV_BRIGHT:                                    // a fraction of the ceiling; never the 2P/EEPROM path
       if (!contractBrightHonoured(g_u)) break;         // S6: only in show mode, and a reset clears it
-      g_u.bright = pr.hasBright ? pr.bright : (pr.hasLevel ? pr.level : g_u.bright);
+      contractBrightOffer(g_u, pr.hasBright ? pr.bright : (pr.hasLevel ? pr.level : g_u.brightWant));
       break;
 
     case CV_LEVEL: {                                   // feed the contract's meter look from Studio energy
-      contractLevelOffer(g_u, pr.hasLevel ? pr.level : 0);   // taken where the meter is drawn (contractLevelDue)
+      contractLevelOffer(g_u, pr.hasLevel ? pr.level : 0);   // taken where the meter is drawn (contractHoldsDue)
       g_levelMs = now;
       g_levelFed = true;
       break;
@@ -801,7 +805,7 @@ inline bool contractLoopTick() {
       if (idx >= 0 && idx != g_u.curSection && contractSectionMayApply(g_u, now)) {
         const ScoreEntry& e = g_score[idx];
         _holdPanel();
-        if (!contractLookSame(g_u, e.effect, e.nativeCode, e.color, e.speed)) {   // S11
+        if (!contractLookContinues(g_u, e.effect, e.nativeCode, e.speed)) {   // S11, and CA1.7: not for a colour alone
           g_u.startMs = now;
           contractLookRestart(g_u);
           g_lastEffect = CE_NONE;
@@ -810,7 +814,7 @@ inline bool contractLoopTick() {
         g_u.sectionStart = e.atBeat;
         g_u.sectionEnd   = (idx + 1 < g_u.scoreLen) ? g_score[idx + 1].atBeat : (e.atBeat + 9999);
         g_u.effect = e.effect; g_u.nativeCode = e.nativeCode; g_u.color = e.color; g_u.speed = e.speed;
-        g_u.bright = e.bright; g_u.beatMod = e.beatMod; g_u.accentMode = e.accentMode;
+        contractBrightOffer(g_u, e.bright); g_u.beatMod = e.beatMod; g_u.accentMode = e.accentMode;
         g_u.accentEvery = e.accentEvery;
         g_u.base = (e.effect == CE_NATIVE) ? CB_NATIVE : CB_LOOK;
       }
@@ -841,6 +845,12 @@ inline bool contractLoopTick() {
     return false;
   }
 
+  // CA1.7: verb L's level and the brightness fraction (B, b=, a section's) go up at most once in
+  // 340 ms, in ONE window, and down at once (contractHoldsDue): a part of a look lights when either
+  // goes up. They are taken on a pass whose frame shows them. The meter is redrawn every d ms, so
+  // with the meter up that is a pass that redraws it: taken on every pass, a raise was mostly
+  // undone by the next lower line before the meter drew it.
+  if (g_u.effect != CE_METER || checkDelay()) contractHoldsDue(g_u, now);
   // S6: b= and B are fractions of the owner's ceiling. The pump rides under that level. The
   // overlay has its own fraction (a P's b=, or the look's level for a scored accent), un-pumped.
   const uint8_t lvl = contractLevel(g_u.ceil, g_u.pulseActive ? g_u.pulseBright : g_u.bright);

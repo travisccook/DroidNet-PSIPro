@@ -82,8 +82,8 @@ board** until a later release finds the flash. The light show needs the default,
 that says so.)
 
 **The default build has one vocabulary of looks.** Six of the contract's looks (comet, chase, wipe,
-gradient, colorcycle, twinkle) are about 1,240 B, and with the contract's gate the image with them
-is 29,108 B. So R1 is built with `PSI_NO_STRIP_LOOKS`. A show that names one of the six still
+gradient, colorcycle, twinkle) are about 1,200 B, and with the contract's gate the image with them
+is 29,490 B. So R1 is built with `PSI_NO_STRIP_LOOKS`. A show that names one of the six still
 plays: comet, chase and wipe draw as scan, twinkle as sparkle, gradient and colorcycle as a solid in
 the line's colour (as an accent, all six draw as a solid), and the board announces
 `contract.1.3s`. The six stay in the source and in the host suite.
@@ -111,9 +111,9 @@ What it buys, measured:
 
 | | serial-only (default) | with I2C |
 | --- | --- | --- |
-| flash | 28,210 B (98.4%) | 16,998 B (59.3%) |
-| SRAM | 1,630 B (63.7%) | 1,217 B (47.5%) |
-| worst-case stack | 446 B of 930 B (48%) | 312 B of 1,343 B (23%) |
+| flash | 28,286 B (98.7%) | 16,998 B (59.3%) |
+| SRAM | 1,632 B (63.8%) | 1,217 B (47.5%) |
+| worst-case stack | 444 B of 928 B (48%) | 312 B of 1,343 B (23%) |
 | the contract layer (the light show) | **yes** | **no** |
 | can an interrupt reach a render? | **no** | yes (upstream's native path) |
 
@@ -141,9 +141,9 @@ on host mocks of the hardware (no mock of the board API: that one lied twice and
 compares it, frame for frame, with captures of every native mode (36 goldens; the 35 native ones on
 the I2C build as well) and with upstream v1.7 on the same mocks (102 scripted timelines on both
 builds, and 447 more on the I2C build with an I2C command that arrives while a mode is drawing);
-runs 106 scripted contract scenarios on the default build, 6 on the build without the
-contract layer, and 108 on two builds no environment links (every look; the contract with I2C);
-feeds the default build 44 hostile line scripts and 1,500 random streams and measures the frames
+runs 111 scripted contract scenarios on the default build, 6 on the build without the
+contract layer, and 113 on two builds no environment links (every look; the contract with I2C);
+feeds the default build 50 hostile line scripts and 1,500 random streams and measures the frames
 (at most three dark-to-lit swings a second by brightness and by luminance, a change of colour at
 most once in 170 ms, nothing above the owner's brightness; in the scripts, no half, quarter or band
 of the panel lights more than three times a second either); then cross-compiles both builds with
@@ -152,17 +152,17 @@ the real avr-gcc, gates their flash and worst-case stack, and runs five probes i
 show lifecycle; the frames on the LED pin under hostile streams; the WS2812 waveform; and the cost
 of a frame.
 
-**The default build fits with 206 B under its gate; the contract with I2C does not fit at all.**
+**The default build fits with 130 B under its gate; the contract with I2C does not fit at all.**
 This is the tightest board of the three, and the numbers are worth knowing before you build:
 
 | Build | Flash | of 28,672 B |
 | --- | --- | --- |
 | Stock upstream PSI Pro (no contract layer) | 25,106 B | 87.6% |
-| **This fork, as shipped (serial-only)** | **28,210 B** | **98.4%** |
-| …with `PSI_NOINLINE` removed | 28,786 B | 100.4% — **will not link** |
-| …without `-mcall-prologues` | 29,010 B | 101.2% — **will not link** |
-| …with the six strip and hue looks (no `PSI_NO_STRIP_LOOKS`) | 29,474 B | 102.8% — **will not link** |
-| …with the I2C intake as well (no strip looks) | 29,878 B | 104.2% — **will not link** |
+| **This fork, as shipped (serial-only)** | **28,286 B** | **98.7%** |
+| …with `PSI_NOINLINE` removed | 28,770 B | 100.3% — **will not link** |
+| …without `-mcall-prologues` | 29,026 B | 101.2% — **will not link** |
+| …with the six strip and hue looks (no `PSI_NO_STRIP_LOOKS`) | 29,490 B | 102.9% — **will not link** |
+| …with the I2C intake as well (no strip looks) | 29,954 B | 104.5% — **will not link** |
 | This fork's I2C build (`-e PSIPro-i2c`): I2C, no contract layer | 16,998 B | 59.3% |
 
 Neil's firmware already used 87.6% of this chip. All 23 upstream modes (0-21 and 92) ship, and every
@@ -193,17 +193,17 @@ gate in its final form (two measures of every frame, the look gate, the native l
 this layer, which is what pushed the six strip looks out of R1 and the contract out of the I2C build.
 The first independent review of R1 and core CA1.6 then cost about 300 B more (a mode that has ended,
 the level a meter shows, the frame at which a look can be seen), less what not sending a held
-frame gave back.
+frame gave back; the second review 38 B; and core CA1.7 (the hold on `B`, the scan's lap) 76 B.
 
 ### SRAM and the stack
 
-SRAM sits at 1,630 B of 2,560 B (63.7%), leaving **930 B for the stack** in the default
+SRAM sits at 1,632 B of 2,560 B (63.8%), leaving **928 B for the stack** in the default
 serial-only build. That used to be an open question here. It has now been analysed statically
 (`test/host/stack_report.py` computes the bound directly from the linked ELF — see the tool's own
 `--help` for why `-fstack-usage` can't be trusted under `-flto`), and in the shipped configuration
 the answer is good:
 
-- **Worst-case stack: 446 B of 930 B (48%), and the bound is SOUND** — with the TWI vector gone,
+- **Worst-case stack: 444 B of 928 B (48%), and the bound is SOUND** — with the TWI vector gone,
   **no interrupt in the image can reach a render at all**, and no interrupt can nest.
 
 - **In the I2C build (`-e PSIPro-i2c`) the worst case is 312 B of 1,343 B (23%), 1,031 B spare, and
@@ -374,11 +374,14 @@ the default (serial-only) build; the I2C build has none of this:
   change, whichever path asked for it: a live `A`, a section, a seek, an accent; the 170 ms run
   from the first frame in which the look could be seen (an LED at 4 levels of 255 or more). The
   same look sent again does not restart.
-- **A part of the panel is held to the same three a second, with one known gap.** `L` raises the
-  meter at most once in 340 ms and lowers it at once; a meter with no `L` redraws every 170 ms at
-  the fastest. The gate itself measures the whole panel, though: a look that moves by itself (the
-  meter's bars) can light one part of the panel just before an `X` and a full look light that part
-  again, inside 340 ms. `docs/BENCH_R1.md` has the figures from the host's random streams.
+- **A part of the panel is held to the same three a second, with one known gap.** `L`, `B` and a
+  look's `b=` go up at most once in 340 ms, in one window between them, and down at once; a meter
+  with no `L` redraws every 170 ms at the fastest; a scan takes a second or more there and back,
+  whatever `s=` asks for (56 ms a column at the fastest on this panel); and a change of colour
+  alone recolours the look that is up, without starting it again. The gate itself measures the
+  whole panel, though: a look that moves by itself (the meter's bars with no `L`) followed by an
+  `X` and a full look can light one part of the panel twice inside 340 ms.
+  `docs/BENCH_R1.md` has the list of known limits and the figures from the host's random streams.
 - **Native modes run as stock.** A show may select modes 0 to 22 and 92, without 2, 3 and 5
   (Flash, Alarm, Scream: whole-field strobes). Their frames are never altered. Every one of them
   draws at the brightness the show gives it, so `b=` and `B` dim all of them. A mode starts only
