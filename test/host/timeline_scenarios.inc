@@ -1471,6 +1471,57 @@ static void the_next_look_keeps_170_ms_from_the_frame_a_look_could_be_seen_at() 
   CHECK(red >= 2026, "the pulse cannot be seen in its first frame (first seen at t=%u): or this scenario shows nothing", red);
   CHECK(green >= red + 170, "green %u ms after the red could first be seen (t=%u); it must be 170", green - red, red);
 }
+// Second review, its test note: a gate that ASKS with one measure (and is still told both) was
+// caught by the property test alone. From dark, white at half level, then blue: the luminance
+// falls, which ends the rise (CA1.6), and the brightest channel stays lit. B raises the blue to
+// full (the field gets brighter: no onset, and the gate's time moves to that frame); white
+// 171 ms later is an onset of the luminance only, and must wait until 340 ms after the raise.
+// Asked by level alone, the gate sees a field that is lit and lets the white through at once.
+static void white_171_ms_after_a_blue_got_brighter_waits_for_the_window() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=off"); at(1500, "!P*A:i=solid,c=ffffff,b=128"); at(2000, "!P*A:i=solid,c=0000ff,b=128");
+  at(3000, "!P*B:b=255"); at(3171, "!P*A:i=solid,c=ffffff");
+  runTo(4200);
+  uint32_t raised = 0, white = 0;
+  for (const Frame& f : between(3000, 4200)) {
+    if (!raised && f.lit == 48 && f.px[0].b == 255 && f.px[0].r == 0 && f.scale >= 190) raised = f.t;
+    if (!white && f.allAre(WHITE) && f.scale >= 190) white = f.t;
+  }
+  CHECK(raised != 0 && white != 0, "the blue at full level, then white (t=%u, %u)", raised, white);
+  CHECK(raised <= 3000 + 27, "nothing holds a field that is lit and gets brighter (t=%u)", raised);
+  CHECK(white >= raised + 340 && white <= raised + 340 + 27, "white within a frame of 340 ms after the blue got brighter (t=%u), saw t=%u", raised + 340, white);
+}
+// Second review, N4. With alwaysOn off the lightsaber battle ends by itself and the swipe returns.
+// A pulse in the battle's last hold (its last frame is up, only its end is left) must not play the
+// whole battle again: the swipe is back when it would have been, give or take the pulse.
+static void a_pulse_in_the_battles_last_hold_does_not_replay_it(int withPulse) {
+  boot(0x00);
+  at(1000, "0T19");
+  if (withPulse) at((uint32_t)withPulse, "!PFP:c=ff00ff,d=170");
+  runTo(14000);
+  uint32_t back = 0;                                  // the first frame of the swipe after the battle
+  for (const Frame& f : between(3000, 14000)) if (f.lit == 48 && magentaLeds(f) == 0 && f.px[0].r + f.px[0].b >= 255 && f.px[0].g == 0) { back = f.t; break; }
+  printf("%u", back);
+}
+static uint32_t swipeBackAfterBattle(int pulseAt) {
+  int p[2]; char got[32] = "";
+  if (pipe(p) != 0) return 0;
+  fflush(stdout);
+  const pid_t pid = fork();
+  if (pid == 0) { close(p[0]); dup2(p[1], 1); a_pulse_in_the_battles_last_hold_does_not_replay_it(pulseAt); fflush(stdout); _exit(0); }
+  close(p[1]);
+  const ssize_t n = read(p[0], got, sizeof got - 1); if (n > 0) got[n] = 0;
+  close(p[0]); int st; waitpid(pid, &st, 0);
+  return (uint32_t)strtoul(got, nullptr, 10);
+}
+static void a_pulse_in_the_battles_last_hold_lets_it_end() {
+  const uint32_t plain = swipeBackAfterBattle(0);
+  CHECK(plain > 5000 && plain < 9000, "with alwaysOn off the battle ends and the swipe is back (t=%u)", plain);
+  for (const int before : {450, 300, 150}) {           // ms before the battle's end
+    const uint32_t back = swipeBackAfterBattle((int)plain - before);
+    CHECK(back != 0 && back <= plain + 700, "a pulse %d ms before the battle's end: the swipe is back at %u ms, without the pulse at %u ms", before, back, plain);
+  }
+}
 // Review, test quality (b). A C that seeks between a solid section and a scan section every 90 ms
 // would restart the scan each time if sections were applied at once: the scan would never leave
 // its first column. A section waits its 170 ms, and meanwhile the look that is up keeps moving.
@@ -1667,6 +1718,8 @@ static const Scenario kScenarios[] = {
   {"a_colour_that_brightens_within_a_rise_is_one_onset", a_colour_that_brightens_within_a_rise_is_one_onset},
   {"a_held_frame_is_not_sent", a_held_frame_is_not_sent},
   {"the_next_look_keeps_170_ms_from_the_frame_a_look_could_be_seen_at", the_next_look_keeps_170_ms_from_the_frame_a_look_could_be_seen_at},
+  {"white_171_ms_after_a_blue_got_brighter_waits_for_the_window", white_171_ms_after_a_blue_got_brighter_waits_for_the_window},
+  {"a_pulse_in_the_battles_last_hold_lets_it_end", a_pulse_in_the_battles_last_hold_lets_it_end},
   {"a_seek_storm_does_not_freeze_the_look", a_seek_storm_does_not_freeze_the_look},
   {"play_at_once_after_send_accents_when_the_look_may_change", play_at_once_after_send_accents_when_the_look_may_change},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},

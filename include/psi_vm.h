@@ -949,9 +949,11 @@ static bool    g_vmDone;             // oneshot finished (hold display)
 // runPattern() clears that for a mode that is already current. runPattern() also clears g_vmDone
 // when another mode starts, so that this is always about the current one.)
 static inline void vmReplayIfEnded() {
-  // ...or is about to end: its last frame is drawn and only the OP_END that ends it is left (the
-  // battle's last hold is 500 ms long, and a pulse that comes in it finds the program not ended).
-  if (!g_vmDone && !((g_vmFlags & VMF_ONESHOT) && pgm_read_byte(g_vmPC) == OP_END)) return;
+  // ...or, under alwaysOn, is about to end: its last frame is drawn and only the OP_END that ends
+  // it is left (the battle's last hold is 500 ms long, and a pulse that comes in it finds the
+  // program not ended). With alwaysOn off that program is left to end: its OP_END gives the panel
+  // to the default look by itself, and playing it again would hold the swipe back a whole battle.
+  if (!g_vmDone && !(alwaysOn && (g_vmFlags & VMF_ONESHOT) && pgm_read_byte(g_vmPC) == OP_END)) return;
   g_vmDone = false;
   g_vmPC = g_vmLoopPtr;              // a oneshot has no loop start: this is its first byte
   g_vmRepLeft = 0;
@@ -1044,11 +1046,19 @@ static void vmMaybeCountLoop(const uint8_t* pc) {
 // new mode's. (Upstream's interrupted function also steps the counters its modes share, so after
 // some modes its new mode runs a step ahead; the VM has no shared counter and starts the new mode
 // at its first step. test/host/diff_upstream.sh lists which.)
+// The rebel symbol sets no step delay (VMF_IMMEDIATE, see vmPlay()). A step reads that from ITS
+// program as it was when the step began: a mode run from inside one of its shows leaves
+// g_vmFlags the NEW program's, and the symbol's interrupted step then set its 1 ms delay after
+// all (the new mode's second step came 26 ms after its first; upstream's symbol never sets one).
+// Without the I2C intake nothing runs under a show, and the flags are read where they are used
+// (a copy costs the serial-only build 42 B).
 #ifdef PSI_ENABLE_I2C
 static volatile uint8_t g_vmRuns;
 #define VM_RAN_UNDER() (runs != g_vmRuns)
+#define VM_NO_DELAY() noDelay
 #else
 #define VM_RAN_UNDER() false
+#define VM_NO_DELAY() (g_vmFlags & VMF_IMMEDIATE)
 #endif
 
 // Execute ops from the current frame start through its SHOW terminator (or END).
@@ -1056,6 +1066,7 @@ static void vmStep() {
   const uint8_t* pc = g_vmPC;
 #ifdef PSI_ENABLE_I2C
   const uint8_t runs = g_vmRuns;
+  const bool noDelay = g_vmFlags & VMF_IMMEDIATE;
 #endif
   bool stale = false;   // a mode was run from inside one of this step's shows (above)
   for (;;) {
@@ -1124,9 +1135,10 @@ static void vmStep() {
       case OP_SHOW: {
         uint16_t d = pgm_read_byte(pc++);
         d |= (uint16_t)pgm_read_byte(pc++) << 8;
-        FastLED.show(brightness());
+        if (!VM_NO_DELAY()) updateLed = 1;                // a step that draws (see vmPlay()): set before
+        FastLED.show(brightness());                       // the show, as upstream's functions set it
         if (VM_RAN_UNDER()) stale = true;
-        if (!(g_vmFlags & VMF_IMMEDIATE)) set_delay(d);   // (the rebel symbol: see vmPlay())
+        if (!VM_NO_DELAY()) set_delay(d);                 // (the rebel symbol: neither; see vmPlay())
         if (stale) return;
         if (g_vmRepLeft == 0) g_vmRepLeft = rep;
         if (--g_vmRepLeft == 0) {
@@ -1140,6 +1152,7 @@ static void vmStep() {
         lo |= (uint16_t)pgm_read_byte(pc++) << 8;
         uint16_t hi = pgm_read_byte(pc++);
         hi |= (uint16_t)pgm_read_byte(pc++) << 8;
+        updateLed = 1;
         FastLED.show(brightness());
         if (VM_RAN_UNDER()) stale = true;
         set_delay(random(lo, hi));
@@ -1295,13 +1308,18 @@ inline void vmPlay(uint8_t progId) {
   }
 
   // updateLed: upstream's mode functions clear it on every call and set it on a call that draws,
-  // and its swipe, back after a mode, redraws at once only if the mode's last call drew.
+  // and its swipe, back after a mode, redraws at once only if the mode's last call drew. It is
+  // set where a step shows and returns (OP_SHOW, OP_SHOWR, OP_SHOWRND in vmStep()), not for every
+  // step: radar's blank between two quadrants and the battle's end are steps that draw nothing,
+  // upstream leaves the flag clear on them, and each can be the mode's last call (the swipe then
+  // redrew every poll where upstream's redraws every 104 ms). The rebel symbol leaves the flag as
+  // it finds it: upstream's displayMatrixColor() never reads or writes it.
   // VMF_IMMEDIATE (the rebel symbol): upstream's displayMatrixColor() draws on every poll and
   // never reads or sets the step delay, so the delay the mode BEFORE the symbol left running is
   // still running for the mode after it. The symbol is stepped whatever that delay says, and its
   // show sets none (OP_SHOW in vmStep()).
-  updateLed = 0;
-  if (!g_vmDone && ((g_vmFlags & VMF_IMMEDIATE) || checkDelay())) { vmStep(); updateLed = 1; }
+  if (!(g_vmFlags & VMF_IMMEDIATE)) updateLed = 0;
+  if (!g_vmDone && ((g_vmFlags & VMF_IMMEDIATE) || checkDelay())) vmStep();
 
   if (g_vmDone) {
     // oneshot end (lightsaberBattle semantics, arriving Task 13)

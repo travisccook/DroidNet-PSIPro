@@ -92,6 +92,20 @@ row same "0T2 @1000, 0D @1030" front 00 01 14 512 1 9000 1000 0T2 1030 0D
 row same "0T6 @1000, 0A @1050" front 00 01 14 512 1 9000 1000 0T6 1050 0A
 row same "0T15 @1000, 0T1 @1040" front 00 01 14 512 1 9000 1000 0T15 1040 0T1
 row same "pot path, 0T5|2 @324, 0D5 @354" rear 00 00 05 100 3738 20000 324 "0T5|2" 354 0D5
+# ...and the flag is set by a step that DRAWS, not by every step: radar's last call is the blank
+# after its last quadrant and the battle's is its end, upstream leaves the flag clear on both, and
+# when the swipe's next change of colour is still to come its redraws are 104 ms apart (the fork's
+# were 26 ms apart: second review, N3). The seeds and times are ones where that change is late.
+for st in "2 1200" "5 300" "6 2600" "3 2600"; do
+  set -- $st
+  row same "0T8 ends by itself, seed $1, sent at $2" front 00 01 14 512 $1 30000 $2 0T8
+  row same "0T19 ends by itself, seed $1, sent at $2" rear 00 01 14 512 $1 30000 $2 0T19
+done
+# ...and the rebel symbol does not touch the flag at all (upstream's displayMatrixColor() never
+# does): after the symbol the swipe redraws as the mode BEFORE the symbol left it to.
+row same "0T9 @2118, 0T14 @6148 and its 5 s" front 00 01 14 512 2581 30000 2118 4T9 6148 04T14
+row same "0T8 @601, 0T14 @4601, 0D @7661" front 01 ff 14 100 2275 20000 601 0T8 4601 0T14 7661 0D
+row same "rear 0T9 @1732, 0T14 @3233" rear 00 ff ff 0 2901 20000 1732 0T9 3233 0T14
 # (2) The rebel symbol is redrawn every poll. A mode command in the same millisecond as a redraw
 # started one poll (26 ms) later than upstream's, behind the 1 ms delay the bytecode set there...
 row same "0T14 @2790, 0T11 @2990" front 00 01 14 512 1 9000 2790 0T14 2990 0T11
@@ -123,9 +137,8 @@ row same "0T19 @2896, 0T19|2 @3000" front 00 01 14 512 1 40000 2896 0T19 3000 "0
 # for the first show at or after 2300 ms.
 UPSTREAM_STEPS_ON=" 2>2 3>3 4>4 5>5 6>2 6>3 6>4 6>5 6>6 6>7 6>8 6>9 6>10 6>11 6>12 6>13 6>15 6>19 6>20 7>7 8>8 9>9 \
 10>2 10>3 10>4 10>5 10>6 10>7 10>8 10>9 10>10 10>11 10>12 10>13 10>15 10>19 10>20 11>11 12>12 \
-13>13 14>2 14>3 14>4 14>5 14>6 14>7 14>8 14>9 14>10 14>11 14>12 14>13 14>15 14>19 14>20 15>2 \
-15>3 15>4 15>5 15>6 15>7 15>8 15>9 15>10 15>11 15>12 15>13 15>15 15>19 15>20 19>2 19>3 19>4 19>5 \
-19>6 19>7 19>8 19>9 19>10 19>11 19>12 19>13 19>15 19>20 20>20 "
+13>13 15>2 15>3 15>4 15>5 15>6 15>7 15>8 15>9 15>10 15>11 15>12 15>13 15>15 15>19 15>20 19>2 \
+19>3 19>4 19>5 19>6 19>7 19>8 19>9 19>10 19>11 19>12 19>13 19>15 19>20 20>20 "
 MODES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 92"
 for was in $MODES; do for now in $MODES; do
   case "$UPSTREAM_STEPS_ON" in *" $was>$now "*) want=diff ;; *) want=same ;; esac

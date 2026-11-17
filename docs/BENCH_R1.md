@@ -13,7 +13,7 @@ claim about R1 is about the host, the cross-compiler and the simulator.
 | Looks | solid, off, flash, pulse, scan, sparkle, rainbow, meter, `native:<n>` | native modes only |
 | Stand-ins | comet, chase, wipe draw as scan; twinkle as sparkle; gradient, colorcycle as solid | none |
 | WDP caps | `droidnet.contract`, `contract.1.3s` | none |
-| Flash | 28,172 B (98.3 %) | 16,982 B (59.2 %) |
+| Flash | 28,210 B (98.4 %) | 16,998 B (59.3 %) |
 
 Both builds carry all 23 upstream modes and mode 22, the exact `millis()` credit, the 200 µs latch gap,
 the bounded command buffer and the WDP announce. The images are built from a clean checkout with
@@ -76,6 +76,7 @@ Record for each step: pass or fail, what was seen, and a short phone video. Seri
 | 26 | A stale timing (review finding 5): `0T6\|1`, wait for the swipe, then `!**M:v=show`, `!P*A:i=native:22` | The processing sweep runs on, lap after lap; it does not restart every second | |
 | 27 | A look that comes up slowly (CA1.6): in a show at brightness 200 (`3P200` first, on a 3 A supply), `!P*A:i=off`, `!P*A:i=pulse,c=ff0000,s=0,b=80`, and 171 ms later `!P*A:i=solid,c=00ff00,b=80` | Red comes up for about a quarter of a second before the green: the green does not cut in on a red that has only just become visible | |
 | 28 | A timing sent to a running short circuit (review finding 7): `0T4`, and one second later `0T4\|20`; then `0T19` and `0T23\|2` during the battle | The fade goes on to its end as if nothing had been sent. The battle stops at its next step and the swipe returns, as upstream's does | |
+| 31 | A pulse as the battle ends, `alwaysOn` off (second review, N4): `0P0`, `0T19`, and `!P*P:c=ffffff,d=170` in the half second its last frame stands (about 5.5 s after the command) | The swipe is back when it would have been without the pulse, give or take the pulse: the battle is not played again (it was: the swipe came back 5 s late). Then `0P1` again | |
 
 ## The I2C image
 
@@ -88,6 +89,7 @@ Record for each step: pass or fail, what was seen, and a short phone video. Seri
 | 21 | `0T92` for 5 minutes beside a stopwatch, then `0T6\|5` | The timed mode ends after 5 s by the stopwatch | |
 | 29 | A mode command over I2C while another mode draws (review finding 3): `0T19` over serial, then `0T15` from the I2C master, twenty times, at random moments of the battle (start the battle again each time); the same with `0T6` then `0T15`, and `0T15` then `0T6` | Each time the new mode takes the panel and keeps it. Never one step of the new mode and then the old one again (that was the fault: the old mode went on under the new mode's number) | |
 | 30 | Steps 23 (without the `!` line: `0T19`, wait, `0T19` again) and 28 on this image | The battle plays again; as step 28 | |
+| 32 | The rebel symbol and an I2C command (second review, N2): `0T14` over serial, then `0T6` from the I2C master, a few times | Leia's message starts and runs at its own pace from its first row (its second row came 26 ms after the first when the command landed inside the symbol's redraw; by eye: no stutter at the start) | |
 
 ## When it is done
 

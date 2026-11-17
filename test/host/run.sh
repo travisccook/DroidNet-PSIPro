@@ -283,7 +283,7 @@ if cmp -s <(frames "$GOLD/standin_rainbow.psig") <(frames "$GOLD/standin_solid.p
 echo "      6 stand-ins identical to the looks they draw."
 
 echo "[6b] upstream differential: Neil's PSIPro v1.7 and the fork on the same mocks"
-# 91 scripted timelines (mode after mode, |timing, alwaysOn, rear jumper, brightness commands)
+# 102 scripted timelines (mode after mode, |timing, alwaysOn, rear jumper, brightness commands)
 # through test/host/upstream-v1.7/PSIPro.ino and through src/main.cpp as each of the two
 # environments builds it (with the contract layer; with the I2C intake and without it), and 447
 # more through upstream and the I2C build, with an I2C command that lands inside a show() (every
