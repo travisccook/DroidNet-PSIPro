@@ -386,14 +386,19 @@ static PSI_NOINLINE void _measure(const CRGB* l, uint8_t n, uint8_t scale) {
   uint16_t sum = 0, sumY = 0;                          // 48 * 255 fits
   uint8_t peak = 0;
   const uint16_t k = (uint16_t)scale + 1u;
+  // The frame as bytes, r, g, b, LED after LED (CRGB is those three bytes: a static_assert in
+  // include/FastLED.h and in the host mock). One scaling in a loop of three is 44 B less flash
+  // than three written out; each channel is still scaled, and compared, as before.
+  const uint8_t* p = (const uint8_t*)l;
   for (uint8_t i = 0; i < n; i++) {
-    const uint8_t r = (uint8_t)((l[i].r * k) >> 8), g = (uint8_t)((l[i].g * k) >> 8), b = (uint8_t)((l[i].b * k) >> 8);
-    uint8_t m = r;
-    if (g > m) m = g;
-    if (b > m) m = b;
+    uint8_t c[3], m = 0;
+    for (uint8_t j = 0; j < 3; j++) {
+      c[j] = (uint8_t)((*p++ * k) >> 8);
+      if (c[j] > m) m = c[j];
+    }
     if (m > peak) peak = m;
     sum += m;
-    sumY += contractLuminance(r, g, b);
+    sumY += contractLuminance(c[0], c[1], c[2]);
   }
   g_mLevel = (uint8_t)(sum / n); g_mLum = (uint8_t)(sumY / n); g_mPeak = peak;
 }
