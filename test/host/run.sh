@@ -101,7 +101,7 @@ echo "[1c/9] wdp_fork PSI Front / PSI Rear identity"
 # Fork-local. The header's own types and caps, with the longest fw git gives a build
 # ("<sha>-dirty"), must build a valid line for both roles in the fork's WDP_LINE_MAX, which is
 # sized to exactly the front line (93 B here) rather than the core's 128. Twice: as R1 is built
-# (without the strip looks: "contract.1.3s"), and with every look ("contract.1.3").
+# (without the strip looks: "contract.1.4s"), and with every look ("contract.1.4").
 "$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 -DPSI_NO_STRIP_LOOKS test_wdp_fork.cpp -o "$T/psi_wdp_fork_test"
 "$T/psi_wdp_fork_test"
 "$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_fork.cpp -o "$T/psi_wdp_fork_test_all"
@@ -269,7 +269,8 @@ fi
 echo "[6d] the stand-in looks"
 # R1 is built without the six strip and hue looks (PSI_NO_STRIP_LOOKS, platformio.ini). A line
 # naming one must draw the nearest look the build has, frame for frame: comet, chase and wipe are
-# scan, twinkle is sparkle, gradient and colorcycle are solid in c=.
+# scan, twinkle is sparkle, gradient and colorcycle are solid in c=. Contract v1.4's three ids (core
+# CA2): logic and projector are sparkle, and vu is meter until Task F5 gives it the pump.
 # (The golden binary, built above, is that build.)
 frames() { python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); sys.stdout.buffer.write(d[d.index(b"\nFRAMES\n"):])' "$1"; }
 standin() {  # <look named on the wire> <look drawn> [committed golden of the look drawn]
@@ -285,10 +286,11 @@ standin() {  # <look named on the wire> <look drawn> [committed golden of the lo
 standin comet scan; standin chase scan; standin wipe scan
 standin twinkle sparkle
 standin gradient solid; standin colorcycle solid
+standin logic sparkle; standin projector sparkle; standin vu meter
 # ...and the build still has the looks it keeps: rainbow is not solid there.
 standin rainbow rainbow
 if cmp -s <(frames "$GOLD/standin_rainbow.psig") <(frames "$GOLD/standin_solid.psig"); then echo "FAIL: rainbow drew as solid"; exit 1; fi
-echo "      6 stand-ins identical to the looks they draw."
+echo "      9 stand-ins identical to the looks they draw."
 
 echo "[6b] upstream differential: Neil's PSIPro v1.7 and the fork on the same mocks"
 # 102 scripted timelines (mode after mode, |timing, alwaysOn, rear jumper, brightness commands)

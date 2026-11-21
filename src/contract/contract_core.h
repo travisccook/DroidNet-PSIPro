@@ -20,8 +20,8 @@
 struct ContractRGB { uint8_t r, g, b; };
 
 // ===== v1.3 constants. ONE definition for all three forks (spec S1, S3, S5, C1). =====
-#define CONTRACT_VERSION "1.3"
-#define CONTRACT_RELEASE 1                           // firmware release: 1 = R1 (bench), 2 = R2 (looks)
+#define CONTRACT_VERSION "1.4"                       // CA2: v1.4 adds the ids logic, projector and vu, and nothing else
+#define CONTRACT_RELEASE 2                           // firmware release: 1 = R1 (bench), 2 = R2 (looks)
 // PHOTOSENSITIVITY. >=170 ms per state => an accent or a pump swing may not RESTART more often
 // than every 2 * 170 = 340 ms, i.e. <= 2.94 per second, inside the <= 3 flashes/sec guidance.
 // A safety limit, not a tuning knob. It used to be defined once per fork.
@@ -46,7 +46,10 @@ enum ContractVerb : uint8_t {
 };
 enum ContractEffect : uint8_t {
   CE_NONE = 0, CE_OFF, CE_SOLID, CE_FLASH, CE_PULSE, CE_RAINBOW, CE_SCAN, CE_SPARKLE, CE_METER, CE_NATIVE,
-  CE_COMET, CE_CHASE, CE_WIPE, CE_GRADIENT, CE_COLORCYCLE, CE_TWINKLE
+  CE_COMET, CE_CHASE, CE_WIPE, CE_GRADIENT, CE_COLORCYCLE, CE_TWINKLE,
+  // v1.4 (CA2). APPENDED, so no stored or wired value moves. A v1.3 board does not know them:
+  // its parser leaves the effect unset (v1.4 H1), so a host sends them only to a board at rel 2.
+  CE_LOGIC, CE_PROJECTOR, CE_VU
 };
 
 struct ContractParams {
@@ -154,12 +157,14 @@ inline int8_t _nameIndex(const char* list, const char* s, size_t len) {
   }
 }
 // The effect table is in ContractEffect order, CE_NATIVE (which takes a number) left out.
-static_assert(CE_OFF == 1 && CE_METER == 8 && CE_NATIVE == 9 && CE_COMET == 10 && CE_TWINKLE == 15,
+static_assert(CE_OFF == 1 && CE_METER == 8 && CE_NATIVE == 9 && CE_COMET == 10 && CE_TWINKLE == 15 &&
+              CE_LOGIC == 16 && CE_PROJECTOR == 17 && CE_VU == 18,
               "ContractEffect changed: update the name table in _effectFromName()");
 inline ContractEffect _effectFromName(const char* s, size_t len, int& nativeCode) {
   nativeCode = -1;
   const int8_t idx = _nameIndex(CONTRACT_PSTR("off,solid,flash,pulse,rainbow,scan,sparkle,meter,"
-                                              "comet,chase,wipe,gradient,colorcycle,twinkle"), s, len);
+                                              "comet,chase,wipe,gradient,colorcycle,twinkle,"
+                                              "logic,projector,vu"), s, len);
   if (idx >= 0) return (ContractEffect)(idx + (idx >= 8 ? 2 : 1));     // skip CE_NATIVE's slot
   // native:<n>. The digits are parsed BOUNDED BY len, not by a NUL.
   // This used to be `nativeCode = atoi(s + 7)`, and atoi() stops at the first NON-DIGIT — not
@@ -207,7 +212,8 @@ inline bool accentEffectAllowed(ContractEffect e) {
     case CE_OFF: case CE_SOLID: case CE_FLASH: case CE_PULSE: case CE_RAINBOW:
     case CE_COMET: case CE_CHASE: case CE_WIPE: case CE_GRADIENT:
     case CE_COLORCYCLE: case CE_TWINKLE: return true;
-    default: return false;   // CE_NONE, CE_SCAN, CE_SPARKLE, CE_METER, CE_NATIVE
+    default: return false;   // CE_NONE, CE_SCAN, CE_SPARKLE, CE_METER, CE_NATIVE,
+                             // and v1.4's CE_LOGIC, CE_PROJECTOR, CE_VU: base looks only (v1.4 section 4)
   }
 }
 // ---- decimal parsers -------------------------------------------------------------
@@ -1576,7 +1582,7 @@ inline bool contractQueryAnswerable(const ParsedContract& p) {
   return p.verb == CV_QUERY && p.cls != '*' && p.unit != '*' && p.params.hasRoute;
 }
 // The reply to Q:r=<route>, routed back the way SHADOW routes its replies so the WCB never
-// broadcasts it:   r=0  ";S0!<cls><unit>q:ver=1.3,rel=1,cap=<n>,n=<held>,ok=<0|1|2>,bpm=<n>\r"
+// broadcasts it:   r=0  ";S0!<cls><unit>q:ver=<CONTRACT_VERSION>,rel=<CONTRACT_RELEASE>,cap=<n>,n=<held>,ok=<0|1|2>,bpm=<n>\r"
 //                  r=n  ";W<n>,;S0!<cls><unit>q:...\r"
 // No NUL is written. Returns the length (at most CONTRACT_REPLY_MAX), or 0 when `out` is smaller
 // than CONTRACT_REPLY_MAX. No printf: that is over 1 KB of flash on an ATmega.
@@ -1724,3 +1730,138 @@ inline bool nativeAllowedFlthy(int code) { return code == 1 || code == 6; }
 // four whole-field swings a second as stock.
 inline bool nativeGatedPsi(int) { return false; }
 inline bool nativeGatedFlthy(int code) { return code == 1; }
+
+// ===== v1.4 (CA2): THE MATH OF logic AND projector (spec v1.4 sections 5 and 6) =====
+// vu has no function of its own: its level is envBright(255, m, beatAccentAmount(...)), offered to
+// the level hold (contractLevelOffer) on every pass while it is pumped (v1.4 N10). The vector
+// group vuLevel pins it.
+//
+// logic. The engine's own blink: every LED walks a 46-colour ramp there and back. The look gives
+// it a hue (N1), a pace (N2) and a level (N3). The functions below give the first two, and the
+// pump on the third (fxLogicPumpAmount); the level itself is envBright() under the ceiling.
+// N1: a colour with no hue (its channels within FX_LOGIC_GREY - 1 of each other: black, white,
+// the greys, and so a line with no c=) is the display's own palette and hue, the stock look.
+// Any other colour is the front palette's shape at that colour's hue:
+//     setPaletteHue(0, (fxLogicHue(c) - FX_LOGIC_HUE_BASE) & 255)
+// FX_LOGIC_HUE_BASE is the front palette's own hue on FastLED's rainbow wheel.
+static const uint8_t FX_LOGIC_GREY = 32;
+static const uint8_t FX_LOGIC_HUE_BASE = 170;
+// N2: the floor under a faster pace, for the engine's fade (the pause at a tween) and its delay
+// (the most a key colour pauses, at random): the stock front display's own pace. A display whose
+// own settings are already under the floor keeps them. These two move only on the evidence of
+// v1.4 section 9, which test/host/test_logic_regions.cpp (a model of the walk) works out; its
+// table is in DROIDNET_FORK.md.
+static const uint8_t FX_LOGIC_FADE_MIN = 1;
+static const uint8_t FX_LOGIC_DELAY_MIN = 10;
+inline bool fxLogicOwn(const ContractRGB& c) {
+  const uint8_t mx = c.r > c.g ? (c.r > c.b ? c.r : c.b) : (c.g > c.b ? c.g : c.b);
+  const uint8_t mn = c.r < c.g ? (c.r < c.b ? c.r : c.b) : (c.g < c.b ? c.g : c.b);
+  return (uint8_t)(mx - mn) < FX_LOGIC_GREY;
+}
+// The colour's hue on FastLED's rainbow wheel (the wheel CHSV draws with, where yellow is 64 and
+// blue 160), 0..255. First the plain hue h, 0..255 with red at 0, green at 85 and blue at 171 (r is
+// tested first, then g, so a tie goes to the earlier channel); then h onto the wheel, a straight
+// line between each pair of anchors. A colour with no spread at all (d = 0) has no hue and gives 0;
+// a layer asks fxLogicOwn() first and never uses it there. Every product fits 16 bits unsigned.
+inline uint8_t fxLogicHue(const ContractRGB& c) {
+  const uint8_t r = c.r, g = c.g, b = c.b;
+  const uint8_t mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+  const uint8_t mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+  const uint16_t d = (uint16_t)(mx - mn);
+  if (d == 0) return 0;
+  uint16_t h;                                                       // the plain hue, 0..255
+  if (r == mx)      h = (g >= b) ? (uint16_t)((43u * (uint16_t)(g - b)) / d) : (uint16_t)((256u - (43u * (uint16_t)(b - g)) / d) & 255u);
+  else if (g == mx) h = (b >= r) ? (uint16_t)(85u + (43u * (uint16_t)(b - r)) / d) : (uint16_t)(85u - (43u * (uint16_t)(r - b)) / d);
+  else              h = (r >= g) ? (uint16_t)(171u + (43u * (uint16_t)(r - g)) / d) : (uint16_t)(171u - (43u * (uint16_t)(g - r)) / d);
+  // anchors (h -> hue): 0->0, 21->32, 43->64, 85->96, 128->128, 171->160, 192->192, 234->224, 256->256
+  uint16_t x0, x1, y0;
+  if (h < 21)       { x0 = 0;   x1 = 21;  y0 = 0;   }
+  else if (h < 43)  { x0 = 21;  x1 = 43;  y0 = 32;  }
+  else if (h < 85)  { x0 = 43;  x1 = 85;  y0 = 64;  }
+  else if (h < 128) { x0 = 85;  x1 = 128; y0 = 96;  }
+  else if (h < 171) { x0 = 128; x1 = 171; y0 = 128; }
+  else if (h < 192) { x0 = 171; x1 = 192; y0 = 160; }
+  else if (h < 234) { x0 = 192; x1 = 234; y0 = 192; }
+  else              { x0 = 234; x1 = 256; y0 = 224; }
+  return (uint8_t)(y0 + ((h - x0) * 32u) / (x1 - x0));              // every segment rises by 32
+}
+// N2: one of the engine's two pace settings (fade or delay) for s=, from the display's own value
+// x. s=128 is x; lower is slower, down to four times x at s=0; higher is faster, down to half of x
+// at s=255, but never under `floor` (FX_LOGIC_FADE_MIN or FX_LOGIC_DELAY_MIN), and an x already
+// under the floor stays x. x * k needs 32 bits (255 * 1024).
+inline uint8_t fxLogicPace(uint8_t s, uint8_t x, uint8_t floor) {
+  const uint32_t k = (s >= 128) ? 256u - (uint32_t)(s - 128u) : 256u + (uint32_t)(128u - s) * 6u;   // 129 .. 256 .. 1024
+  const uint32_t y = ((uint32_t)x * k) >> 8;
+  if (s <= 128) return (uint8_t)(y > 255u ? 255u : y);
+  const uint8_t least = x < floor ? x : floor;
+  return (uint8_t)(y < least ? least : y);
+}
+// N3, and section 9 (core revision CA2): THE PUMP ON A logic LOOK RISES AT MOST EVERY 400 ms, not
+// every 340. The level reaches an LED at that LED's next step (up to fade + 1 frames later, and
+// later still for an LED in a key pause), so the light rises 0 to about 130 ms after the beat,
+// by a different amount each beat. With rises 341 ms apart (S2's floor at 176 BPM) that put a
+// part of the display, and at the owner's full brightness the whole of it by the gate's own
+// count, four times into one second: on every display size, at every pace, the stock one
+// included (test/host/test_logic_regions.cpp, a model of the walk; DROIDNET_FORK.md has its
+// table). No floor of the pace can help, so the pump has one of its own. In the model 360 ms
+// failed and 380 ms passed; 400 passed every case run, owners' fades up to 40 and delays up to
+// 100 included, and leaves room for a frame drawn late.
+// fxLogicPumpFires() is beatAccentFires() with the rate floor taken at FX_LOGIC_PUMP_MIN_MS. It
+// never fires on a beat S2 would not, and in the contract's tempo range (30..300) it differs
+// only where a group is one beat (am=2 with no an=, am=3, a downbeat mode with bpb=1) between
+// 151 and 176 BPM: there it keeps every other beat. A logics layer pumps logic with
+// fxLogicPumpAmount() where every other look uses beatAccentAmount().
+static const uint32_t FX_LOGIC_PUMP_MIN_MS = 400u;
+inline bool fxLogicPumpFires(uint8_t am, const BeatPos& bp, const BeatClock& bc, uint8_t every = 0) {
+  if (!beatAccentFires(am, bp, bc, every)) return false;
+  int32_t group;                                          // the group of n beats this beat begins, as beatAccentFires() picks it
+  uint8_t n;
+  if (am == 2) { n = accentEveryN(every); group = _floorDiv(bp.beatIndex - (int32_t)accentEveryPhase(every), n); }
+  else if (am == 3) { n = 1; group = bp.beatIndex; }
+  else { n = bc.bpb ? bc.bpb : 4; group = _floorDiv(bp.beatIndex, n); }
+  const uint32_t span = 60000UL * n;                      // ms * bpm in one group
+  const uint32_t k = (FX_LOGIC_PUMP_MIN_MS * bc.bpm + span - 1UL) / span;
+  return k <= 1 || (group % (int32_t)k) == 0;
+}
+inline uint8_t fxLogicPumpAmount(uint8_t am, const BeatPos& bp, uint8_t beatMod, uint32_t sectionProgress16,
+                                 const BeatClock& bc, uint8_t every = 0) {
+  return fxLogicPumpFires(am, bp, bc, every) ? beatAccentAmount(am, bp, beatMod, sectionProgress16, bc, every) : 0;
+}
+// projector. The stock colour projector re-rolls all seven pixels of a jewel, from a row of ten
+// slots of one colour, every 50 to 149 ms. Through the contract it is paced for the gate (N7):
+//   * a step comes every FX_PROJECTOR_STEP_MIN_MS .. FX_PROJECTOR_STEP_MAX_MS, uniformly, and draws
+//     a candidate slot for each pixel, uniformly from the ten;
+//   * a BRIGHTENING step gives every pixel its candidate. It is allowed when FX_PROJECTOR_BRIGHT_MS
+//     have passed since the look's last brightening step and since the unit's level last went up
+//     (levelMs, the window verb L, verb B and b= share), and it takes that window (levelMs = now);
+//   * any other step CRUMBLES: a pixel takes its candidate only when fxProjectorTake() says so.
+// No pixel gets brighter but at a brightening step or a raise of the level, and those share one
+// 340 ms window (N9). The pump does not reach the look (N8): am= and m= are kept and ignored.
+static const uint32_t FX_PROJECTOR_STEP_MIN_MS = 50u;
+static const uint32_t FX_PROJECTOR_STEP_MAX_MS = 149u;
+static const uint32_t FX_PROJECTOR_BRIGHT_MS = 2u * STROBE_MIN_STATE_MS;
+// N6: slot 0..9 of a colour's row. 0..2 the colour; 3 white; 4, 5, 6 the colour mixed toward white
+// (each channel x + (255 - x) * w / 255, w = 85, 128, 170); 7..9 dark, and so is any slot past 9.
+// Black (and so a line with no c=) is 0000ff, the colour of the Leia row.
+inline ContractRGB fxProjectorSlot(const ContractRGB& c, uint8_t slot) {
+  ContractRGB o = c;
+  if (!c.r && !c.g && !c.b) { o.r = 0; o.g = 0; o.b = 255; }
+  if (slot <= 2) return o;
+  if (slot == 3) { o.r = o.g = o.b = 255; return o; }
+  if (slot <= 6) {
+    const uint16_t w = slot == 4 ? 85u : slot == 5 ? 128u : 170u;
+    o.r = (uint8_t)(o.r + ((uint16_t)(255u - o.r) * w) / 255u);       // (255 - x) * w passes 32,767: unsigned 16 bits
+    o.g = (uint8_t)(o.g + ((uint16_t)(255u - o.g) * w) / 255u);
+    o.b = (uint8_t)(o.b + ((uint16_t)(255u - o.b) * w) / 255u);
+    return o;
+  }
+  o.r = o.g = o.b = 0;
+  return o;
+}
+// N7: may a crumbling step put `cand` where `cur` is? Only when it is no brighter by either of the
+// gate's measures: the brightest channel, and the luminance (contractLuminance).
+inline bool fxProjectorTake(const ContractRGB& cur, const ContractRGB& cand) {
+  const uint8_t a = cur.r > cur.g ? (cur.r > cur.b ? cur.r : cur.b) : (cur.g > cur.b ? cur.g : cur.b);
+  const uint8_t b = cand.r > cand.g ? (cand.r > cand.b ? cand.r : cand.b) : (cand.g > cand.b ? cand.g : cand.b);
+  return b <= a && contractLuminance(cand.r, cand.g, cand.b) <= contractLuminance(cur.r, cur.g, cur.b);
+}

@@ -3,11 +3,11 @@
 // the RSeries and FlthyHPs forks) builds and paces the line; this file only says what the board
 // is and where the line goes:
 //
-//     @WDP1 {"type":"PSI Front","fw":"<commit>","caps":["droidnet.contract","contract.1.3s"]}
+//     @WDP1 {"type":"PSI Front","fw":"<commit>","caps":["droidnet.contract","contract.1.4s"]}
 //
-// The second tag says which contract the board speaks. "contract.1.3s" is v1.3 with six of its
+// The second tag says which contract the board speaks. "contract.1.4s" is v1.4 with six of its
 // looks drawn as stand-ins (PSI_NO_STRIP_LOOKS), which is how R1 is built; a build with all of
-// them says "contract.1.3". A host can tell the two apart without a query. A build without the
+// them says "contract.1.4". A host can tell the two apart without a query. A build without the
 // contract layer (PSI_NO_CONTRACT: the PSIPro-i2c environment) sends no caps at all, so nothing
 // takes it for a board that can run a show:
 //
@@ -43,9 +43,9 @@
 #define WDP_FORK_LINE_TAIL  "\"}\n"                  // the line ends after fw: no caps
 #else
 #ifdef PSI_NO_STRIP_LOOKS
-#define WDP_FORK_CONTRACT   "contract.1.3s"
+#define WDP_FORK_CONTRACT   "contract.1.4s"
 #else
-#define WDP_FORK_CONTRACT   "contract.1.3"
+#define WDP_FORK_CONTRACT   "contract.1.4"
 #endif
 #define WDP_FORK_CAPS       "droidnet.contract " WDP_FORK_CONTRACT
 // The same tags as the line spells them (the space becomes `","`), for sizing the buffer below.

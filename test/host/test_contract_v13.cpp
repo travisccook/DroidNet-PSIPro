@@ -587,10 +587,10 @@ static void test_score_verify() {
 static void test_query_reply() {
   char buf[CONTRACT_REPLY_MAX];
   struct { uint8_t route; char cls, unit; uint8_t cap, held, ok; uint16_t bpm; const char* want; } rows[] = {
-    {   0, 'L', 'F',  32,   5, 1, 120, ";S0!LFq:ver=1.3,rel=1,cap=32,n=5,ok=1,bpm=120\r" },
-    {   2, 'P', 'R',  12,   0, 0,   0, ";W2,;S0!PRq:ver=1.3,rel=1,cap=12,n=0,ok=0,bpm=0\r" },
-    {  99, 'H', 'T', 255, 255, 2, 300, ";W99,;S0!HTq:ver=1.3,rel=1,cap=255,n=255,ok=2,bpm=300\r" },   // the longest there is
-    { 200, 'L', 'F',   1,   1, 9, 5000, ";W99,;S0!LFq:ver=1.3,rel=1,cap=1,n=1,ok=2,bpm=999\r" },      // out-of-range inputs clamp
+    {   0, 'L', 'F',  32,   5, 1, 120, ";S0!LFq:ver=1.4,rel=2,cap=32,n=5,ok=1,bpm=120\r" },
+    {   2, 'P', 'R',  12,   0, 0,   0, ";W2,;S0!PRq:ver=1.4,rel=2,cap=12,n=0,ok=0,bpm=0\r" },
+    {  99, 'H', 'T', 255, 255, 2, 300, ";W99,;S0!HTq:ver=1.4,rel=2,cap=255,n=255,ok=2,bpm=300\r" },   // the longest there is
+    { 200, 'L', 'F',   1,   1, 9, 5000, ";W99,;S0!LFq:ver=1.4,rel=2,cap=1,n=1,ok=2,bpm=999\r" },      // out-of-range inputs clamp
   };
   for (size_t i = 0; i < sizeof rows / sizeof rows[0]; i++) {
     const uint8_t n = contractFormatQuery(buf, sizeof buf, rows[i].route, rows[i].cls, rows[i].unit,
@@ -610,7 +610,7 @@ static void test_query_reply() {
   CHECK(contractParse("*FQ:r=0", p) && !contractQueryAnswerable(p));
   CHECK(contractParse("**Q", p) && !contractQueryAnswerable(p));               // (it is still a valid line: a keepalive)
   CHECK(contractParse("LFA:r=0", p) && !contractQueryAnswerable(p));
-  CHECK(!contractParse("LFq:ver=1.3,rel=1,cap=32,n=5,ok=1,bpm=120", p));       // a reply is never a command
+  CHECK(!contractParse("LFq:ver=1.4,rel=2,cap=32,n=5,ok=1,bpm=120", p));       // a reply is never a command
 }
 
 // ---- S8 and section 12: one timing definition for flash / pulse / scan ----
@@ -1281,7 +1281,165 @@ static void test_level_hold() {
   CHECK(!contractLevelDue(x, 1339) && contractLevelDue(x, 1340) && x.level == 255);
 }
 
+// ---- CA2 (contract v1.4): the three ids, and the math of logic and projector ----
+// The expected values were worked out from the spec's own words (v1.4 sections 5 and 6) by a
+// model written separately from the core, not by running it.
+static ContractRGB rgbOf(uint32_t x) { ContractRGB c = { (uint8_t)(x >> 16), (uint8_t)(x >> 8), (uint8_t)x }; return c; }
+static uint32_t rgbNum(const ContractRGB& c) { return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b; }
+static void test_ca2() {
+  // the version, the release and the query reply
+  CHECK(strcmp(CONTRACT_VERSION, "1.4") == 0 && CONTRACT_RELEASE == 2);
+  { char buf[CONTRACT_REPLY_MAX];
+    const uint8_t n = contractFormatQuery(buf, sizeof buf, 0, 'L', 'F', 32, 5, 1, 120);
+    const char* want = ";S0!LFq:ver=1.4,rel=2,cap=32,n=5,ok=1,bpm=120\r";
+    CHECK(n == strlen(want) && memcmp(buf, want, n) == 0); }
+  // the ids: appended, so no stored value moved, and their names parse
+  CHECK(CE_LOGIC == 16 && CE_PROJECTOR == 17 && CE_VU == 18 && CE_TWINKLE == 15);
+  static const struct { const char* name; ContractEffect e; } ids[] = { { "logic", CE_LOGIC }, { "projector", CE_PROJECTOR }, { "vu", CE_VU } };
+  for (size_t i = 0; i < 3; i++) {
+    int nc = 7;
+    CHECK(_effectFromName(ids[i].name, strlen(ids[i].name), nc) == ids[i].e && nc == -1);
+    char l[48];
+    snprintf(l, sizeof l, "LFA:i=%s", ids[i].name);      CHECK(P(l).hasEffect && P(l).effect == ids[i].e);
+    snprintf(l, sizeof l, "LFA:i=%sx", ids[i].name);     CHECK(!P(l).hasEffect);
+    snprintf(l, sizeof l, "LFA:i=%.*s", (int)strlen(ids[i].name) - 1, ids[i].name);   CHECK(!P(l).hasEffect);
+    // none of the three is an accent: ae= naming one is no accent (v1.4 section 4)
+    CHECK(!accentEffectAllowed(ids[i].e));
+    snprintf(l, sizeof l, "LFA:ae=%s", ids[i].name);     CHECK(!P(l).hasAccentFx && P(l).accentFx == CE_NONE);
+    snprintf(l, sizeof l, "LFA:i=%s,ae=flash", ids[i].name);
+    CHECK(P(l).effect == ids[i].e && P(l).hasAccentFx && P(l).accentFx == CE_FLASH);     // a base look under an accent
+  }
+  CHECK(!P("LFA:i=Logic").hasEffect && !P("LFA:i=VU").hasEffect && !P("LFA:i=v").hasEffect && !P("LFA:i=projecto").hasEffect);
+  { const ContractParams a = P("LFA:i=logic,c=116530,s=200,b=180,m=255,am=2,an=2,ap=1,at=16");
+    CHECK(a.hasEffect && a.effect == CE_LOGIC && a.hasColor && a.color.g == 0x65 && a.speed == 200 && a.bright == 180);
+    CHECK(a.beatMod == 255 && a.accentMode == 2 && a.an == 2 && a.ap == 1 && a.atBeat == 16);
+    const ContractParams v = P("PFA:i=vu,am=1,m=200");   CHECK(v.effect == CE_VU && v.accentMode == 1 && v.beatMod == 200);
+    const ContractParams h = P("HFA:i=projector,c=ff0000,b=90");   CHECK(h.effect == CE_PROJECTOR && h.color.r == 255 && h.bright == 90); }
+  // a scored line keeps its id (the score entry has no field more)
+  { ParsedContract p; CHECK(contractParse("LFA:i=projector,at=4", p) && p.params.hasAt && p.params.effect == CE_PROJECTOR); }
+
+  // ---- N1: fxLogicOwn. A colour with no hue: its channels within 31 of each other ----
+  CHECK(FX_LOGIC_GREY == 32 && FX_LOGIC_HUE_BASE == 170);
+  CHECK(fxLogicOwn(rgbOf(0x000000)) && fxLogicOwn(rgbOf(0xffffff)) && fxLogicOwn(rgbOf(0x808080)) && fxLogicOwn(rgbOf(0x1f0000)));
+  CHECK(fxLogicOwn(rgbOf(0x646483)) && !fxLogicOwn(rgbOf(0x646484)));     // 31 apart: own; 32: a hue
+  CHECK(fxLogicOwn(rgbOf(0x836464)) && !fxLogicOwn(rgbOf(0x846464)));
+  CHECK(fxLogicOwn(rgbOf(0x648364)) && !fxLogicOwn(rgbOf(0x648464)));
+  CHECK(fxLogicOwn(rgbOf(0xe0ffff)) && !fxLogicOwn(rgbOf(0xdfffff)));     // the low channel decides too
+  CHECK(!fxLogicOwn(rgbOf(0x200000)) && !fxLogicOwn(rgbOf(0x116530)) && !fxLogicOwn(rgbOf(0x0000ff)));
+  // ---- N1: fxLogicHue. The plain hue, then onto FastLED's rainbow wheel: every anchor and one value each side ----
+  static const struct { uint32_t c; int h, hue; } hues[] = {
+    { 0xff0006, 255, 254 }, { 0xff0000,   0,   0 }, { 0xff0600,   1,   1 },
+    { 0xff7700,  20,  30 }, { 0xff7d00,  21,  32 }, { 0xff8300,  22,  33 },
+    { 0xfffa00,  42,  62 }, { 0xfaff00,  43,  64 }, { 0xf4ff00,  44,  64 },
+    { 0x06ff00,  84,  95 }, { 0x00ff00,  85,  96 }, { 0x00ff06,  86,  96 },
+    { 0x00fffa, 127, 127 }, { 0x00ffff, 128, 128 }, { 0x00faff, 129, 128 },
+    { 0x0006ff, 170, 159 }, { 0x0000ff, 171, 160 }, { 0x0600ff, 172, 161 },
+    { 0x7700ff, 191, 190 }, { 0x7d00ff, 192, 192 }, { 0x8300ff, 193, 192 },
+    { 0xff0089, 233, 223 }, { 0xff0083, 234, 224 }, { 0xff007d, 235, 225 },
+    { 0xffff00,  43,  64 },                      // red and green tie: r is tested first
+    { 0x00ffff, 128, 128 },                      // green and blue tie: g before b
+    { 0xff00ff, 213, 208 }, { 0x116530, 100, 107 }, { 0xc86496, 235, 225 },
+    { 0x202000,  43,  64 }, { 0x000020, 171, 160 } };   // dim colours: the hue alone (d = 32)
+  for (size_t i = 0; i < sizeof hues / sizeof hues[0]; i++) {
+    const uint8_t got = fxLogicHue(rgbOf(hues[i].c));
+    if (got != hues[i].hue) printf("     fxLogicHue(%06x) = %d, want %d (plain hue %d)\n", (unsigned)hues[i].c, got, hues[i].hue, hues[i].h);
+    CHECK(got == hues[i].hue);
+  }
+  CHECK(fxLogicHue(rgbOf(0x000000)) == 0 && fxLogicHue(rgbOf(0x808080)) == 0);   // no hue at all: 0 (never a division by 0)
+  // every colour: a hue, and the wheel never runs backwards along one sector
+  for (int g = 0; g < 256; g++) CHECK(fxLogicHue(rgbOf(0xff0000u | ((uint32_t)g << 8))) <= 64);
+  { int was = -1; for (int g = 0; g < 256; g++) { const int h = fxLogicHue(rgbOf(0xff0000u | ((uint32_t)g << 8))); CHECK(h >= was); was = h; } }
+  { int was = -1; for (int r = 0; r < 255; r++) { const int h = fxLogicHue(rgbOf(0x0000ffu | ((uint32_t)r << 16))); CHECK(h >= was && h >= 160 && h <= 208); was = h; } }
+  // ---- N2: fxLogicPace. s against the display's own fade (floor 1) and delay (floor 10) ----
+  static const uint8_t kS[5] = { 0, 127, 128, 129, 255 }, kFade[4] = { 0, 1, 3, 255 }, kDelay[4] = { 0, 10, 40, 255 };
+  static const uint8_t wantFade[5][4]  = { { 0, 4, 12, 255 }, { 0, 1, 3, 255 }, { 0, 1, 3, 255 }, { 0, 1, 2, 254 }, { 0, 1, 1, 128 } };
+  static const uint8_t wantDelay[5][4] = { { 0, 40, 160, 255 }, { 0, 10, 40, 255 }, { 0, 10, 40, 255 }, { 0, 10, 39, 254 }, { 0, 10, 20, 128 } };
+  for (int i = 0; i < 5; i++) for (int j = 0; j < 4; j++) {
+    CHECK(fxLogicPace(kS[i], kFade[j], 1) == wantFade[i][j]);
+    CHECK(fxLogicPace(kS[i], kDelay[j], 10) == wantDelay[i][j]);
+  }
+  for (int s = 0; s < 256; s++) for (int x = 0; x < 256; x++) {
+    const uint8_t y = fxLogicPace((uint8_t)s, (uint8_t)x, 10);
+    if (s == 128) CHECK(y == x);                                         // 128: the display's own
+    if (s < 128) CHECK(y >= x && (uint32_t)y <= 4u * (uint32_t)x);       // slower, at most four times
+    if (s > 128) CHECK(y <= x && (y >= 10 || y == x) && 2u * (uint32_t)y + 1u >= (uint32_t)x);   // faster, at most twice; never under the floor unless it was
+    if (s > 0) CHECK(fxLogicPace((uint8_t)(s - 1), (uint8_t)x, 10) >= y);   // a higher s is never slower
+  }
+  CHECK(FX_LOGIC_FADE_MIN >= 1 && FX_LOGIC_DELAY_MIN >= 10);
+  // ---- N3 and section 9 (CA2): logic's pump. Its rises are 400 ms apart at the least, not 340 ----
+  // The level reaches each LED at its next step, up to a step late, so rises 341 ms apart lit a
+  // part of the display four times in a second (test_logic_regions.cpp). The pump on a logic look
+  // fires on beatAccentFires()'s beats, thinned where they are closer than FX_LOGIC_PUMP_MIN_MS.
+  CHECK(FX_LOGIC_PUMP_MIN_MS == 400u);
+  for (int bpm = CONTRACT_BPM_MIN; bpm <= CONTRACT_BPM_MAX; bpm++) for (int bpb : { 1, 3, 4, 12 }) for (int am = 0; am <= 5; am++)
+    for (int an : { 1, 2, 3, 16 }) {
+      if (am != 2 && an != 1) continue;
+      BeatClock bc; bc.running = true; bc.bpm = (uint16_t)bpm; bc.bpb = (uint8_t)bpb;
+      const uint8_t every = accentEveryPack((uint8_t)an, an > 1 ? 1 : 0);
+      long last = -1000000; int fired = 0, thinned = 0;
+      for (int beat = -20; beat < 200; beat++) {
+        BeatPos bp; bp.beatIndex = beat; bp.barPos = (uint8_t)(((beat % bpb) + bpb) % bpb); bp.phase16 = 0;
+        const bool s2 = beatAccentFires((uint8_t)am, bp, bc, every), lg = fxLogicPumpFires((uint8_t)am, bp, bc, every);
+        CHECK(!lg || s2);                                                  // never a beat S2 would not fire
+        if (s2 && !lg) thinned++;
+        if (lg) {
+          const long ms = (long)beat * 60000L / bpm;
+          if (fired) CHECK(ms - last >= (long)FX_LOGIC_PUMP_MIN_MS - 1); // (a beat begins at a whole ms at or after its instant)
+          last = ms; fired++;
+        }
+        for (int m : { 0, 255 }) {
+          BeatPos q = bp; q.phase16 = (uint16_t)(beat * 2731);
+          CHECK(fxLogicPumpAmount((uint8_t)am, q, (uint8_t)m, 40000u, bc, every) == (lg ? beatAccentAmount((uint8_t)am, q, (uint8_t)m, 40000u, bc, every) : 0));
+        }
+      }
+      // it thins only every-beat pumps between 151 and 176 BPM (one beat 341 to 397 ms): there it
+      // keeps every other beat; everywhere else it is S2's own choice
+      const bool oneBeat = (am == 2 && an == 1) || am == 3 || ((am == 1 || am == 4) && bpb == 1);
+      CHECK((thinned > 0) == (oneBeat && bpm >= 151 && bpm <= 176));
+      if (oneBeat && bpm >= 151 && bpm <= 176) CHECK(fired == 110);
+    }
+
+  // ---- N6: fxProjectorSlot. The ten slots for black, white, the six primaries and 116530 ----
+  static const struct { uint32_t c; uint32_t slot[10]; } rows[] = {
+    { 0x000000, { 0x0000ff, 0x0000ff, 0x0000ff, 0xffffff, 0x5555ff, 0x8080ff, 0xaaaaff, 0, 0, 0 } },   // no c=: the Leia row
+    { 0xffffff, { 0xffffff, 0xffffff, 0xffffff, 0xffffff, 0xffffff, 0xffffff, 0xffffff, 0, 0, 0 } },
+    { 0xff0000, { 0xff0000, 0xff0000, 0xff0000, 0xffffff, 0xff5555, 0xff8080, 0xffaaaa, 0, 0, 0 } },
+    { 0x00ff00, { 0x00ff00, 0x00ff00, 0x00ff00, 0xffffff, 0x55ff55, 0x80ff80, 0xaaffaa, 0, 0, 0 } },
+    { 0x0000ff, { 0x0000ff, 0x0000ff, 0x0000ff, 0xffffff, 0x5555ff, 0x8080ff, 0xaaaaff, 0, 0, 0 } },
+    { 0x00ffff, { 0x00ffff, 0x00ffff, 0x00ffff, 0xffffff, 0x55ffff, 0x80ffff, 0xaaffff, 0, 0, 0 } },
+    { 0xff00ff, { 0xff00ff, 0xff00ff, 0xff00ff, 0xffffff, 0xff55ff, 0xff80ff, 0xffaaff, 0, 0, 0 } },
+    { 0xffff00, { 0xffff00, 0xffff00, 0xffff00, 0xffffff, 0xffff55, 0xffff80, 0xffffaa, 0, 0, 0 } },
+    { 0x116530, { 0x116530, 0x116530, 0x116530, 0xffffff, 0x609875, 0x88b297, 0xafcbba, 0, 0, 0 } } };
+  for (size_t i = 0; i < sizeof rows / sizeof rows[0]; i++) for (int k = 0; k < 10; k++) {
+    const uint32_t got = rgbNum(fxProjectorSlot(rgbOf(rows[i].c), (uint8_t)k));
+    if (got != rows[i].slot[k]) printf("     fxProjectorSlot(%06x, %d) = %06x, want %06x\n", (unsigned)rows[i].c, k, (unsigned)got, (unsigned)rows[i].slot[k]);
+    CHECK(got == rows[i].slot[k]);
+  }
+  for (int k = 10; k < 256; k++) CHECK(rgbNum(fxProjectorSlot(rgbOf(0x116530), (uint8_t)k)) == 0);   // past the row: dark
+  CHECK(FX_PROJECTOR_STEP_MIN_MS == 50 && FX_PROJECTOR_STEP_MAX_MS == 149 && FX_PROJECTOR_BRIGHT_MS == 2 * STROBE_MIN_STATE_MS);
+  // ---- N7: fxProjectorTake for every pair of slots of the blue row (row: from, column: to) ----
+  static const char* const kTake[10] = {
+    "1110000111", "1110000111", "1110000111", "1111111111", "1110100111",
+    "1110110111", "1110111111", "0000000111", "0000000111", "0000000111" };
+  for (int a = 0; a < 10; a++) for (int b = 0; b < 10; b++) {
+    const bool got = fxProjectorTake(fxProjectorSlot(rgbOf(0), (uint8_t)a), fxProjectorSlot(rgbOf(0), (uint8_t)b));
+    if (got != (kTake[a][b] == '1')) printf("     fxProjectorTake(slot %d, slot %d) = %d\n", a, b, got ? 1 : 0);
+    CHECK(got == (kTake[a][b] == '1'));
+  }
+  // by either measure: a colour that is brighter in one and darker in the other is not taken
+  CHECK(!fxProjectorTake(rgbOf(0x0000ff), rgbOf(0x008000)) && !fxProjectorTake(rgbOf(0x008000), rgbOf(0x0000ff)));
+  CHECK(fxProjectorTake(rgbOf(0x808080), rgbOf(0x808080)) && fxProjectorTake(rgbOf(0x808080), rgbOf(0)) && !fxProjectorTake(rgbOf(0), rgbOf(0x010000)));
+  // any pair of any rows: a taken candidate never lights a pixel by either measure
+  for (uint32_t c : { 0x000000u, 0xff0000u, 0x00ff00u, 0x116530u, 0xffffffu, 0x203040u })
+    for (int a = 0; a < 10; a++) for (int b = 0; b < 10; b++) {
+      const ContractRGB x = fxProjectorSlot(rgbOf(c), (uint8_t)a), y = fxProjectorSlot(rgbOf(c), (uint8_t)b);
+      const int mx = x.r > x.g ? (x.r > x.b ? x.r : x.b) : (x.g > x.b ? x.g : x.b), my = y.r > y.g ? (y.r > y.b ? y.r : y.b) : (y.g > y.b ? y.g : y.b);
+      CHECK(fxProjectorTake(x, y) == (my <= mx && contractLuminance(y.r, y.g, y.b) <= contractLuminance(x.r, x.g, x.b)));
+    }
+}
+
 int main() {
+  test_ca2();
   test_level_hold();
   test_integer_clock();
   test_field_gate();

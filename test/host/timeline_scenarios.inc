@@ -315,6 +315,27 @@ static void every_look_latches_frames() {
     else        CHECK(mostLit(a, b) > 0, "i=%s lit nothing", looks[k]);
   }
 }
+// Contract v1.4 (core CA2): the three new ids parse and draw their stand-ins in every build. logic
+// and projector are sparkle (the look this board has nearest them), vu keeps its own id and draws
+// as the meter until Task F5 gives it the pump, and none of them is an accent: a P naming one
+// overlays solid. (run.sh stage 6d holds them to sparkle and meter frame for frame.)
+static void v14_ids_draw_their_stand_ins() {
+  boot();
+  at(1000, "!P*A:i=logic,c=00ff00,s=200"); at(3000, "!P*A:i=projector,c=00ff00,s=200");
+  at(5000, "!P*A:i=vu,c=00ff00,s=200");
+  runTo(2000);
+  CHECK(g_u.effect == CE_SPARKLE, "i=logic draws sparkle here, effect %d", (int)g_u.effect);
+  CHECK(mostLit(1100, 1990) > 0 && between(1100, 1990).size() >= 5, "i=logic latches lit frames");
+  runTo(4000);
+  CHECK(g_u.effect == CE_SPARKLE, "i=projector draws sparkle here, effect %d", (int)g_u.effect);
+  CHECK(mostLit(3100, 3990) > 0, "i=projector lit nothing");
+  runTo(6000);
+  CHECK(g_u.effect == CE_VU, "i=vu keeps its id, effect %d", (int)g_u.effect);
+  CHECK(mostLit(5100, 5990) > 0 && between(5100, 5990).size() >= 4, "i=vu latches lit frames, as the meter does");
+  at(6500, "!P*P:i=vu,c=ffffff,d=300");
+  runTo(6600);
+  CHECK(g_u.pulseActive && g_u.pulseFx == CE_SOLID, "a P naming vu overlays solid, pulseFx %d", (int)g_u.pulseFx);
+}
 #ifndef PSI_NO_STRIP_LOOKS
 // The strip looks are drawn column by column from the core's own maths: a comet has a tail of
 // falling brightness, a wipe grows, a gradient spreads hues, a colour cycle is one colour that moves.
@@ -511,7 +532,7 @@ static void a_verified_load_plays_and_reports_ok() {
   loadTwo((uint16_t)(crc16(kL0) ^ crc16(kL1)), 2);
   runTo(3000);
   CHECK(shown(2900).allAre(GREEN), "a good load plays");
-  char want[64]; snprintf(want, sizeof want, ";S0!PFq:ver=1.3,rel=1,cap=%d,n=2,ok=1,bpm=0\r", (int)PSI_SCORE_CAP);
+  char want[64]; snprintf(want, sizeof want, ";S0!PFq:ver=1.4,rel=2,cap=%d,n=2,ok=1,bpm=0\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(Serial1.txLog, want) != nullptr, "Q:r=0 after a good V (tx: %s)", Serial1.txLog);
 }
 // n and k do not depend on a line delivered twice (a mesh retry) or on the order of arrival.
@@ -586,13 +607,13 @@ static void the_query_reply_is_byte_exact() {
   runTo(5000);
   const char* tx = Serial1.txLog;
   char want[80];
-  snprintf(want, sizeof want, ";S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
+  snprintf(want, sizeof want, ";S0!PFq:ver=1.4,rel=2,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(tx, want) != nullptr, "r=0: straight to the Pi's own WCB (tx: %s)", tx);
-  snprintf(want, sizeof want, ";W7,;S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
+  snprintf(want, sizeof want, ";W7,;S0!PFq:ver=1.4,rel=2,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(tx, want) != nullptr, "r=7: by way of WCB 7 (tx: %s)", tx);
-  snprintf(want, sizeof want, ";W99,;S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
+  snprintf(want, sizeof want, ";W99,;S0!PFq:ver=1.4,rel=2,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(tx, want) != nullptr, "r=99: the longest route (tx: %s)", tx);
-  snprintf(want, sizeof want, ";S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=0\r", (int)PSI_SCORE_CAP);
+  snprintf(want, sizeof want, ";S0!PFq:ver=1.4,rel=2,cap=%d,n=0,ok=0,bpm=0\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(tx, want) != nullptr, "a held clock reads 0 (tx: %s)", tx);
   CHECK(countOf(tx, "q:ver=") == 4, "four queries, four replies: saw %u", countOf(tx, "q:ver="));
 }
@@ -1737,6 +1758,7 @@ static const Scenario kScenarios[] = {
   {"an_a_with_no_look_is_solid", an_a_with_no_look_is_solid},
   {"a_hold_freezes_the_show", a_hold_freezes_the_show},
   {"every_look_latches_frames", every_look_latches_frames},
+  {"v14_ids_draw_their_stand_ins", v14_ids_draw_their_stand_ins},
 #ifndef PSI_NO_STRIP_LOOKS
   {"strip_looks_draw_their_shapes", strip_looks_draw_their_shapes},
   {"the_colour_scaler_is_exact", the_colour_scaler_is_exact},
