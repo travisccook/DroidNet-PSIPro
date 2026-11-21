@@ -270,7 +270,8 @@ echo "[6d] the stand-in looks"
 # R1 is built without the six strip and hue looks (PSI_NO_STRIP_LOOKS, platformio.ini). A line
 # naming one must draw the nearest look the build has, frame for frame: comet, chase and wipe are
 # scan, twinkle is sparkle, gradient and colorcycle are solid in c=. Contract v1.4's three ids (core
-# CA2): logic and projector are sparkle, and vu is meter until Task F5 gives it the pump.
+# CA2): logic and projector are sparkle, and vu not pumped is meter (pumped, the beat moves its
+# level: stage 6c's a_pumped_vu_* scenarios).
 # (The golden binary, built above, is that build.)
 frames() { python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); sys.stdout.buffer.write(d[d.index(b"\nFRAMES\n"):])' "$1"; }
 standin() {  # <look named on the wire> <look drawn> [committed golden of the look drawn]
@@ -458,7 +459,8 @@ if [ -n "$PIO" ] && [ -x "$SIMAVR" ]; then
   # Section 11 (a 400-byte burst with no gap at 9600 baud loses no line): nothing reads the port
   # while a pass of loop() runs, and the 64-byte RX ring holds 66 ms of such a burst. The longest
   # pass in any look must stay under 20 ms.
-  python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 300 --max-pass-us 20000
+  # (14 looks: v1.4's vu pumped at 120 BPM, redrawn every pass, is the fourteenth.)
+  python3 ../simavr/check_millis.py "$T/millis.txt" --limit-ppm 300 --max-pass-us 20000 --looks 14
   # The same on the PSIPro-i2c build (the I2C intake, no contract layer): ten native modes.
   SIMENV=millis_i2c simrun millis 300 "$T/millis_i2c.txt"
   python3 ../simavr/check_millis.py "$T/millis_i2c.txt" --limit-ppm 300 --max-pass-us 20000 --looks 10

@@ -316,9 +316,9 @@ static void every_look_latches_frames() {
   }
 }
 // Contract v1.4 (core CA2): the three new ids parse and draw their stand-ins in every build. logic
-// and projector are sparkle (the look this board has nearest them), vu keeps its own id and draws
-// as the meter until Task F5 gives it the pump, and none of them is an accent: a P naming one
-// overlays solid. (run.sh stage 6d holds them to sparkle and meter frame for frame.)
+// and projector are sparkle (the look this board has nearest them), vu keeps its own id and, not
+// pumped, draws as the meter (pumped: the scenarios of Task F5, below), and none of them is an
+// accent: a P naming one overlays solid. (run.sh stage 6d holds them to sparkle and meter frame for frame.)
 static void v14_ids_draw_their_stand_ins() {
   boot();
   at(1000, "!P*A:i=logic,c=00ff00,s=200"); at(3000, "!P*A:i=projector,c=00ff00,s=200");
@@ -1700,6 +1700,193 @@ static void a_bpm_that_is_not_a_number_is_ignored() {
   CHECK(shown(3000).allAre(MAGENTA) && shown(3200).allAre(CYAN), "the clock ran on: section 2 starts at 3100 as seeded");
 }
 
+// ---- v1.4 N10 to N12 (Task F5): vu, the meter the beat pump moves ---------------------------------
+// While the unit is pumped (the clock runs, am= and m= are not 0) the pump moves the meter's LEVEL,
+// envBright(255, m, amount), through the core's level hold, and the brightness stays at b=. Not
+// pumped, vu is meter. Each row of the panel (0 the top, 5 the bottom: VUMeter() darkens rows
+// 0 to level[c] - 1) is lit when half its LEDs are on at a scale of 100 or more, dark when a tenth
+// or fewer are on or the scale is 0; an onset is dark to lit. No row may light more than three
+// times in any second, nor twice inside 340 ms (v1.4 section 9).
+static void rowOnsets(uint32_t from, uint32_t to, std::vector<uint32_t> on[LEDS_PER_COLUMN]) {
+  bool lit[LEDS_PER_COLUMN];
+  for (int r = 0; r < LEDS_PER_COLUMN; r++) lit[r] = true;     // a row lit before `from` is not an onset
+  for (const Frame& f : between(from, to))
+    for (int r = 0; r < LEDS_PER_COLUMN; r++) {
+      unsigned n = 0, onLeds = 0;
+      for (int c = 0; c < COLUMNS; c++) {
+        const int led = psiLed((uint8_t)c, (uint8_t)r);
+        if (led < 0) continue;
+        n++; if (f.px[led].r | f.px[led].g | f.px[led].b) onLeds++;
+      }
+      const bool dark = f.scale == 0 || onLeds * 10 <= n, bright = f.scale >= 100 && onLeds * 2 >= n;
+      if (!lit[r] && bright) { on[r].push_back(f.t); lit[r] = true; } else if (lit[r] && dark) lit[r] = false;
+    }
+}
+static unsigned worstSecond(const std::vector<uint32_t>& on) {
+  unsigned most = 0;
+  for (size_t a = 0; a < on.size(); a++) {
+    unsigned n = 0;
+    for (size_t b = a; b < on.size() && on[b] - on[a] < 1000; b++) n++;
+    if (n > most) most = n;
+  }
+  return most;
+}
+static uint32_t closestTwo(const std::vector<uint32_t>& on) {
+  uint32_t g = 0xFFFFFFFFu;
+  for (size_t k = 1; k < on.size(); k++) if (on[k] - on[k - 1] < g) g = on[k] - on[k - 1];
+  return g;
+}
+// The rows of [from, to]: none lights more than three times a second or twice inside 340 ms, and
+// row `follow` (the bars' middle unless a scenario says) lights at least `least` times.
+static void rowsKeepTheGate(const char* what, uint32_t from, uint32_t to, int follow, unsigned least) {
+  std::vector<uint32_t> on[LEDS_PER_COLUMN];
+  rowOnsets(from, to, on);
+  for (int r = 0; r < LEDS_PER_COLUMN; r++) {
+    printf("  %s: row %d lit %u times, at most %u in a second, the closest two %u ms apart\n", what, r,
+           (unsigned)on[r].size(), worstSecond(on[r]), on[r].size() > 1 ? closestTwo(on[r]) : 0u);
+    CHECK(worstSecond(on[r]) <= 3, "%s: row %d lit %u times in one second", what, r, worstSecond(on[r]));
+    CHECK(on[r].size() < 2 || closestTwo(on[r]) >= 340, "%s: row %d lit twice %u ms apart", what, r, closestTwo(on[r]));
+  }
+  CHECK(on[follow].size() >= least, "%s: row %d follows the beat: lit %u times, expected %u or more", what, follow,
+        (unsigned)on[follow].size(), least);
+}
+// The brightness of every lit frame in [a, b] (the pump moves the level, not the brightness).
+static bool everyLitFrameAt(uint32_t a, uint32_t b, uint8_t scale) {
+  for (const Frame& f : between(a, b)) if (f.lit && f.scale != scale) return false;
+  return true;
+}
+// A pumped vu at each tempo of the list: the owner's brightness 200 (the ceiling), b=255, m=255,
+// redrawn every pass (s=255). 30 BPM: a beat every 2,000 ms; 120: 500; 176: 341, every beat; 177:
+// 339, under S2's 340 ms floor, so every second beat; 300: 200, every second beat (400 ms).
+// The middle of the bars (row 3, a level of 128 or more) lights on two beats in three or more,
+// except at 176 BPM: there the beats are 341 ms apart and the level's window 340 ms, so a beat's
+// rise is often taken a pass or two after the beat (the first pass 340 ms after the last rise),
+// when the level has fallen. The bars still rise on the beat, lower: the bottom row (a level of 43
+// or more) lights on half the beats or more.
+static void vuAtTempo(int bpm) {
+  boot(0x00, 0x01, 200);
+  char c[48]; snprintf(c, sizeof c, "!**C:bpm=%d,bpb=4,beat=0", bpm);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=vu,c=ffffff,s=255,am=2,m=255"); at(1500, c);
+  runTo(13600);
+  // the beats in the 12 s measured, as the pump fires on them
+  const unsigned beats = bpm == 30 ? 6 : bpm == 120 ? 24 : bpm == 176 ? 35 : bpm == 177 ? 17 : 30;
+  char what[32]; snprintf(what, sizeof what, "vu at %d BPM", bpm);
+  CHECK(g_u.effect == CE_VU, "%s: the look is vu, effect %d", what, (int)g_u.effect);
+  if (bpm == 176) rowsKeepTheGate(what, 1600, 13600, 5, beats / 2);
+  else            rowsKeepTheGate(what, 1600, 13600, 3, beats * 2 / 3);
+  CHECK(everyLitFrameAt(1600, 13600, 200), "%s: the pump moved the brightness: the look's level is b= (200)", what);
+}
+static void a_pumped_vu_at_30_bpm()  { vuAtTempo(30); }
+static void a_pumped_vu_at_120_bpm() { vuAtTempo(120); }
+static void a_pumped_vu_at_176_bpm() { vuAtTempo(176); }
+static void a_pumped_vu_at_177_bpm() { vuAtTempo(177); }
+static void a_pumped_vu_at_300_bpm() { vuAtTempo(300); }
+// N10: the level is 255 - m between beats and rides up on each beat. m=200 at 30 BPM: the pump's
+// amount is at most 200, so on a beat the level is envBright(255, 200, 200) = 211 (four rows of six
+// lit: VUMeter() darkens 6 - 211 * 6 / 255 = 2), and late in the beat it rests at 255 - 200 = 55
+// (one row). Read in the middle column, which has all six rows.
+static unsigned rowsLitAt(uint32_t t) {
+  const Frame& f = shown(t);
+  unsigned n = 0;
+  for (int r = 0; r < LEDS_PER_COLUMN; r++) { const int led = psiLed(5, (uint8_t)r); if (led >= 0 && (f.px[led].r | f.px[led].g | f.px[led].b)) n++; }
+  return n;
+}
+static void a_pumped_vu_rests_at_255_minus_m() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=vu,c=ffffff,s=255,am=2,m=200"); at(1500, "!**C:bpm=30,bpb=4,beat=0");
+  runTo(9600);
+  for (const uint32_t beat : {3500u, 5500u, 7500u}) {
+    printf("  the beat at %u: %u rows lit 60 ms after it, %u rows 1,900 ms after it\n", beat, rowsLitAt(beat + 60), rowsLitAt(beat + 1900));
+    CHECK(rowsLitAt(beat + 60) == 4, "on the beat at %u the bars ride up to 211 (four rows), saw %u rows", beat, rowsLitAt(beat + 60));
+    CHECK(rowsLitAt(beat + 1900) == 1, "late in the beat at %u the bars rest at 255 - m (one row), saw %u rows", beat, rowsLitAt(beat + 1900));
+  }
+}
+// N11: a C seek every 50 ms (each lands on the start of a beat, where the pump is at its top).
+static void a_pumped_vu_under_a_seek_every_50_ms() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=vu,c=ffffff,s=255,am=2,m=255"); at(1500, "!**C:bpm=120,bpb=4,beat=0");
+  for (uint32_t t = 2000; t < 8000; t += 100) { at(t, "!**C:bpm=120,bpb=4,beat=0"); at(t + 50, "!**C:bpm=120,bpb=4,beat=2"); }
+  runTo(9000);
+  // Every seek lands on the top of a beat: the bars stay high and the top two rows are what moves.
+  rowsKeepTheGate("vu under a seek every 50 ms", 1900, 8100, 1, 8);
+}
+// N11: B between nothing and 200 every 30 ms over a pumped vu: B shares the level's window.
+static void a_pumped_vu_under_b_between_0_and_200() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=vu,c=ffffff,s=255,am=2,m=255"); at(1500, "!**C:bpm=120,bpb=4,beat=0");
+  for (uint32_t t = 2000; t < 8000; t += 60) { at(t, "!P*B:b=0"); at(t + 30, "!P*B:b=200"); }
+  runTo(9000);
+  rowsKeepTheGate("vu under B 0 and 200", 1900, 8100, 5, 3);
+}
+// Two fresh firmwares, the frames of each hashed: `fn(k)` sets one up and runs it.
+static uint32_t hashFrames(uint32_t a, uint32_t b, unsigned& frames) {
+  uint32_t h = 2166136261u; frames = 0;
+  for (const Frame& f : between(a, b)) {
+    frames++;
+    h = (h ^ f.scale) * 16777619u; h = (h ^ (f.t & 0xFFFF)) * 16777619u; h = (h ^ (f.t >> 16)) * 16777619u;
+    for (int i = 0; i < NUM_LEDS; i++) { h = (h ^ f.px[i].r) * 16777619u; h = (h ^ f.px[i].g) * 16777619u; h = (h ^ f.px[i].b) * 16777619u; }
+  }
+  return h;
+}
+static bool framesOfChild(void (*fn)(int), int k, uint32_t a, uint32_t b, uint32_t& h, unsigned& frames) {
+  int p[2];
+  if (pipe(p) != 0) return false;
+  fflush(stdout);
+  const pid_t pid = fork();
+  if (pid == 0) {
+    close(p[0]); fn(k);
+    uint32_t out[2]; unsigned n; out[0] = hashFrames(a, b, n); out[1] = n;
+    _exit(write(p[1], out, sizeof out) == (ssize_t)sizeof out ? 0 : 3);
+  }
+  close(p[1]);
+  uint32_t got[2] = {0, 0};
+  const ssize_t n = read(p[0], got, sizeof got);
+  close(p[0]); int st = 0; waitpid(pid, &st, 0);
+  h = got[0]; frames = got[1];
+  return n == (ssize_t)sizeof got && WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+// N12: not pumped, vu and meter latch the same frames from the same seed: with am= and m= and no
+// clock, with a clock and no m=, fed by L, and fed by L that then stops (the walk after 2 s).
+static void notPumped(int k) {
+  boot(0x00, 0x01, 200);
+  const char* look = (k & 1) ? "vu" : "meter";
+  char a[64];
+  at(1000, "!**M:v=show");
+  switch (k >> 1) {
+    case 0: snprintf(a, sizeof a, "!P*A:i=%s,c=ffffff,s=200,am=2,m=255", look); at(1100, a); break;
+    case 1: snprintf(a, sizeof a, "!P*A:i=%s,c=ffffff,s=255,am=2", look); at(1100, a); at(1500, "!**C:bpm=120,bpb=4,beat=0"); break;
+    default:
+      snprintf(a, sizeof a, "!P*A:i=%s,c=00ff00,s=255", look); at(1100, a);
+      for (uint32_t t = 1500; t < 5000; t += 70) at(t, (t / 70) % 3 ? "!P*L:v=200" : "!P*L:v=40");
+      break;
+  }
+  runTo(9000);
+}
+static void vu_not_pumped_is_the_meter() {
+  static const char* const what[] = {"am= and m= with no clock", "a clock and no m=", "fed by L, then not"};
+  for (int s = 0; s < 3; s++) {
+    uint32_t hm = 0, hv = 0; unsigned fm = 0, fv = 0;
+    CHECK(framesOfChild(notPumped, 2 * s, 1000, 9000, hm, fm) && framesOfChild(notPumped, 2 * s + 1, 1000, 9000, hv, fv),
+          "%s: a firmware did not finish", what[s]);
+    printf("  %s: meter %u frames, hash %08x; vu %u frames, hash %08x\n", what[s], fm, hm, fv, hv);
+    CHECK(fm > 20 && hm == hv && fm == fv, "%s: vu is not the meter", what[s]);
+  }
+}
+// N12: an L that arrives while the pump runs is not shown. The same pumped vu with and without L
+// lines between 0 and 255 every 37 ms latches the same frames.
+static void pumpedWithL(int k) {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=vu,c=ffffff,s=255,am=2,m=255"); at(1500, "!**C:bpm=120,bpb=4,beat=0");
+  if (k) for (uint32_t t = 2000; t < 8000; t += 37) at(t, (t / 37) & 1 ? "!P*L:v=255" : "!P*L:v=0");
+  runTo(9000);
+}
+static void l_during_a_pump_changes_nothing() {
+  uint32_t h0 = 0, h1 = 0; unsigned f0 = 0, f1 = 0;
+  CHECK(framesOfChild(pumpedWithL, 0, 1000, 9000, h0, f0) && framesOfChild(pumpedWithL, 1, 1000, 9000, h1, f1), "a firmware did not finish");
+  printf("  without L: %u frames, hash %08x; with L every 37 ms: %u frames, hash %08x\n", f0, h0, f1, h1);
+  CHECK(f0 > 100 && h0 == h1 && f0 == f1, "an L during the pump changed what the panel shows");
+}
+
 #ifdef PSI_ENABLE_I2C
 // ---- the I2C build: the TWI interrupt only queues ------------------------------------------------
 // A contract line from an I2C master is copied in the interrupt and applied by loop(): nothing is
@@ -1844,6 +2031,16 @@ static const Scenario kScenarios[] = {
   {"play_at_once_after_send_accents_when_the_look_may_change", play_at_once_after_send_accents_when_the_look_may_change},
   {"a_repeated_scored_line_changes_nothing", a_repeated_scored_line_changes_nothing},
   {"a_bpm_that_is_not_a_number_is_ignored", a_bpm_that_is_not_a_number_is_ignored},
+  {"a_pumped_vu_at_30_bpm", a_pumped_vu_at_30_bpm},
+  {"a_pumped_vu_at_120_bpm", a_pumped_vu_at_120_bpm},
+  {"a_pumped_vu_at_176_bpm", a_pumped_vu_at_176_bpm},
+  {"a_pumped_vu_at_177_bpm", a_pumped_vu_at_177_bpm},
+  {"a_pumped_vu_at_300_bpm", a_pumped_vu_at_300_bpm},
+  {"a_pumped_vu_rests_at_255_minus_m", a_pumped_vu_rests_at_255_minus_m},
+  {"a_pumped_vu_under_a_seek_every_50_ms", a_pumped_vu_under_a_seek_every_50_ms},
+  {"a_pumped_vu_under_b_between_0_and_200", a_pumped_vu_under_b_between_0_and_200},
+  {"vu_not_pumped_is_the_meter", vu_not_pumped_is_the_meter},
+  {"l_during_a_pump_changes_nothing", l_during_a_pump_changes_nothing},
 #ifdef PSI_ENABLE_I2C
   {"an_i2c_contract_line_is_applied_by_loop", an_i2c_contract_line_is_applied_by_loop},
   {"an_i2c_native_command_takes_the_panel_back", an_i2c_native_command_takes_the_panel_back},

@@ -492,6 +492,8 @@ static std::string randomLine() {
   const uint32_t kind = rnd(17);
   const uint32_t r1 = rnd(256), r2 = rnd(2) ? 255 : rnd(300), r3 = rnd(2) ? 255 : rnd(256), r4 = rnd(6), r5 = rnd(5), r6 = rnd(4);
   const uint32_t r7 = rnd(400), r8 = rnd(40), r9 = rnd(65536), r10 = rnd(2) ? rnd(256) : (rnd(2) ? 0u : 255u), r11 = rnd(600), r12 = rnd(8);
+  // v1.4: half the meters are vu (by a value already drawn, so that every stream is the stream R1 ran)
+  if (!strcmp(fx, "meter") && (r9 & 1)) fx = "vu";
   switch (kind) {
     case 0: case 1: case 2:
       snprintf(b, sizeof b, "%s%sA:i=%s,c=%s,s=%u,b=%u,m=%u,am=%u", cls, unit, fx, col, r1, r2, r3, r4); break;
@@ -683,6 +685,29 @@ static const Profile kProfiles[] = {
     [](uint32_t t) { if (t == 0) tx("PFB:b=0"); if (t == 50) tx("PFB:b=255"); }, 100 },
   { "the pump under a native look at 300 BPM", []() { pShow(); tx("PFA:i=native:16,m=255,am=2"); tx("**C:bpm=300,ph=0,bpb=4,beat=0"); },
     [](uint32_t t) { if (t == 0) tx("**C:bpm=300,ph=0,bpb=4,beat=0"); }, 150 },
+  // ---- v1.4 (Task F5): vu, the meter the beat pump moves (N10 to N12). Its level rides the pump
+  // through the core's level hold, in the window B and b= share: no row of the panel lights more
+  // than three times a second, at every tempo of section 9's list, under a seek every 50 ms, under
+  // B, and with L arriving while the pump runs (which is not shown).
+  { "a pumped vu at 30 BPM", []() { pShow(); tx("PFA:i=vu,c=ffffff,s=255,am=2,m=255"); tx("**C:bpm=30,ph=0,bpb=4,beat=0"); },
+    [](uint32_t) {}, 1000 },
+  { "a pumped vu at 120 BPM", []() { pShow(); tx("PFA:i=vu,c=ffffff,s=255,am=2,m=255"); tx("**C:bpm=120,ph=0,bpb=4,beat=0"); },
+    [](uint32_t) {}, 1000 },
+  { "a pumped vu at 176 BPM", []() { pShow(); tx("PFA:i=vu,c=ffffff,s=255,am=2,m=255"); tx("**C:bpm=176,ph=0,bpb=4,beat=0"); },
+    [](uint32_t) {}, 1000 },
+  { "a pumped vu at 177 BPM", []() { pShow(); tx("PFA:i=vu,c=ffffff,s=255,am=2,m=255"); tx("**C:bpm=177,ph=0,bpb=4,beat=0"); },
+    [](uint32_t) {}, 1000 },
+  { "a pumped vu at 300 BPM", []() { pShow(); tx("PFA:i=vu,c=ffffff,s=255,am=2,m=255"); tx("**C:bpm=300,ph=0,bpb=4,beat=0"); },
+    [](uint32_t) {}, 1000 },
+  { "a pumped vu under a C seek every 50 ms", []() { pShow(); tx("PFA:i=vu,c=ffffff,s=255,am=2,m=255"); tx("**C:bpm=120,ph=0,bpb=4,beat=0"); },
+    [](uint32_t t) { if (t == 0) tx("**C:bpm=120,ph=0,bpb=4,beat=0"); if (t == 50) tx("**C:bpm=120,ph=0,bpb=4,beat=3"); }, 100 },
+  { "a pumped vu under B between 0 and 200", []() { pShow(); tx("PFA:i=vu,c=ffffff,s=255,am=2,m=255"); tx("**C:bpm=120,ph=0,bpb=4,beat=0"); },
+    [](uint32_t t) { if (t == 0) tx("P*B:b=0"); if (t == 30) tx("P*B:b=200"); }, 60 },
+  { "L 0/255 at a pumped vu at 176 BPM", []() { pShow(); tx("PFA:i=vu,c=ffffff,s=255,am=2,m=255"); tx("**C:bpm=176,ph=0,bpb=4,beat=0"); },
+    [](uint32_t t) { if (t == 0) tx("P*L:v=0"); if (t == 50) tx("P*L:v=255"); }, 100 },
+  { "a pumped vu at its slowest redraw, with a scored accent", []() { pShow(); tx("PFA:i=vu,c=ffffff,s=0,am=2,m=255,at=0,ae=flash,ac=ffffff");
+                                                                   tx("**C:bpm=150,ph=0,bpb=4,beat=0"); },
+    [](uint32_t) {}, 1000 },
   // PSI: a pulse over the board's own native look (L3), and the native look coming back, again and again.
   { "P over the native look", []() {},
     [](uint32_t t) { if (t == 0) tx("PFP:c=ffffff,d=60"); if (t == 100) tx("PFA:i=off"); if (t == 150) tx("PFM:v=idle"); }, 200 },
