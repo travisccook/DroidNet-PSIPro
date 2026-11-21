@@ -342,14 +342,20 @@ inline bool contractYieldForD(int address) {
 // with no level feed still moves.
 static bool     g_levelFed = false;
 static bool     g_meterMine = false;                   // VUMeter() is running for the contract's meter look
-// v1.4 N10: a vu look is pumped this pass (the clock runs, am= and m= are not 0, no overlay): the
-// pump is its level feed, and L is not (N12). Set by contractLoopTick() before it draws.
+// v1.4 N10: a vu look is pumped (the clock runs, am= and m= are not 0, an overlay up or not): the
+// pump is its level feed, and L is not (N12). _vuPump() is the state as it is now, for a line (an L
+// right after A:i=meter in one burst is the meter's, the R2 review's finding 4); g_vuPumped is the
+// tick's, for what it draws and sends. The pump feeds the meter as L does (_levelFeed, every pumped
+// pass): when it stops (C:bpm=0, am=0, m=0) the meter holds the pump's last level for 2 s, as after
+// a last L, and only then walks (finding 2: the walk's next step came right after the pump's rise).
+// When it starts from the walk, the bars start dark and the level's window starts there.
+static PSI_NOINLINE bool _vuPump() { return g_u.effect == CE_VU && g_clock.running && g_u.beatMod && g_u.accentMode; }
 static bool     g_vuPumped = false;
-static uint8_t  g_vuShown  = 0;                        // the field level of the last frame the contract sent
+static uint8_t  g_vuShown  = 0, g_vuLevelShown = 0;    // the field level and the meter's level of the last frame sent
 static uint32_t g_levelMs  = 0;
+static PSI_NOINLINE void _levelFeed(uint32_t now) { g_levelMs = now; g_levelFed = true; }   // L, or the pump
 inline bool contractHoldsLevels() {
   if (!g_meterMine) return false;
-  if (g_vuPumped) return true;
   if (g_levelFed && (uint32_t)(millis() - g_levelMs) >= 2000u) g_levelFed = false;
   return g_levelFed;
 }
@@ -473,9 +479,13 @@ int contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
       // gate holds the look's first frames; VUMeter() opens with a black frame) or have its frame
       // held here, and the bars then light a pass or three later: counted from the take, the next
       // beat's rise came 312 ms after the bars lit (the host's property test, at the owner's
-      // brightness 20). The window only ever moves later.
-      if (g_vuPumped && level > g_vuShown) g_u.levelMs = now;
-      g_vuShown = level;
+      // brightness 20). The window only ever moves later. A rise is a frame whose field level is up,
+      // or whose meter level is: higher bars at a lower brightness (a B or b= fall taken with it)
+      // light rows with the field level down (the R2 review's finding 3). An overlay that started
+      // before the pump (a P over a vu not yet pumped) is such a frame too: g_vuPumped holds under
+      // an overlay (finding 1).
+      if (g_vuPumped && (level > g_vuShown || g_u.level > g_vuLevelShown)) g_u.levelMs = now;
+      g_vuShown = level; g_vuLevelShown = g_u.level;
     }
   }
 #ifdef PSI_ENABLE_I2C
@@ -640,7 +650,12 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
 // it), so a reset cannot open the cap.
 static PSI_NOINLINE bool _fireAccent(ContractEffect fx, const ContractRGB& c, uint32_t durMs, uint8_t bright,
                                      uint32_t now) {
-  if (g_u.base == CB_NATIVE) return false;             // R1: no overlay on a native:<n> look, scored or live
+  // R1: no overlay on a native:<n> look, scored or live. v1.4 on the PSI: none on a pumped vu
+  // either (a scored ae= and a live P are ignored there; over a vu that is not pumped, the meter,
+  // both work). The overlay lights the bars, and its end hands them back to a pump whose level is
+  // still up: a row lit twice in 208 ms, five times a second, at every tempo tried (the R2
+  // review's finding 1 and, under an accent, finding 5). Studio plans no accent over vu.
+  if (g_u.base == CB_NATIVE || _vuPump()) return false;
   if (!strobeCoolDownExpired(g_u.pulseLastMs, now, 2 * STROBE_MIN_STATE_MS)) return false;
   _takePanel();                                        // L3: a pulse may overlay the native look
   g_u.pulseFx      = _lookHere(fx, true);
@@ -765,12 +780,11 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
       break;
 
     case CV_LEVEL: {                                   // feed the contract's meter look from Studio energy
-      if (g_vuPumped) break;                           // v1.4 N12: an L while the pump feeds vu is not shown
+      if (_vuPump()) break;                            // v1.4 N12: an L while the pump feeds vu is not shown
       // v= is 0 when the line has none (the parser writes it only with its flag; ContractParams
       // starts it at 0): taken as it is, 14 B less than testing the flag (test_r2fix_recoveries.cpp).
       contractLevelOffer(g_u, pr.level);               // taken where the meter is drawn (contractHoldsDue)
-      g_levelMs = now;
-      g_levelFed = true;
+      _levelFeed(now);
       break;
     }
 
@@ -868,7 +882,6 @@ inline bool contractLoopTick() {
     }
   }
 
-  g_vuPumped = false;                                  // set again below, on a pass that pumps a vu
   if (!_owns()) {                                      // nothing of ours left to show: the native look runs
     // S10: handing the panel to the board's own look is the contract's edge, and the light that
     // look shows next is counted as the contract's doing. So the hand-over waits until an onset
@@ -881,8 +894,10 @@ inline bool contractLoopTick() {
       _givePanelBack();
       _nativeEdge(1, code);
     }
+    g_vuPumped = false;
     return false;
   }
+  g_vuPumped = _vuPump();
 
   // CA1.7: verb L's level and the brightness fraction (B, b=, a section's) go up at most once in
   // 340 ms, in ONE window, and down at once (contractHoldsDue): a part of a look lights when either
@@ -904,10 +919,12 @@ inline bool contractLoopTick() {
     // pass that redraws the meter (a raise at most once in 340 ms, in the window B and b= share; a
     // fall at once). The brightness stays at the look's level. Every other look: the pump moves
     // the brightness. One envBright() for both (two copies cost 80 B more).
-    const bool vu = g_u.effect == CE_VU;
-    const uint8_t e = envBright(vu ? 255 : lvl, g_u.beatMod, env);
-    if (vu) contractLevelOffer(g_u, e); else effBright = e;
-    g_vuPumped = vu;
+    const uint8_t e = envBright(g_vuPumped ? 255 : lvl, g_u.beatMod, env);
+    if (g_vuPumped) {
+      if (!g_levelFed) { g_u.level = 0; g_u.levelMs = now; }   // from the walk: dark, and the window starts
+      _levelFeed(now);
+      contractLevelOffer(g_u, e);
+    } else effBright = e;
   } else if (g_u.pulseActive ? g_u.pulseFx == CE_PULSE : (g_u.base == CB_LOOK && g_u.effect == CE_PULSE)) {
     // pulse: the shared breathe (a 2000 ms cycle at s=0 down to 340 ms at s=255, never faster: S8)
     // whenever nothing pumps the look. Under the beat pump the envelope IS the breathe.
