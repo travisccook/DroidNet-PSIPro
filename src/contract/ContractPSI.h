@@ -777,7 +777,9 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
       break;
 
     case CV_MODE:
-      if (pr.mode == 's')      _boundary('s', pr.hasWd ? pr.wd : 0);   // L2: wd=<s> arms the watchdog
+      // L2: wd=<s> arms the watchdog. wd= is 0 when the line has none (written only with its flag;
+      // ContractParams starts it at 0): taken as it is, 18 B less (test_r2fix_recoveries.cpp).
+      if (pr.mode == 's')      _boundary('s', pr.wd);
       else if (pr.mode == 'i') _boundary('i', 0);
       break;
 
