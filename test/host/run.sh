@@ -28,6 +28,7 @@
 #   7. scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock
 #   8. HSV oracle: CE_RAINBOW (CHSV->CRGB) == FastLED 3.5.0 hsv2rgb_rainbow (full cube)
 #   9. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
+#   R2 review (last): the independent review's findings on the R2 line; fails while one is open
 set -e
 cd "$(dirname "$0")"
 
@@ -477,3 +478,30 @@ else
   echo "SKIP: needs PlatformIO and its simavr package:"
   echo "      pip install platformio && pio pkg install -g --tool platformio/tool-simavr"
 fi
+
+echo "[R2 review] the independent review of the R2 line (0e87a91..be6e9d2), 2026-11-21"
+# REVIEW FINDINGS, not the layer's own tests. Last, so that every stage above has run first. The
+# differential (review_r2_differential.cpp) holds the two flash recoveries to R1's code and passes.
+# The scenarios (review_r2.inc, through test_timeline.cpp) and the profiles (review_r2_profiles.inc,
+# through test_property.cpp's observers) each FAIL until the finding they name is fixed; the
+# controls among them (R1's looks under the same lines) pass. The suite fails here while any
+# finding is open.
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w -DPSI_NO_STRIP_LOOKS \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' review_r2_differential.cpp -o "$T/psi_review_diff"
+"$T/psi_review_diff" > "$T/review_diff.out" 2>&1 || { cat "$T/review_diff.out"; echo "FAIL: a flash recovery behaves unlike R1"; exit 1; }
+sed 's/^/      /' "$T/review_diff.out"
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w -DPSI_NO_STRIP_LOOKS \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' '-DTIMELINE_SCENARIOS="review_r2.inc"' test_timeline.cpp \
+    -o "$T/psi_review_timeline"
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w -DPSI_NO_STRIP_LOOKS \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' '-DPROPERTY_PROFILES="review_r2_profiles.inc"' test_property.cpp \
+    -o "$T/psi_review_property"
+open_findings=0
+for s in $("$T/psi_review_timeline" --list); do
+  if "$T/psi_review_timeline" "$s" > "$T/review.out" 2>&1; then echo "      ok    $s"
+  else sed 's/^/      /' "$T/review.out"; open_findings=$((open_findings + 1)); fi
+done
+if PROPERTY_STREAMS=0 "$T/psi_review_property" > "$T/review_property.out" 2>&1; then echo "      ok    the review's profiles"
+else sed 's/^/      /' "$T/review_property.out"; open_findings=$((open_findings + 1)); fi
+if [ "$open_findings" -ne 0 ]; then echo "FAIL: $open_findings R2 review check(s) fail: open findings (test/host/review_r2.inc)"; exit 1; fi
+echo "      every R2 review finding is closed"

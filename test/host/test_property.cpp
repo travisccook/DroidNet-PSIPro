@@ -542,6 +542,11 @@ struct Profile { const char* name; void (*setup)(); void (*at)(uint32_t t); uint
 static void pShow() { tx("**M:v=show"); }
 // The owner keeps native mode `code` running (the board's alwaysOn setting, then the command).
 static void ownerRuns(int code) { alwaysOn = true; gButtons = true; press(code); }
+// -DPROPERTY_PROFILES="<file>" runs another table of profiles through the same observers (run.sh's
+// last stage: the R2 review's findings, review_r2_profiles.inc).
+#ifdef PROPERTY_PROFILES
+#include PROPERTY_PROFILES
+#else
 static const Profile kProfiles[] = {
   { "X between live A lines", pShow,
     [](uint32_t t) { if (t == 0) tx("PFA:i=solid,c=ffffff"); if (t == 50) tx("PFX"); if (t == 100) tx("PFA:i=solid,c=ffffff"); }, 170 },
@@ -712,6 +717,7 @@ static const Profile kProfiles[] = {
   { "P over the native look", []() {},
     [](uint32_t t) { if (t == 0) tx("PFP:c=ffffff,d=60"); if (t == 100) tx("PFA:i=off"); if (t == 150) tx("PFM:v=idle"); }, 200 },
 };
+#endif
 static const int kProfileCount = (int)(sizeof kProfiles / sizeof kProfiles[0]);
 
 struct Result {
