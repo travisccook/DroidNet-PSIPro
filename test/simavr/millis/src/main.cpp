@@ -56,7 +56,8 @@ static const char kLooks[] PROGMEM =
   "meter|!P*A:i=meter\n"
   "scan|!P*A:i=scan,c=202020\n"
   "native1|!P*A:i=native:1\n"
-  "native15|!P*A:i=native:15\n";
+  "native15|!P*A:i=native:15\n"
+  "vu+pump|!P*A:i=vu,c=202020,s=255,m=255,am=2|!**C:bpm=120,bpb=4,beat=0\n";
 #endif
 static const char* gRow = kLooks;      // the row being measured (flash address)
 static uint32_t m0, t0;
