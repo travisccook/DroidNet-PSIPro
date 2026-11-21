@@ -683,8 +683,11 @@ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint16_t lineCr
     e.color      = pr.hasColor ? pr.color : g_u.color;
     e.speed      = pr.hasSpeed ? pr.speed : 128;
     e.bright     = pr.hasBright ? pr.bright : 255;     // S6: carried in the entry; 255 is the ceiling
-    e.beatMod    = pr.hasBeatMod ? pr.beatMod : 0;
-    e.accentMode = pr.hasAm ? pr.accentMode : 0;
+    // m= and am= are 0 when the line has none: the parser writes them only with their flags, and
+    // ContractParams starts them at 0 (contract_core.h). Copied as they are, with no test of the
+    // flag: the same entry, 58 B less flash than `pr.hasBeatMod ? pr.beatMod : 0` and its twin.
+    e.beatMod    = pr.beatMod;
+    e.accentMode = pr.accentMode;
     e.accentEvery = accentEveryFrom(pr);               // an=, ap=: with am=2, the beats where beat % n == ap
     if (pr.hasAccentFx) {
       e.accentFx    = pr.accentFx;
