@@ -692,7 +692,9 @@ PSI_NOINLINE inline void _applyAnimate(const ContractParams& pr, uint16_t lineCr
   // S7: native codes are an allow-list, the core's (nativeAllowedPsi: modes 0 to 22 and 92 without
   // Flash, Alarm and Scream, which swing the whole field at 6.4 and 3.8 Hz). A line naming any
   // other code is dropped whole, live or scored; a scored one then fails verb V, as it should.
-  if (pr.hasEffect && pr.effect == CE_NATIVE && !nativeAllowedPsi(pr.nativeCode)) return;
+  // (pr.effect is CE_NONE whenever pr.hasEffect is false: the parser sets the two together, so the
+  // flag is not tested here, nor for P below; test_r2fix_recoveries.cpp holds it.)
+  if (pr.effect == CE_NATIVE && !nativeAllowedPsi(pr.nativeCode)) return;
   if (pr.hasAt) {                                      // a scored section: stored, not shown
     // A scored A carries its look: an entry is a whole section, not a patch. Without i= the line
     // is dropped (and then counts against verb V, as it should).
@@ -739,7 +741,7 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
 
     case CV_PULSE: {                                   // one-shot accent; outside a show it overlays the native look (L3)
       _showBegin();
-      ContractEffect fx = (pr.hasEffect && accentEffectAllowed(pr.effect)) ? pr.effect : CE_SOLID;
+      ContractEffect fx = accentEffectAllowed(pr.effect) ? pr.effect : CE_SOLID;   // CE_NONE is no accent
       // b= on P is the overlay's alone (S9): it never becomes the base look's level.
       _fireAccent(fx, pr.hasColor ? pr.color : ContractRGB{255, 255, 255}, pr.hasDur ? pr.durMs : 120,
                   pr.hasBright ? pr.bright : g_u.bright, now);
