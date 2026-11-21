@@ -764,7 +764,9 @@ inline void applyContract(const ParsedContract& p, uint16_t lineCrc, uint32_t no
 
     case CV_LEVEL: {                                   // feed the contract's meter look from Studio energy
       if (g_vuPumped) break;                           // v1.4 N12: an L while the pump feeds vu is not shown
-      contractLevelOffer(g_u, pr.hasLevel ? pr.level : 0);   // taken where the meter is drawn (contractHoldsDue)
+      // v= is 0 when the line has none (the parser writes it only with its flag; ContractParams
+      // starts it at 0): taken as it is, 14 B less than testing the flag (test_r2fix_recoveries.cpp).
+      contractLevelOffer(g_u, pr.level);               // taken where the meter is drawn (contractHoldsDue)
       g_levelMs = now;
       g_levelFed = true;
       break;

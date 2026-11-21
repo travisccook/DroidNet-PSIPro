@@ -25,6 +25,7 @@
 #   6c. timeline scenarios: scripted wire lines, assertions on the frames (every build)
 #   6d. the six stand-in looks draw scan, sparkle and solid, frame for frame
 #   6e. contract S9 as a property of the firmware: hostile and random line streams, frames measured
+#   6f. the R2 fix's flash recoveries held to the code they replaced (test_r2fix_recoveries.cpp)
 #   7. scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock
 #   8. HSV oracle: CE_RAINBOW (CHSV->CRGB) == FastLED 3.5.0 hsv2rgb_rainbow (full cube)
 #   9. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
@@ -350,6 +351,14 @@ for cfg in "-DPSI_NO_STRIP_LOOKS"; do
   "$T/psi_property" > "$T/property.out" 2>&1 || { cat "$T/property.out"; echo "FAIL: the S9 property does not hold"; exit 1; }
   sed 's/^/      /' "$T/property.out"
 done
+
+echo "[6f] the R2 fix's flash recoveries held to the code they replaced"
+# test_r2fix_recoveries.cpp: each recovery drops the test of a ContractParams flag whose value is the
+# default without it (v=, wd=, i=). The parser's side for every line, and L and M:v=show end to end.
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w -DPSI_NO_STRIP_LOOKS \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_r2fix_recoveries.cpp -o "$T/psi_r2fix_recoveries"
+"$T/psi_r2fix_recoveries" | sed 's/^/      /'
+test "${PIPESTATUS[0]}" -eq 0 || { echo "FAIL: a flash recovery of the R2 fix behaves unlike the code it replaced"; exit 1; }
 
 echo "[7/9] scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock"
 # include/FastLED.h replaced FastLED with a from-scratch WS2812 driver. The 31 goldens
