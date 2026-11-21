@@ -47,8 +47,9 @@ build has no contract layer.
   across the panel's 10 columns as a 1-D strand, and NOT in R1's image: no environment links them
   (they do not fit), a line naming one draws a stand-in, and the host suite keeps running them.
 - Contract v1.3, first release: see "Contract v1.3 on the PSI" below.
-- On the R2 line (`lighting-r2`): the shared core at revision CA2, contract v1.4, release 2, with
-  stand-ins for its three new ids. See "The R2 line: core CA2" below.
+- On the R2 line (`lighting-r2`): the shared core at revision CA2, contract v1.4, release 2:
+  `vu`, the meter moved by the beat pump, and stand-ins for `logic` and `projector`. See "The R2
+  line: core CA2" and "`vu` (Task F5)" below.
 - Shared beat-brightness envelope (`envBright`) — identical across all three forks.
 - Pre-existing upstream `buildCommand()` out-of-bounds write — fixed in `src/main.cpp` (bounds-check
   before the write, terminator clamped). Offered back to Neil.
@@ -69,9 +70,9 @@ bytecode; 36 golden captures of the native modes (35 of them on the I2C build to
 against upstream v1.7 on the same mocks, on both builds, and 447 more on the I2C build with a
 command from inside a `show()`; the contract scenarios
 (`test_timeline.cpp`: the firmware's own `src/main.cpp`, scripted wire lines, assertions on the
-frames it latches): 112 on the default build, 6 on the build without the contract layer, 114 on each
+frames it latches): 122 on the default build, 6 on the build without the contract layer, 124 on each
 of two builds no environment links (every look; the contract with I2C); contract S9 and S11 as a
-property of the default build under 50 hostile scripts and 1,500 random streams
+property of the default build under 59 hostile scripts and 1,500 random streams
 (`test_property.cpp`); the scale and HSV oracles; the cross-compile of both builds with the flash,
 stack and no-float gates; and five simavr probes (`test/simavr/README.md`). There is no mock of the
 board API.
@@ -182,11 +183,11 @@ The three new ids parse and draw stand-ins, as v1.4's table has them on the PSI:
 
 - `logic` and `projector` draw `sparkle`, in every build (`_lookHere()`); as an overlay, solid.
 - `vu` keeps its own id. Wherever the layer tests `CE_METER` it tests `CE_VU` too (the meter case of
-  `_renderLook()`, and the pass that takes the level holds while the meter is up), so it draws
-  exactly as `meter` until Task F5 gives it the pump.
+  `_renderLook()`, and the pass that takes the level holds while the meter is up). Not pumped it
+  draws exactly as `meter`; pumped, see "`vu` (Task F5)".
 - None of them is an accent (`accentEffectAllowed()`): a `P` naming one overlays solid.
 
-Stage 6d holds the three to `sparkle` and `meter` frame for frame; the timeline scenario
+Stage 6d holds the three, not pumped, to `sparkle` and `meter` frame for frame; the timeline scenario
 `v14_ids_draw_their_stand_ins` checks them in every build. The 36 native captures, the 549 upstream
 timelines and the property stage's output are what they were in R1.
 
@@ -201,6 +202,83 @@ The core's new functions are inline and nothing here calls them; its names and v
 The stand-ins cost 22 B, all of it in `loop()` (the meter case's new label alone is 12 B). Measured
 on clean trees with `pio run -e PSIPro` and `test/host/stack_report.py`; host-tested and
 cross-compiled, not run on a board.
+
+### `vu` (Task F5)
+
+v1.4 N10 to N12 in `src/contract/ContractPSI.h`. While the unit is pumped (the clock runs, `am=` and
+`m=` are not 0, no overlay is up) a `vu` look offers `envBright(255, m, amount)` (the core's vector
+group `vuLevel`) to the core's level hold every pass, in `contractLoopTick()`; the hold takes it on
+the next pass that redraws the meter (up at most once in 340 ms, in the window `B` and `b=` share;
+down at once), and the meter draws `state.level` as it draws a level from `L`. The brightness stays
+at the look's level. Not pumped, `vu` is `meter` in every respect. An `L` that arrives while the
+pump feeds `vu` is dropped (N12).
+
+One thing the spec did not say, found by the property test: the level's window has to run from
+the frame that shows a rise, not from the pass that took it. The look gate holds a look's first
+frames (and a change of colour's), `VUMeter()` opens a look with a black frame, and the field gate
+holds a frame it would count as an onset; in each case the bars light a pass or three after the
+rise was taken, and the next beat's rise, 340 ms after the take, lit a band of the panel 312 ms
+after it had lit (at the owner's brightness 20, every round). So `contractFrameScale()` moves the
+window to a sent frame whose field level is above the last sent one, while a pumped `vu` is up.
+The window only ever moves later. (`meter` fed by `L` has the same exposure in principle; no
+script has shown it, and it is R1's behaviour, so it is left as it is.)
+
+Readings to know: `s=` paces the redraw as it does for a fed meter (`s=255` every pass, `s=128`
+every 210 ms, late on most beats at 120 BPM: the middle of the bars lit on 16 of 24 beats at
+`s=128`, 24 of 24 at `s=255`); a pause (`C:bpm=0`) stops the clock, so `vu` is the meter and walks.
+At 176 BPM (beats 341 ms apart, the window 340) a beat's rise is often taken a pass late, when the
+level has fallen: the bars rise lower.
+
+Host scenarios (stage 6c; owner brightness 200, `m=255`, `s=255`, 12 s; a row is lit at half its
+LEDs and a scale of 100, dark at a tenth): no row lit more than three times in a second or twice
+inside 340 ms in any of them.
+
+| Scenario | Middle row (3) lit | Closest two onsets of any row | Most in a second |
+| --- | --- | --- | --- |
+| `a_pumped_vu_at_30_bpm` | 6 of 6 beats | 2,002 ms | 1 |
+| `a_pumped_vu_at_120_bpm` | 24 of 24 | 494 ms | 3 |
+| `a_pumped_vu_at_176_bpm` | 9 (bottom row 20) of 35 | 364 ms | 3 |
+| `a_pumped_vu_at_177_bpm` (every second beat, S2) | 17 of 17 | 676 ms | 2 |
+| `a_pumped_vu_at_300_bpm` (every second beat) | 29 of 30 | 364 ms | 3 |
+| `a_pumped_vu_under_a_seek_every_50_ms` (6 s) | 1 (top rows 11 and 13) | 364 ms | 3 |
+| `a_pumped_vu_under_b_between_0_and_200` (6 s) | 3 | 364 ms | 2 |
+
+`a_pumped_vu_rests_at_255_minus_m`: at `m=200`, four rows of six lit 60 ms after a beat (211 of
+255) and one 1,900 ms after it (55), three beats of three. `vu_not_pumped_is_the_meter`: the same
+frames as `meter`, hash for hash, with `am=`/`m=` and no clock, with a clock and no `m=`, and fed by
+`L` and then not. `l_during_a_pump_changes_nothing`: 291 frames, the same hash with and without an
+`L` every 37 ms. The property test has nine profiles for `vu` (the five tempos, the seek, `B`, `L`
+at 176 BPM, the slowest redraw with a scored accent) and turns half the random streams' `meter`
+lines into `vu` by a value already drawn, so the streams are R1's: the profiles keep every region to
+364 ms and three onsets a second, the random streams to 340 ms (both as R1). simavr, pumped `vu` at
+120 BPM, `s=255`: 0 ppm, longest pass 5.4 ms (the longest of any look is still the meter, 7.8 ms).
+
+Flash, found in `ContractPSI.h` with no change in behaviour, one commit each, measured on clean
+trees (`pio run -e PSIPro`; a dirty tree adds 6 B of flash and 12 B of SRAM through `-dirty`):
+
+| Commit | What | PSIPro flash |
+| --- | --- | --- |
+| CA2 and the stand-ins (Task F3) | | 28,328 B |
+| a scored entry's `m=` and `am=` copied as parsed | they are 0 without their flags (`ContractParams`), so the two tests went | 28,270 B (-58) |
+| `_measure()` scales the channels in a loop of three | the frame read as bytes, LED after LED | 28,226 B (-44) |
+| `vu` | the pump on the level, the L guard, the window from the frame that shows a rise | 28,330 B (+104) |
+
+| | R1 (`0e87a91`) | CA2, stand-ins (Task F3) | With `vu` |
+| --- | --- | --- | --- |
+| PSIPro flash | 28,286 B | 28,328 B | 28,330 B (86 B under the gate of 28,416) |
+| PSIPro SRAM | 1,632 B | 1,632 B | 1,634 B |
+| PSIPro stack headroom (sound bound) | 484 B | 484 B | 482 B (floor 256) |
+| PSIPro-i2c flash / SRAM / headroom | 16,998 B / 1,217 B / 1,031 B | the same | the same |
+
+Tried and not kept (each against the stand-ins' 28,328 B, measured on dirty trees less 6 B): the
+pump with two `envBright()` calls, one for `vu` and one for the rest, +140 B, against +50 B for one
+call with its base chosen (before the `L` guard, +8 B, and the window from the shown frame, +46 B);
+the same with the offer made before the hold is taken, so that no `L` could get between, +178 B; a
+second hold taken just before the meter draws, with the brightness worked out again, +304 B, and it
+did not close the window problem above. `_speedToDelay()` in 16 bits (exact for every `s`) saves
+2 B and was left out.
+Host-tested, simulated and cross-compiled; not run on a board. The bench rows are
+`docs/BENCH_R2.md`.
 
 ## Layout
 
