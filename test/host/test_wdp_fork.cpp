@@ -16,17 +16,17 @@ static int g_fail = 0, g_total = 0;
 #define CHECK(cond) do { g_total++; if(!(cond)){ g_fail++; \
   printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);} } while(0)
 
-// The lines, byte for byte. The second caps tag is the contract the build speaks: "contract.1.3s"
-// for a build without the strip and hue looks (R1, as platformio.ini builds it), "contract.1.3"
+// The lines, byte for byte. The second caps tag is the contract the build speaks: "contract.1.4s"
+// for a build without the strip and hue looks (R1, as platformio.ini builds it), "contract.1.4"
 // for one with all of them.
 // A build without the contract layer (PSI_NO_CONTRACT: the PSIPro-i2c environment) sends no caps.
 #ifdef PSI_NO_CONTRACT
 #define CAPS_TAIL "\"}\n"
 #else
 #ifdef PSI_NO_STRIP_LOOKS
-#define CONTRACT_TAG "contract.1.3s"
+#define CONTRACT_TAG "contract.1.4s"
 #else
-#define CONTRACT_TAG "contract.1.3"
+#define CONTRACT_TAG "contract.1.4"
 #endif
 #define CAPS_TAIL "\",\"caps\":[\"droidnet.contract\",\"" CONTRACT_TAG "\"]}\n"
 #endif
@@ -58,7 +58,7 @@ static void test_the_line_buffer_is_exactly_the_front_line() {
   CHECK(WDP_LINE_MAX == 49);
   CHECK(strstr(kFront, "caps") == nullptr && strstr(kFront, "contract") == nullptr);
 #else
-  CHECK(WDP_LINE_MAX == 93 + (int)sizeof(CONTRACT_TAG) - (int)sizeof("contract.1.3"));
+  CHECK(WDP_LINE_MAX == 93 + (int)sizeof(CONTRACT_TAG) - (int)sizeof("contract.1.4"));
 #endif
   CHECK(sizeof(kFront) - 1 <= 128);                  // the core's own line limit, which the WCB is sized for
   char small[WDP_LINE_MAX - 1];

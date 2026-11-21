@@ -506,6 +506,8 @@ static ContractEffect model_effect(const std::string& v, int& nativeCode) {
     {"rainbow",CE_RAINBOW},{"scan",CE_SCAN},{"sparkle",CE_SPARKLE},{"meter",CE_METER},
     {"comet",CE_COMET},{"chase",CE_CHASE},{"wipe",CE_WIPE},{"gradient",CE_GRADIENT},
     {"colorcycle",CE_COLORCYCLE},{"twinkle",CE_TWINKLE},
+    // v1.4 (CA2): appended ids. Base looks only, never an accent.
+    {"logic",CE_LOGIC},{"projector",CE_PROJECTOR},{"vu",CE_VU},
   };
   for (auto& t : tbl) if (v == t.n) return t.e;
   if (v.size() > 7 && v.compare(0, 7, "native:") == 0) {
@@ -647,6 +649,7 @@ static void section_F_lines() {
     "-99999999999", "4294967295", "4294967296", "2147483647", "2147483648", "-2147483648",
     "-2147483649", "solid", "off", "native:5", "native:", "native:-3", "native:99999",
     "native:zz", "comet", "scan", "sparkle", "meter", "rainbow", "twinkle", "colorcycle",
+    "logic", "projector", "vu", "v", "vuu", "logi", "projectors",
     "SOLID", "soli", "solidd", "ff0000", "FF0000", "ff00", "ff0000ff", "gg0000", "0080ff",
     "show", "idle", "s", "i", "stop", " show", "x", "=", ":", ".", "e9",
     // values containing '=' -- the value slice runs to the next ',' or NUL, NOT to the next
@@ -713,7 +716,7 @@ static void section_F_random_lines(long iters) {
   // so this generator builds those on purpose and then perturbs them.
   static const char* K[] = { "i","c","s","d","b","m","at","am","v","bpm","ph","bpb","beat",
                              "ae","ac","ad","sw","a","b","at","","x","wd","n","k","an","ap","r" };
-  static const char* V[] = { "solid","comet","scan","native:5","native:","off","twinkle",
+  static const char* V[] = { "solid","comet","scan","native:5","native:","off","twinkle","logic","projector","vu",
                              "ff0000","0080ff","ffff","zz","0","1","255","-1","-99999999999",
                              "4294967296","2147483648"," 7","show","idle","","=","solid=x",
                              "ff0000=1","2550","2551","120","99","100","+5","12x","2147483647",
@@ -914,7 +917,7 @@ static void section_H_slices() {
   // strncmp is bounded by the equal-length test)
   static const char* names[] = { "off","solid","flash","pulse","rainbow","scan","sparkle",
                                  "meter","comet","chase","wipe","gradient","colorcycle",
-                                 "twinkle" };
+                                 "twinkle","logic","projector","vu" };
   for (const char* n : names) {
     size_t len = strlen(n);
     char* b = (char*)malloc(len);
@@ -1005,6 +1008,8 @@ static void section_I_tables() {
     {"rainbow",CE_RAINBOW},{"scan",CE_SCAN},{"sparkle",CE_SPARKLE},{"meter",CE_METER},
     {"comet",CE_COMET},{"chase",CE_CHASE},{"wipe",CE_WIPE},{"gradient",CE_GRADIENT},
     {"colorcycle",CE_COLORCYCLE},{"twinkle",CE_TWINKLE},
+    // v1.4 (CA2): appended ids. Base looks only, never an accent.
+    {"logic",CE_LOGIC},{"projector",CE_PROJECTOR},{"vu",CE_VU},
   };
   ParsedContract p;
   for (auto& t : tbl) {
@@ -1047,7 +1052,8 @@ static void section_I_tables() {
   }
   // native: an ae= can NEVER arm the overlay, whatever the code
   for (const char* s : { "ae=native:1", "ae=native:0", "ae=native:-1", "ae=native:99999",
-                         "ae=scan", "ae=sparkle", "ae=meter", "ae=", "ae=x" }) {
+                         "ae=scan", "ae=sparkle", "ae=meter", "ae=", "ae=x",
+                         "ae=logic", "ae=projector", "ae=vu" }) {
     CHECK(contractParse((std::string("P*A:") + s).c_str(), p) && !p.params.hasAccentFx &&
           p.params.accentFx == CE_NONE);
   }

@@ -101,7 +101,7 @@ echo "[1c/9] wdp_fork PSI Front / PSI Rear identity"
 # Fork-local. The header's own types and caps, with the longest fw git gives a build
 # ("<sha>-dirty"), must build a valid line for both roles in the fork's WDP_LINE_MAX, which is
 # sized to exactly the front line (93 B here) rather than the core's 128. Twice: as R1 is built
-# (without the strip looks: "contract.1.3s"), and with every look ("contract.1.3").
+# (without the strip looks: "contract.1.4s"), and with every look ("contract.1.4").
 "$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 -DPSI_NO_STRIP_LOOKS test_wdp_fork.cpp -o "$T/psi_wdp_fork_test"
 "$T/psi_wdp_fork_test"
 "$CXX_HOST" -std=c++11 -Wall -Wextra -Werror -O0 test_wdp_fork.cpp -o "$T/psi_wdp_fork_test_all"

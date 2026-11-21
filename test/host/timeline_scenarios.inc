@@ -511,7 +511,7 @@ static void a_verified_load_plays_and_reports_ok() {
   loadTwo((uint16_t)(crc16(kL0) ^ crc16(kL1)), 2);
   runTo(3000);
   CHECK(shown(2900).allAre(GREEN), "a good load plays");
-  char want[64]; snprintf(want, sizeof want, ";S0!PFq:ver=1.3,rel=1,cap=%d,n=2,ok=1,bpm=0\r", (int)PSI_SCORE_CAP);
+  char want[64]; snprintf(want, sizeof want, ";S0!PFq:ver=1.4,rel=2,cap=%d,n=2,ok=1,bpm=0\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(Serial1.txLog, want) != nullptr, "Q:r=0 after a good V (tx: %s)", Serial1.txLog);
 }
 // n and k do not depend on a line delivered twice (a mesh retry) or on the order of arrival.
@@ -586,13 +586,13 @@ static void the_query_reply_is_byte_exact() {
   runTo(5000);
   const char* tx = Serial1.txLog;
   char want[80];
-  snprintf(want, sizeof want, ";S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
+  snprintf(want, sizeof want, ";S0!PFq:ver=1.4,rel=2,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(tx, want) != nullptr, "r=0: straight to the Pi's own WCB (tx: %s)", tx);
-  snprintf(want, sizeof want, ";W7,;S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
+  snprintf(want, sizeof want, ";W7,;S0!PFq:ver=1.4,rel=2,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(tx, want) != nullptr, "r=7: by way of WCB 7 (tx: %s)", tx);
-  snprintf(want, sizeof want, ";W99,;S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
+  snprintf(want, sizeof want, ";W99,;S0!PFq:ver=1.4,rel=2,cap=%d,n=0,ok=0,bpm=128\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(tx, want) != nullptr, "r=99: the longest route (tx: %s)", tx);
-  snprintf(want, sizeof want, ";S0!PFq:ver=1.3,rel=1,cap=%d,n=0,ok=0,bpm=0\r", (int)PSI_SCORE_CAP);
+  snprintf(want, sizeof want, ";S0!PFq:ver=1.4,rel=2,cap=%d,n=0,ok=0,bpm=0\r", (int)PSI_SCORE_CAP);
   CHECK(strstr(tx, want) != nullptr, "a held clock reads 0 (tx: %s)", tx);
   CHECK(countOf(tx, "q:ver=") == 4, "four queries, four replies: saw %u", countOf(tx, "q:ver="));
 }

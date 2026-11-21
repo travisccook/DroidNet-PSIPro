@@ -27,6 +27,7 @@
 #include "../../src/contract/contract_core.h"
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 static int g_fail = 0; static long g_total = 0;
 #define CHECK(cond) do { g_total++; if (!(cond)) { g_fail++; if (g_fail < 40) printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond); } } while (0)
@@ -115,7 +116,105 @@ static int worst(int look, int N, uint8_t sp) {
   return most;
 }
 
+// ---- v1.4 (CA2): projector's step rule (N7) on a jewel of seven, with seeded dice ----
+// Pixel 0 is the centre, 1 to 6 the ring. The windows: every pair, both halves of the ring, the
+// centre with each half, the whole jewel. A step every FX_PROJECTOR_STEP_MIN_MS to _MAX_MS draws a
+// candidate slot for each pixel; a brightening step (FX_PROJECTOR_BRIGHT_MS after the last one and
+// after the level last went up, and it takes that window) gives every pixel its candidate, any
+// other step only the candidates fxProjectorTake() allows. The level is the unit's brightness
+// fraction through the core's own hold (contractBrightOffer, contractHoldsDue), steady or raised
+// and dropped as fast as lines can come; a change of level repaints the slots and rolls nothing.
+static uint32_t g_dice = 1;
+static uint32_t dice(uint32_t n) { g_dice = g_dice * 1664525u + 1013904223u; return (g_dice >> 8) % n; }
+struct JewelObs {                                   // the gate's rule on one window, counting onsets a second
+  bool started, lit; int ref; uint32_t at[8]; int n, most;
+  void reset() { started = lit = false; ref = 0; n = most = 0; }
+  void see(int x, uint32_t t) {
+    if (!started) { started = true; ref = x; lit = x >= STEP; return; }
+    if (lit) { if (x > ref) ref = x; else if (ref - x >= STEP) { lit = false; ref = x; } }
+    else if (x < ref) ref = x;
+    else if (x - ref >= STEP) {
+      lit = true; ref = x; at[n++ & 7] = t;
+      int w = 0; for (int k = 0; k < 8 && k < n; k++) if (t - at[(n - 1 - k) & 7] < 1000u) w++;
+      if (w > most) most = w;
+    }
+  }
+};
+static int projectorWorst(uint32_t rgb, bool stormy, uint32_t seed, int& brightenings, int& worstGap) {
+  static const uint8_t kWin[26][7] = {                // pixel lists, 0xFF-terminated where shorter
+    {0,1,255},{0,2,255},{0,3,255},{0,4,255},{0,5,255},{0,6,255},{1,2,255},{1,3,255},{1,4,255},{1,5,255},{1,6,255},
+    {2,3,255},{2,4,255},{2,5,255},{2,6,255},{3,4,255},{3,5,255},{3,6,255},{4,5,255},{4,6,255},{5,6,255},
+    {1,2,3,255},{4,5,6,255},{0,1,2,3,255},{0,4,5,6,255},{0,1,2,3,4,5,6} };
+  static JewelObs obs[2][26];
+  for (int m = 0; m < 2; m++) for (int w = 0; w < 26; w++) obs[m][w].reset();
+  g_dice = seed;
+  const ContractRGB c = { (uint8_t)(rgb >> 16), (uint8_t)(rgb >> 8), (uint8_t)rgb };
+  ContractUnitState u;
+  uint8_t slot[7] = { 7, 7, 7, 7, 7, 7, 7 };          // dark until the first brightening
+  uint32_t now = 1000, nextStep = 1000, nextLine = 1000, lastBright = 0; bool anyBright = false;
+  brightenings = 0; worstGap = 1000000; int most = 0;
+  const uint32_t end = now + 30u * 60u * 1000u;       // 30 minutes
+  while (now < end) {
+    bool changed = false;
+    if (stormy && now >= nextLine) {                  // a B or b= line: up or down, as fast as they come
+      contractBrightOffer(u, (uint8_t)(dice(3) ? (dice(2) ? 255 : 0) : dice(256)));
+      nextLine = now + 10u + dice(40);
+    }
+    if (contractHoldsDue(u, now)) changed = true;
+    if (now >= nextStep) {
+      uint8_t cand[7]; for (int p = 0; p < 7; p++) cand[p] = (uint8_t)dice(10);
+      const bool may = (!anyBright || strobeCoolDownExpired(lastBright, now, FX_PROJECTOR_BRIGHT_MS)) &&
+                       strobeCoolDownExpired(u.levelMs, now, FX_PROJECTOR_BRIGHT_MS);
+      for (int p = 0; p < 7; p++) {
+        const ContractRGB a = fxProjectorSlot(c, slot[p]), b = fxProjectorSlot(c, cand[p]);
+        const bool take = may || fxProjectorTake(a, b);
+        // a crumbling step never lights a pixel by either measure
+        if (!may && take) CHECK(contractLuminance(b.r, b.g, b.b) <= contractLuminance(a.r, a.g, a.b) &&
+                                (b.r > b.g ? (b.r > b.b ? b.r : b.b) : (b.g > b.b ? b.g : b.b)) <= (a.r > a.g ? (a.r > a.b ? a.r : a.b) : (a.g > a.b ? a.g : a.b)));
+        if (take) slot[p] = cand[p];
+      }
+      if (may) {
+        if (anyBright && now - lastBright < (uint32_t)worstGap) worstGap = (int)(now - lastBright);
+        lastBright = now; anyBright = true; u.levelMs = now; brightenings++;
+      }
+      changed = true;
+      nextStep = now + FX_PROJECTOR_STEP_MIN_MS + dice(FX_PROJECTOR_STEP_MAX_MS - FX_PROJECTOR_STEP_MIN_MS + 1u);
+    }
+    if (changed) {
+      uint8_t lv[7], ly[7];
+      for (int p = 0; p < 7; p++) {
+        const ContractRGB a = fxProjectorSlot(c, slot[p]);
+        const uint8_t r = (uint8_t)((a.r * (uint16_t)u.bright) / 255u), g = (uint8_t)((a.g * (uint16_t)u.bright) / 255u), b = (uint8_t)((a.b * (uint16_t)u.bright) / 255u);
+        lv[p] = r > g ? (r > b ? r : b) : (g > b ? g : b); ly[p] = contractLuminance(r, g, b);
+      }
+      for (int m = 0; m < 2; m++) for (int w = 0; w < 26; w++) {
+        int sum = 0, k = 0;
+        for (; k < 7 && kWin[w][k] != 255; k++) sum += (m ? ly : lv)[kWin[w][k]];
+        obs[m][w].see(sum / k, now);
+        if (obs[m][w].most > most) most = obs[m][w].most;
+      }
+    }
+    now += 1u + dice(4);                              // a pass of the loop: 1 to 4 ms
+  }
+  return most;
+}
+static void test_projector_regions() {
+  printf("projector (v1.4 N7), seven pixels, 30 minutes of steps each: the most onsets one window had in a second\n");
+  for (uint32_t rgb : { 0x000000u, 0xff0000u, 0x116530u, 0xffffffu, 0x00ff00u })
+    for (int stormy = 0; stormy < 2; stormy++) for (uint32_t seed : { 1u, 77u, 4242u }) {
+      int bright = 0, gap = 0;
+      const int w = projectorWorst(rgb, stormy != 0, seed, bright, gap);
+      CHECK(w <= 3);
+      CHECK(gap >= (int)FX_PROJECTOR_BRIGHT_MS);       // three brightenings in any second at the most
+      CHECK(stormy ? bright > 0 : bright > 30 * 60 * 2);   // and it does brighten: steady, more than twice a second on average;
+                                                       // under B and b= storms seldom, for the raises take the window
+      if (seed == 1u) printf("  c=%06x %-26s %d (brightening steps %d, the closest two %d ms)\n", (unsigned)rgb,
+                             stormy ? "under B and b= storms:" : "steady level:", w, bright, gap);
+    }
+}
+
 int main() {
+  test_projector_regions();
   static int table[NLOOKS][NMAX + 1];
   for (int look = 0; look < NLOOKS; look++) for (int N = NMIN; N <= NMAX; N++) {
     int w = 0; uint32_t seen[256]; int nSeen = 0;
