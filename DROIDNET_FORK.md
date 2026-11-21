@@ -47,6 +47,8 @@ build has no contract layer.
   across the panel's 10 columns as a 1-D strand, and NOT in R1's image: no environment links them
   (they do not fit), a line naming one draws a stand-in, and the host suite keeps running them.
 - Contract v1.3, first release: see "Contract v1.3 on the PSI" below.
+- On the R2 line (`lighting-r2`): the shared core at revision CA2, contract v1.4, release 2, with
+  stand-ins for its three new ids. See "The R2 line: core CA2" below.
 - Shared beat-brightness envelope (`envBright`) — identical across all three forks.
 - Pre-existing upstream `buildCommand()` out-of-bounds write — fixed in `src/main.cpp` (bounds-check
   before the write, terminator clamped). Offered back to Neil.
@@ -67,7 +69,7 @@ bytecode; 36 golden captures of the native modes (35 of them on the I2C build to
 against upstream v1.7 on the same mocks, on both builds, and 447 more on the I2C build with a
 command from inside a `show()`; the contract scenarios
 (`test_timeline.cpp`: the firmware's own `src/main.cpp`, scripted wire lines, assertions on the
-frames it latches): 111 on the default build, 6 on the build without the contract layer, 113 on each
+frames it latches): 112 on the default build, 6 on the build without the contract layer, 114 on each
 of two builds no environment links (every look; the contract with I2C); contract S9 and S11 as a
 property of the default build under 50 hostile scripts and 1,500 random streams
 (`test_property.cpp`); the scale and HSV oracles; the cross-compile of both builds with the flash,
@@ -168,6 +170,37 @@ single pass of `loop()`:
 
 The gate in `run.sh` is 300 ppm and 20 ms. None of this has been measured on a board: the bench
 checklist is `docs/BENCH_R1.md`.
+
+## The R2 line: core CA2 (contract v1.4; never flashed)
+
+The shared core is at revision CA2 (RSeries `9991f5a`; see "Core revision CA2" in the RSeries fork's
+`docs/CHANGING_THE_CORE.md`): contract v1.4, release 2. The query reply says `ver=1.4,rel=2`, the WDP
+caps say `contract.1.4s` (`contract.1.4` for the all-looks build). The I2C build is unchanged and
+links no contract layer.
+
+The three new ids parse and draw stand-ins, as v1.4's table has them on the PSI:
+
+- `logic` and `projector` draw `sparkle`, in every build (`_lookHere()`); as an overlay, solid.
+- `vu` keeps its own id. Wherever the layer tests `CE_METER` it tests `CE_VU` too (the meter case of
+  `_renderLook()`, and the pass that takes the level holds while the meter is up), so it draws
+  exactly as `meter` until Task F5 gives it the pump.
+- None of them is an accent (`accentEffectAllowed()`): a `P` naming one overlays solid.
+
+Stage 6d holds the three to `sparkle` and `meter` frame for frame; the timeline scenario
+`v14_ids_draw_their_stand_ins` checks them in every build. The 36 native captures, the 549 upstream
+timelines and the property stage's output are what they were in R1.
+
+| | R1 (`0e87a91`, core CA1.7) | Core CA2 alone | Core CA2 and the stand-ins |
+| --- | --- | --- | --- |
+| PSIPro flash | 28,286 B | 28,306 B | 28,328 B (88 B under the gate of 28,416) |
+| PSIPro SRAM | 1,632 B | 1,632 B | 1,632 B |
+| PSIPro stack headroom (sound bound) | 484 B | 484 B | 484 B (floor 256) |
+| PSIPro-i2c flash / SRAM / headroom | 16,998 B / 1,217 B / 1,031 B | the same | the same |
+
+The core's new functions are inline and nothing here calls them; its names and version cost 20 B.
+The stand-ins cost 22 B, all of it in `loop()` (the meter case's new label alone is 12 B). Measured
+on clean trees with `pio run -e PSIPro` and `test/host/stack_report.py`; host-tested and
+cross-compiled, not run on a board.
 
 ## Layout
 
