@@ -315,6 +315,27 @@ static void every_look_latches_frames() {
     else        CHECK(mostLit(a, b) > 0, "i=%s lit nothing", looks[k]);
   }
 }
+// Contract v1.4 (core CA2): the three new ids parse and draw their stand-ins in every build. logic
+// and projector are sparkle (the look this board has nearest them), vu keeps its own id and draws
+// as the meter until Task F5 gives it the pump, and none of them is an accent: a P naming one
+// overlays solid. (run.sh stage 6d holds them to sparkle and meter frame for frame.)
+static void v14_ids_draw_their_stand_ins() {
+  boot();
+  at(1000, "!P*A:i=logic,c=00ff00,s=200"); at(3000, "!P*A:i=projector,c=00ff00,s=200");
+  at(5000, "!P*A:i=vu,c=00ff00,s=200");
+  runTo(2000);
+  CHECK(g_u.effect == CE_SPARKLE, "i=logic draws sparkle here, effect %d", (int)g_u.effect);
+  CHECK(mostLit(1100, 1990) > 0 && between(1100, 1990).size() >= 5, "i=logic latches lit frames");
+  runTo(4000);
+  CHECK(g_u.effect == CE_SPARKLE, "i=projector draws sparkle here, effect %d", (int)g_u.effect);
+  CHECK(mostLit(3100, 3990) > 0, "i=projector lit nothing");
+  runTo(6000);
+  CHECK(g_u.effect == CE_VU, "i=vu keeps its id, effect %d", (int)g_u.effect);
+  CHECK(mostLit(5100, 5990) > 0 && between(5100, 5990).size() >= 4, "i=vu latches lit frames, as the meter does");
+  at(6500, "!P*P:i=vu,c=ffffff,d=300");
+  runTo(6600);
+  CHECK(g_u.pulseActive && g_u.pulseFx == CE_SOLID, "a P naming vu overlays solid, pulseFx %d", (int)g_u.pulseFx);
+}
 #ifndef PSI_NO_STRIP_LOOKS
 // The strip looks are drawn column by column from the core's own maths: a comet has a tail of
 // falling brightness, a wipe grows, a gradient spreads hues, a colour cycle is one colour that moves.
@@ -1737,6 +1758,7 @@ static const Scenario kScenarios[] = {
   {"an_a_with_no_look_is_solid", an_a_with_no_look_is_solid},
   {"a_hold_freezes_the_show", a_hold_freezes_the_show},
   {"every_look_latches_frames", every_look_latches_frames},
+  {"v14_ids_draw_their_stand_ins", v14_ids_draw_their_stand_ins},
 #ifndef PSI_NO_STRIP_LOOKS
   {"strip_looks_draw_their_shapes", strip_looks_draw_their_shapes},
   {"the_colour_scaler_is_exact", the_colour_scaler_is_exact},

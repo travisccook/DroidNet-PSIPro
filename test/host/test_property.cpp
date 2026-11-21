@@ -303,7 +303,7 @@ static void hook(const CRGB* l, int n, uint8_t scale) {
   // The contract's meter look is one look in three colours (green rows, then yellow, then red):
   // its mean colour moves with its bars. From one meter frame to the next that is the look's own
   // texture, not a change of look; into the meter and out of it is counted as ever.
-  const bool meter = !nativeFrame && g_u.base == CB_LOOK && !g_u.pulseActive && g_u.effect == CE_METER;
+  const bool meter = !nativeFrame && g_u.base == CB_LOOK && !g_u.pulseActive && (g_u.effect == CE_METER || g_u.effect == CE_VU);
   const bool sameLook = meter && gWasMeter;
   gWasMeter = meter;
   // S9 for both measures at once. Every frame moves the rule's state; the light of Leia and Knight

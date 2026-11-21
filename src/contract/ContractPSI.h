@@ -472,17 +472,23 @@ int contractFrameScale(const CRGB* l, uint8_t n, uint8_t scale) {
 // As an accent overlay all six become solid: scan and sparkle keep state between frames, which is
 // why the core refuses them as accents. The six stay in this file and are run on the host (the
 // all-looks build of the timeline scenarios), so that they can come back when there is room.
+// Contract v1.4 (core CA2) adds three ids. logic (the logics' look) and projector (the
+// holoprojectors') draw sparkle here in every build, as v1.4's table has it; vu is the PSI's own
+// and keeps its id (wherever CE_METER is tested, CE_VU is too): until Task F5 gives it the pump
+// it draws exactly as meter. None of the three is an accent (accentEffectAllowed()).
 #ifdef PSI_NO_STRIP_LOOKS
 static PSI_NOINLINE ContractEffect _lookHere(ContractEffect e, bool overlay) {
   switch (e) {
     case CE_COMET: case CE_CHASE: case CE_WIPE: return overlay ? CE_SOLID : CE_SCAN;
-    case CE_TWINKLE:                            return overlay ? CE_SOLID : CE_SPARKLE;
+    case CE_TWINKLE: case CE_LOGIC: case CE_PROJECTOR: return overlay ? CE_SOLID : CE_SPARKLE;
     case CE_GRADIENT: case CE_COLORCYCLE:       return CE_SOLID;
     default:                                    return e;
   }
 }
 #else
-static inline ContractEffect _lookHere(ContractEffect e, bool) { return e; }
+static inline ContractEffect _lookHere(ContractEffect e, bool overlay) {
+  return (e == CE_LOGIC || e == CE_PROJECTOR) ? (overlay ? CE_SOLID : CE_SPARKLE) : e;
+}
 #endif
 
 // ---- rainbow (newly authored; ignores color per contract §6) ----------------
@@ -582,6 +588,7 @@ inline void _renderLook(ContractEffect eff, const CRGB& col, uint32_t t0) {
 #endif
     case CE_SPARKLE: vmContractSparkle(d, col);                     break;
     case CE_METER:                                                          // level[] fed by verb L
+    case CE_VU:                                                             // v1.4: meter until Task F5 pumps it
       // The top rows are a region of the panel like any other, and the gate sees only the whole
       // field (review finding 1): L alternating between half and full blinked the top half ten
       // times a second, and with no level feed the meter's random walk at 20 ms a step did the same.
@@ -850,7 +857,7 @@ inline bool contractLoopTick() {
   // goes up. They are taken on a pass whose frame shows them. The meter is redrawn every d ms, so
   // with the meter up that is a pass that redraws it: taken on every pass, a raise was mostly
   // undone by the next lower line before the meter drew it.
-  if (g_u.effect != CE_METER || checkDelay()) contractHoldsDue(g_u, now);
+  if ((g_u.effect != CE_METER && g_u.effect != CE_VU) || checkDelay()) contractHoldsDue(g_u, now);
   // S6: b= and B are fractions of the owner's ceiling. The pump rides under that level. The
   // overlay has its own fraction (a P's b=, or the look's level for a scored accent), un-pumped.
   const uint8_t lvl = contractLevel(g_u.ceil, g_u.pulseActive ? g_u.pulseBright : g_u.bright);
