@@ -70,7 +70,7 @@ bytecode; 36 golden captures of the native modes (35 of them on the I2C build to
 against upstream v1.7 on the same mocks, on both builds, and 447 more on the I2C build with a
 command from inside a `show()`; the contract scenarios
 (`test_timeline.cpp`: the firmware's own `src/main.cpp`, scripted wire lines, assertions on the
-frames it latches): 122 on the default build, 6 on the build without the contract layer, 124 on each
+frames it latches): 124 on the default build, 6 on the build without the contract layer, 126 on each
 of two builds no environment links (every look; the contract with I2C); contract S9 and S11 as a
 property of the default build under 59 hostile scripts and 1,500 random streams
 (`test_property.cpp`); the scale and HSV oracles; the cross-compile of both builds with the flash,
@@ -210,8 +210,9 @@ v1.4 N10 to N12 in `src/contract/ContractPSI.h`. While the unit is pumped (the c
 group `vuLevel`) to the core's level hold every pass, in `contractLoopTick()`; the hold takes it on
 the next pass that redraws the meter (up at most once in 340 ms, in the window `B` and `b=` share;
 down at once), and the meter draws `state.level` as it draws a level from `L`. The brightness stays
-at the look's level. Not pumped, `vu` is `meter` in every respect. An `L` that arrives while the
-pump feeds `vu` is dropped (N12).
+at the look's level. Not pumped, `vu` is `meter`. An `L` that arrives while the pump feeds `vu` is
+dropped (N12). Since the R2 review (below): the pump is a level feed like `L`, no accent overlay
+starts over a pumped `vu`, and the window also counts a frame whose meter level is up.
 
 One thing the spec did not say, found by the property test: the level's window has to run from
 the frame that shows a rise, not from the pass that took it. The look gate holds a look's first
@@ -225,7 +226,8 @@ script has shown it, and it is R1's behaviour, so it is left as it is.)
 
 Readings to know: `s=` paces the redraw as it does for a fed meter (`s=255` every pass, `s=128`
 every 210 ms, late on most beats at 120 BPM: the middle of the bars lit on 16 of 24 beats at
-`s=128`, 24 of 24 at `s=255`); a pause (`C:bpm=0`) stops the clock, so `vu` is the meter and walks.
+`s=128`, 24 of 24 at `s=255`); a pause (`C:bpm=0`) stops the clock, so `vu` is the meter: since the
+R2 review it holds the pump's last level for 2 s, as after a last `L`, and then walks.
 At 176 BPM (beats 341 ms apart, the window 340) a beat's rise is often taken a pass late, when the
 level has fallen: the bars rise lower.
 
@@ -279,6 +281,65 @@ did not close the window problem above. `_speedToDelay()` in 16 bits (exact for 
 2 B and was left out.
 Host-tested, simulated and cross-compiled; not run on a board. The bench rows are
 `docs/BENCH_R2.md`.
+
+### The R2 review of `vu`, and its fix (2026-11-21)
+
+An independent review found five defects in `vu`, as failing tests (`test/host/review_r2.inc`,
+`review_r2_profiles.inc`, run by `run.sh`'s last stage, `[R2 review]`). Each is closed:
+
+| # | Finding | Closed by |
+| --- | --- | --- |
+| 1 | A scored `vu` with an accent relit the bottom rows 208 ms after the accent, five times a second | The rule below: no accent over a pumped `vu` |
+| 2 | A pause, a resume, `am=0` or `m=0` handed the rows between the pump and the walk with no window (286 and 208 ms relights) | The pump feeds the meter as `L` does (`_levelFeed()` every pumped pass): stopped, the meter holds the pump's last level for 2 s, then walks; started from the walk, the bars go dark and the level's window starts there |
+| 3 | The window "from the frame that shows a rise" missed higher bars shown at a lower brightness | A sent frame is a rise when its field level or its meter level is up |
+| 4 | An `L` just after `A:i=meter` (one burst) was dropped: the guard read the last tick's state | The guard reads the state as it is now (`_vuPump()`) |
+| 5 | An `L` during an accent over a pumped `vu` was shown | The same guard, which holds under an overlay; and no overlay now starts over a pumped `vu` |
+
+**A v1.4 rule for the PSI (a narrowing; for the spec and Studio):** *no accent overlay starts over
+a pumped `vu`. While the unit's look is `vu` and it is pumped (the clock runs, `am=` and `m=` are
+not 0), a scored entry's `ae=` does not fire and a live `P` is ignored. Over a `vu` that is not
+pumped, which is the meter, both work as on the meter.* The entry keeps its `ae=` (verb `V` is
+unchanged) and fires again once the pump stops. Why a rule and not a mending: the overlay lights
+the bars, and its end hands them back to a pump whose level is still up. With fixes 2 to 5 and the
+window rule but without this rule, 33 of 90 scored accents (the owner's 20 and 200; `m=` 128, 200,
+255; 60, 90, 120, 150 and 176 BPM; `flash`, `solid`, `pulse`) relit a row inside 340 ms; R1's meter
+under the same lines does in 26 of 90 (rows are a tenth of the panel, under S12's quarter). Studio
+plans no accent over `vu`.
+
+**A reading (for the spec):** N12's "not pumped, `vu` is `meter`" is kept with the pump counted as
+a level feed: the meter after the pump is the meter after a last `L`.
+
+What stays as it was, measured with the review's row observer (lit at half the owner's ceiling):
+300 random streams of pauses, resumes, `am=`/`m=` toggles, `B`, `L` and colour lines at a pumped
+`vu` relight no row inside 340 ms (none for R1's meter either). With `P` lines in the mix, 4 of
+300 do, the same 4 of 300 as R1's meter; with switches between `vu` and `meter`, 21 of 300 (18
+starting from the meter): R1's known limit for a part of the panel (`docs/BENCH_R1.md`).
+
+Flash, each recovery its own commit, measured on clean trees, held to the code it replaced by a new
+stage, 6f (`test/host/test_r2fix_recoveries.cpp`: the parser's side for every line, and `L` and
+`M:v=show` end to end). Each drops the test of a flag whose value is the default without it.
+
+| Commit | What | PSIPro flash |
+| --- | --- | --- |
+| Task F5, merged (`be6e9d2`) | | 28,330 B |
+| verb `L`'s level taken as parsed | `pr.hasLevel ? pr.level : 0` is `pr.level` | 28,316 B (-14) |
+| `M:v=show`'s watchdog taken as parsed | `pr.hasWd ? pr.wd : 0` is `pr.wd` | 28,298 B (-18) |
+| the `i=` flag not tested where `i=` is | `hasEffect` is `effect != CE_NONE`; `CE_NONE` is neither native nor an accent | 28,274 B (-24) |
+| the fix | the five findings, the rule above | 28,372 B (+98) |
+
+| | Task F5 | After the review's fix |
+| --- | --- | --- |
+| PSIPro flash | 28,330 B | 28,372 B (44 B under the gate of 28,416) |
+| PSIPro SRAM | 1,634 B | 1,635 B |
+| PSIPro stack headroom (sound bound) | 482 B | 482 B (floor 256) |
+| PSIPro-i2c flash / SRAM / headroom | 16,998 B / 1,217 B / 1,031 B | the same |
+
+The review's own fix measured 28,454 B. What made room here: one `_levelFeed()` for `L` and the pump
+(two inline copies of the 4-byte time cost 44 B more), the pump as a feed in place of a transition
+detector (`set_delay()` on the way to the walk and a static "was pumped"), the overlay rule in
+`_fireAccent()` (2 B), a `g_vuPumped` that holds under an overlay (no code: the review's overlay
+clause in the window rule), and the three recoveries above. simavr, pumped `vu` at 120 BPM: 0 ppm, longest pass 5.5 ms. Host-tested,
+simulated and cross-compiled; not run on a board.
 
 ## Layout
 
