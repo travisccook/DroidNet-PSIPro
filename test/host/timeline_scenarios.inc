@@ -1886,6 +1886,73 @@ static void l_during_a_pump_changes_nothing() {
   printf("  without L: %u frames, hash %08x; with L every 37 ms: %u frames, hash %08x\n", f0, h0, f1, h1);
   CHECK(f0 > 100 && h0 == h1 && f0 == f1, "an L during the pump changed what the panel shows");
 }
+// ---- the R2 review's fix (2026-11-21): accents, pauses, the pump as a level feed -------------------
+// The rows with "lit" at half the owner's ceiling (the review's observer), so that the bench
+// brightness, 20, is measured as well as 200.
+static bool rowsKeepAt(uint32_t from, uint32_t to, int ceil) {
+  bool lit[LEDS_PER_COLUMN]; std::vector<uint32_t> on[LEDS_PER_COLUMN];
+  for (int r = 0; r < LEDS_PER_COLUMN; r++) lit[r] = true;
+  for (const Frame& f : between(from, to))
+    for (int r = 0; r < LEDS_PER_COLUMN; r++) {
+      unsigned n = 0, onLeds = 0;
+      for (int c = 0; c < COLUMNS; c++) { const int led = psiLed((uint8_t)c, (uint8_t)r); if (led < 0) continue; n++; if (f.px[led].r | f.px[led].g | f.px[led].b) onLeds++; }
+      const bool dark = f.scale == 0 || onLeds * 10 <= n, bright = f.scale * 2 >= ceil && onLeds * 2 >= n;
+      if (!lit[r] && bright) { on[r].push_back(f.t); lit[r] = true; } else if (lit[r] && dark) lit[r] = false;
+    }
+  for (int r = 0; r < LEDS_PER_COLUMN; r++) if (worstSecond(on[r]) > 3 || (on[r].size() > 1 && closestTwo(on[r]) < 340)) return false;
+  return true;
+}
+static unsigned whiteFrames(uint32_t a, uint32_t b) {
+  unsigned n = 0;
+  for (const Frame& f : between(a, b)) if (f.allAre(WHITE)) n++;
+  return n;
+}
+// v1.4 on the PSI (the fix's narrowing): no accent overlay over a pumped vu. A scored ae= on a vu
+// section and a live P are ignored while the pump runs; over a vu that is not pumped (the meter) a
+// P overlays as ever. Across tempos, depths, accents and both brightnesses, the rows keep the gate.
+static void accentOverVu(int k) {
+  static const int kOwner[2] = {20, 200}, kM[3] = {128, 200, 255}, kBpm[5] = {60, 90, 120, 150, 176};
+  static const char* const kAe[3] = {"flash", "solid", "pulse"};
+  const int owner = kOwner[k % 2], m = kM[(k / 2) % 3], bpm = kBpm[(k / 6) % 5]; const char* ae = kAe[(k / 30) % 3];
+  boot(0x00, 0x01, (uint8_t)owner);
+  char a[112], c[48];
+  snprintf(a, sizeof a, "!P*A:i=vu,c=ffffff,s=255,am=2,m=%d,at=0,ae=%s,ac=ffffff", m, ae);
+  snprintf(c, sizeof c, "!**C:bpm=%d,bpb=4,beat=0", bpm);
+  at(1000, "!**M:v=show"); at(1100, a); at(1500, c);
+  runTo(9600);
+  CHECK(whiteFrames(1600, 9600) == 0, "owner %d m=%d %d BPM ae=%s: an accent overlaid a pumped vu", owner, m, bpm, ae);
+  CHECK(rowsKeepAt(1600, 9600, owner), "owner %d m=%d %d BPM ae=%s: a row lit twice inside 340 ms or four times in a second", owner, m, bpm, ae);
+}
+static void no_accent_over_a_pumped_vu() {
+  int bad = 0;
+  for (int k = 0; k < 90; k++) if (!inChild(accentOverVu, k)) bad++;
+  CHECK(bad == 0, "%d of 90 scored accents over a pumped vu broke (above)", bad);
+  // live: a P over a pumped vu is ignored; paused (the meter), it overlays
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=vu,c=00ff00,s=255,am=2,m=255"); at(1500, "!**C:bpm=120,bpb=4,beat=0");
+  at(3000, "!P*P:c=ffffff,d=200"); at(4000, "!**C:bpm=0"); at(4600, "!P*P:c=ffffff,d=200");
+  runTo(5200);
+  CHECK(whiteFrames(2900, 3900) == 0, "a P over a pumped vu overlaid it");
+  CHECK(whiteFrames(4600, 4900) > 0, "a P over a vu that is not pumped (the meter) must overlay it");
+}
+// The pump feeds the meter as L does: paused, the bars hold the pump's last level for 2 s, then the
+// meter walks. Resumed from the walk, the bars go dark and the level's window starts there.
+static void a_paused_vu_holds_its_bars_for_2_s_then_walks() {
+  boot(0x00, 0x01, 200);
+  at(1000, "!**M:v=show"); at(1100, "!P*A:i=vu,c=ffffff,s=255,am=2,m=255"); at(1500, "!**C:bpm=120,bpb=4,beat=0");
+  at(3600, "!**C:bpm=0"); at(8000, "!**C:bpm=120,bpb=4,beat=0");
+  runTo(8400);
+  const Frame& held = shown(3650);
+  bool same = true;
+  for (const Frame& f : between(3650, 5550)) for (int i = 0; i < NUM_LEDS; i++) if (f.px[i].r != held.px[i].r || f.px[i].g != held.px[i].g || f.px[i].b != held.px[i].b) same = false;
+  CHECK(same, "paused, the bars hold the pump's last level for 2 s");
+  bool moved = false;
+  for (const Frame& f : between(5700, 7900)) for (int i = 0; i < NUM_LEDS; i++) if (f.px[i].r != held.px[i].r || f.px[i].g != held.px[i].g || f.px[i].b != held.px[i].b) moved = true;
+  CHECK(moved, "after 2 s the paused vu walks");
+  // (dark at the meter's next redraw, 170 ms at most after the resume; the first rise 340 ms after it)
+  CHECK(rowsLitAt(8250) == 0, "resumed from the walk the bars start dark, saw %u rows", rowsLitAt(8250));
+  CHECK(rowsKeepAt(1600, 8400, 200), "a pause and a resume relit a row inside 340 ms");
+}
 
 #ifdef PSI_ENABLE_I2C
 // ---- the I2C build: the TWI interrupt only queues ------------------------------------------------
@@ -2041,6 +2108,8 @@ static const Scenario kScenarios[] = {
   {"a_pumped_vu_under_b_between_0_and_200", a_pumped_vu_under_b_between_0_and_200},
   {"vu_not_pumped_is_the_meter", vu_not_pumped_is_the_meter},
   {"l_during_a_pump_changes_nothing", l_during_a_pump_changes_nothing},
+  {"no_accent_over_a_pumped_vu", no_accent_over_a_pumped_vu},
+  {"a_paused_vu_holds_its_bars_for_2_s_then_walks", a_paused_vu_holds_its_bars_for_2_s_then_walks},
 #ifdef PSI_ENABLE_I2C
   {"an_i2c_contract_line_is_applied_by_loop", an_i2c_contract_line_is_applied_by_loop},
   {"an_i2c_native_command_takes_the_panel_back", an_i2c_native_command_takes_the_panel_back},

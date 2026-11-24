@@ -25,9 +25,11 @@
 #   6c. timeline scenarios: scripted wire lines, assertions on the frames (every build)
 #   6d. the six stand-in looks draw scan, sparkle and solid, frame for frame
 #   6e. contract S9 as a property of the firmware: hostile and random line streams, frames measured
+#   6f. the R2 fix's flash recoveries held to the code they replaced (test_r2fix_recoveries.cpp)
 #   7. scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock
 #   8. HSV oracle: CE_RAINBOW (CHSV->CRGB) == FastLED 3.5.0 hsv2rgb_rainbow (full cube)
 #   9. REAL cross-compile for the ATmega32U4 (optional; needs PlatformIO)
+#   R2 review (last): the independent review's findings on the R2 line; fails while one is open
 set -e
 cd "$(dirname "$0")"
 
@@ -350,6 +352,14 @@ for cfg in "-DPSI_NO_STRIP_LOOKS"; do
   sed 's/^/      /' "$T/property.out"
 done
 
+echo "[6f] the R2 fix's flash recoveries held to the code they replaced"
+# test_r2fix_recoveries.cpp: each recovery drops the test of a ContractParams flag whose value is the
+# default without it (v=, wd=, i=). The parser's side for every line, and L and M:v=show end to end.
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w -DPSI_NO_STRIP_LOOKS \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' test_r2fix_recoveries.cpp -o "$T/psi_r2fix_recoveries"
+"$T/psi_r2fix_recoveries" | sed 's/^/      /'
+test "${PIPESTATUS[0]}" -eq 0 || { echo "FAIL: a flash recovery of the R2 fix behaves unlike the code it replaced"; exit 1; }
+
 echo "[7/9] scale-math oracle: the clean-room driver's scalers == FastLED 3.5.0 == the mock"
 # include/FastLED.h replaced FastLED with a from-scratch WS2812 driver. The 31 goldens
 # gate the firmware's STAGING against native_mocks/FastLED.h, NOT against that driver, so
@@ -477,3 +487,30 @@ else
   echo "SKIP: needs PlatformIO and its simavr package:"
   echo "      pip install platformio && pio pkg install -g --tool platformio/tool-simavr"
 fi
+
+echo "[R2 review] the independent review of the R2 line (0e87a91..be6e9d2), 2026-11-21"
+# REVIEW FINDINGS, not the layer's own tests. Last, so that every stage above has run first. The
+# differential (review_r2_differential.cpp) holds the two flash recoveries to R1's code and passes.
+# The scenarios (review_r2.inc, through test_timeline.cpp) and the profiles (review_r2_profiles.inc,
+# through test_property.cpp's observers) each FAIL until the finding they name is fixed; the
+# controls among them (R1's looks under the same lines) pass. The suite fails here while any
+# finding is open.
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w -DPSI_NO_STRIP_LOOKS \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' review_r2_differential.cpp -o "$T/psi_review_diff"
+"$T/psi_review_diff" > "$T/review_diff.out" 2>&1 || { cat "$T/review_diff.out"; echo "FAIL: a flash recovery behaves unlike R1"; exit 1; }
+sed 's/^/      /' "$T/review_diff.out"
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w -DPSI_NO_STRIP_LOOKS \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' '-DTIMELINE_SCENARIOS="review_r2.inc"' test_timeline.cpp \
+    -o "$T/psi_review_timeline"
+"$CXX_SAN" -std=gnu++17 -O1 -fsigned-char -fsanitize=address,undefined -fno-sanitize-recover=all -w -DPSI_NO_STRIP_LOOKS \
+    -I . -I native_mocks -I ../../include '-DWDP_FW="abcdef0"' '-DPROPERTY_PROFILES="review_r2_profiles.inc"' test_property.cpp \
+    -o "$T/psi_review_property"
+open_findings=0
+for s in $("$T/psi_review_timeline" --list); do
+  if "$T/psi_review_timeline" "$s" > "$T/review.out" 2>&1; then echo "      ok    $s"
+  else sed 's/^/      /' "$T/review.out"; open_findings=$((open_findings + 1)); fi
+done
+if PROPERTY_STREAMS=0 "$T/psi_review_property" > "$T/review_property.out" 2>&1; then echo "      ok    the review's profiles"
+else sed 's/^/      /' "$T/review_property.out"; open_findings=$((open_findings + 1)); fi
+if [ "$open_findings" -ne 0 ]; then echo "FAIL: $open_findings R2 review check(s) fail: open findings (test/host/review_r2.inc)"; exit 1; fi
+echo "      every R2 review finding is closed"
