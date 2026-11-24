@@ -51,8 +51,8 @@ build has no contract layer.
   `vu`, the meter moved by the beat pump, and stand-ins for `logic` and `projector`. See "The R2
   line: core CA2" and "`vu` (Task F5)" below.
 
-**Release 2 status (2026-11-24).** The R2 line is the branch `claude/amazing-heisenberg-40jot7`
-(head `445381d`); `main` is R1 (`0e87a91`). On it: core CA2 (RSeries `9991f5a`), `vu` (Task F5),
+**Release 2 status (2026-11-24).** The R2 line was built on the branch `claude/amazing-heisenberg-40jot7`
+and is `main` since 2026-11-24 (the owner's decision; host-tested only); R1 is `0e87a91`. On it: core CA2 (RSeries `9991f5a`), `vu` (Task F5),
 and an independent review whose five findings are closed, with one v1.4 rule for this board: no
 accent overlay starts over a pumped `vu`. The default image links at 28,372 B of flash (44 B under
 the gate of 28,416 B), 1,635 B of SRAM and 482 B of stack headroom (floor 256); the I2C image is
