@@ -13,7 +13,7 @@ about R2 is about the host, the cross-compiler and the simulator.
 | New looks | `vu`: the meter, its level moved by the beat pump (v1.4 N10 to N12) | none |
 | Stand-ins | as R1, and `logic`, `projector` draw `sparkle` | none |
 | Query reply, WDP caps | `ver=1.4,rel=2`; `droidnet.contract`, `contract.1.4s` | no reply; no caps |
-| Flash | 28,330 B (98.8 %; gate 28,416 B) | 16,998 B (59.3 %) |
+| Flash | 28,372 B (99.0 %; gate 28,416 B) | 16,998 B (59.3 %) |
 
 What to have in mind while watching `vu`:
 

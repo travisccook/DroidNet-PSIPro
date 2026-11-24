@@ -86,7 +86,8 @@ gradient, colorcycle, twinkle) are about 1,200 B, and with the contract's gate t
 is 29,490 B. So R1 is built with `PSI_NO_STRIP_LOOKS`. A show that names one of the six still
 plays: comet, chase and wipe draw as scan, twinkle as sparkle, gradient and colorcycle as a solid in
 the line's colour (as an accent, all six draw as a solid), and the board announces
-`contract.1.3s`. The six stay in the source and in the host suite.
+`contract.1.3s` (release 2, on the branch `claude/amazing-heisenberg-40jot7`, announces `contract.1.4s`). The six
+stay in the source and in the host suite.
 
 Be aware of the failure mode if you get this wrong: with I2C compiled out, the board does not
 complain, it simply **never answers** an I2C master. No error, no blink — it just sits there.
@@ -443,7 +444,7 @@ fork sends one 0.5-3 s after power-up and then every 25-30 s, on the serial head
 WCB's port, 9600 baud):
 
 ```text
-@WDP1 {"type":"PSI Front","fw":"1a2b3c4","caps":["droidnet.contract","contract.1.3"]}
+@WDP1 {"type":"PSI Front","fw":"1a2b3c4","caps":["droidnet.contract","contract.1.3s"]}
 ```
 
 - **`type`** comes from the front/rear jumper, read at each announce with the contract's own test
@@ -456,7 +457,9 @@ WCB's port, 9600 baud):
 - **`caps`**: `droidnet.contract`, the Driveable-Animation Contract above, and the version the
   build speaks: `contract.1.3s` from the default (serial-only) build, which draws six of the
   contract's looks as stand-ins (`contract.1.3` is a build with all of them, which no environment
-  links today). The I2C build has no contract layer and sends no `caps` at all.
+  links today). Release 2 (contract v1.4, the branch `claude/amazing-heisenberg-40jot7`) says
+  `contract.1.4s`, and `contract.1.4` for the all-looks build. The I2C build has no contract layer
+  and sends no `caps` at all.
 
 The WCB consumes the line; it is never forwarded to another port or board. The line goes out in
 pieces no bigger than the free room in the serial TX buffer, so the render loop never waits on it,
